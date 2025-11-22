@@ -12,13 +12,15 @@ if (!redisUrl) {
 const redisClient = createClient({
   url: redisUrl,
   socket: {
+    tls: true,
     reconnectStrategy: (retries) => {
-      if (retries > 10) {
-        return new Error('Redis max reconnection attempts reached');
+      if (retries > 20) {
+        console.error('Redis max retries reached');
+        return false;
       }
-      return Math.min(retries * 100, 3000);
+      return Math.min(retries * 200, 5000);
     },
-    connectTimeout: 10000,
+    connectTimeout: 30000,
   },
 });
 
