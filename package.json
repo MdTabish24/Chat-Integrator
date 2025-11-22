@@ -22,8 +22,7 @@
     "type-check:frontend": "cd frontend && npm run type-check",
     "docker:up": "docker-compose up -d",
     "docker:down": "docker-compose down",
-    "docker:logs": "docker-compose logs -f",
-    "prepare": "husky install"
+    "docker:logs": "docker-compose logs -f"
   },
   "devDependencies": {
     "concurrently": "^8.2.2",
