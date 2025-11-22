@@ -1,0 +1,14 @@
+# Render Blueprint Configuration
+# NOTE: Add environment variables manually in Render Dashboard
+# DO NOT commit API keys here!
+
+services:
+  - type: web
+    name: messaging-hub
+    env: node
+    region: singapore
+    plan: free
+    buildCommand: npm run install:all && npm run build:backend
+    startCommand: cd backend && npm start
+    # Add all environment variables in Render Dashboard
+    # See .env.render file for complete list

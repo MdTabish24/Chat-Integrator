@@ -1,0 +1,137 @@
+import express, { Application } from 'express';
+import { createServer } from 'http';
+import cors from 'cors';
+import dotenv from 'dotenv';
+import cookieParser from 'cookie-parser';
+import { errorHandler } from './middleware/errorHandler';
+import { getHelmetConfig } from './middleware/security';
+import { httpsRedirect } from './middleware/httpsRedirect';
+import { sanitizeInput } from './middleware/xssSanitizer';
+import { setCsrfToken, verifyCsrfToken, getCsrfToken } from './middleware/csrf';
+import pool from './config/database';
+import { connectRedis } from './config/redis';
+import { websocketService } from './services/websocketService';
+
+dotenv.config();
+
+const app: Application = express();
+const httpServer = createServer(app);
+const PORT = process.env.PORT || 3000;
+
+// Security middleware (must be first)
+app.use(httpsRedirect);
+app.use(getHelmetConfig());
+
+// CORS configuration
+app.use(cors({
+  origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+  credentials: true,
+}));
+
+// Body parsing middleware
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+app.use(cookieParser());
+
+// XSS sanitization (after body parsing)
+app.use(sanitizeInput);
+
+// CSRF protection (set token for all requests)
+app.use(setCsrfToken);
+
+// Health check endpoint (no CSRF required)
+app.get('/health', async (_req, res) => {
+  try {
+    // Check database connection
+    await pool.query('SELECT 1');
+    
+    // Get WebSocket stats
+    const wsStats = websocketService.getStats();
+    
+    res.json({ 
+      status: 'ok', 
+      timestamp: new Date().toISOString(),
+      services: {
+        database: 'connected',
+        redis: 'connected',
+        websocket: {
+          status: 'active',
+          connections: wsStats.totalConnections,
+          authenticatedUsers: wsStats.authenticatedUsers
+        }
+      }
+    });
+  } catch (error) {
+    res.status(503).json({ 
+      status: 'error', 
+      timestamp: new Date().toISOString(),
+      error: 'Service unavailable'
+    });
+  }
+});
+
+// CSRF token endpoint
+app.get('/api/csrf-token', getCsrfToken);
+
+// API routes
+import authRoutes from './routes/authRoutes';
+import oauthRoutes from './routes/oauthRoutes';
+import messageRoutes from './routes/messageRoutes';
+import conversationRoutes from './routes/conversationRoutes';
+import webhookRoutes from './routes/webhookRoutes';
+
+// Import middleware
+import { rateLimiter } from './middleware/rateLimiter';
+import { apiUsageLogger } from './middleware/apiUsageLogger';
+
+// Apply rate limiting and API usage logging to all API routes
+app.use('/api', rateLimiter);
+app.use('/api', apiUsageLogger);
+
+// Apply CSRF verification to state-changing API routes (not webhooks)
+app.use('/api', verifyCsrfToken);
+
+app.use('/api/auth', authRoutes);
+app.use('/api/oauth', oauthRoutes);
+app.use('/api/messages', messageRoutes);
+app.use('/api/conversations', conversationRoutes);
+app.use('/api/webhooks', webhookRoutes);
+
+// Error handling middleware (must be last)
+app.use(errorHandler);
+
+// Initialize connections and start server
+const startServer = async () => {
+  try {
+    // Connect to Redis
+    await connectRedis();
+    console.log('Redis connected successfully');
+
+    // Test database connection
+    await pool.query('SELECT NOW()');
+    console.log('Database connected successfully');
+
+    // Initialize WebSocket service
+    websocketService.initialize(httpServer);
+    console.log('WebSocket service initialized');
+
+    // Initialize message polling service
+    const { messagePollingService } = await import('./services/messagePollingService');
+    await messagePollingService.initialize();
+    console.log('Message polling service initialized');
+
+    // Start server
+    httpServer.listen(PORT, () => {
+      console.log(`Server is running on port ${PORT}`);
+      console.log(`Environment: ${process.env.NODE_ENV}`);
+      console.log(`WebSocket server ready for connections`);
+    });
+  } catch (error) {
+    console.error('Failed to start server:', error);
+    process.exit(1);
+  }
+};
+
+startServer();
+
+export default app;
