@@ -131,7 +131,7 @@ export const handleCallback = async (req: Request, res: Response) => {
     const oauthService = getOAuthService(platform);
 
     // Exchange code for tokens
-    const tokens = await oauthService.exchangeCodeForToken(code as string, state as string);
+    const tokens = await oauthService.exchangeCodeForToken(code as string, { state: state as string });
 
     // Get user info from platform
     const userInfo = await oauthService.getUserInfo(tokens.accessToken);

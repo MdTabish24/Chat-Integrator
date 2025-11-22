@@ -77,7 +77,8 @@ export class TwitterOAuthService extends OAuthBaseService {
    * @param state - State parameter to retrieve code verifier
    * @returns OAuth tokens
    */
-  async exchangeCodeForToken(code: string, state?: string): Promise<any> {
+  async exchangeCodeForToken(code: string, additionalParams?: Record<string, string>): Promise<any> {
+    const state = additionalParams?.state;
     if (!state) {
       throw new Error('State parameter is required for Twitter OAuth');
     }
