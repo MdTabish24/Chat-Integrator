@@ -93,12 +93,14 @@ class TelegramUserClientService {
             return { accountId: '', username: '', needPassword: true };
           }
           
-          // Check password
-          await tempSession.client.invoke(
-            new Api.auth.CheckPassword({
-              password: await tempSession.client.computeCheck(password),
-            })
-          );
+          // Check password using signInWithPassword
+          await tempSession.client.signInWithPassword({
+            apiId: this.apiId,
+            apiHash: this.apiHash,
+          }, {
+            password: () => Promise.resolve(password),
+            onError: (err: any) => console.error('[telegram-user] Password error:', err),
+          });
         } else {
           throw error;
         }
