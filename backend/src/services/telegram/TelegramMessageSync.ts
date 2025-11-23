@@ -34,7 +34,7 @@ class TelegramMessageSyncService {
 
           // Insert message and track unread status
           await pool.query(
-            `INSERT INTO messages (conversation_id, platform_message_id, content, sender_id, sender_name, sent_at, is_from_user, is_read)
+            `INSERT INTO messages (conversation_id, platform_message_id, content, sender_id, sender_name, sent_at, is_outgoing, is_read)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
              ON CONFLICT (conversation_id, platform_message_id) DO NOTHING`,
             [
@@ -55,7 +55,7 @@ class TelegramMessageSyncService {
           `UPDATE conversations 
            SET unread_count = (
              SELECT COUNT(*) FROM messages 
-             WHERE conversation_id = $1 AND is_read = false AND is_from_user = false
+             WHERE conversation_id = $1 AND is_read = false AND is_outgoing = false
            )
            WHERE id = $1`,
           [conversationId]

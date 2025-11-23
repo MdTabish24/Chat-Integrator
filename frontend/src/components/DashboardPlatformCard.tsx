@@ -170,7 +170,7 @@ const DashboardPlatformCard: React.FC<DashboardPlatformCardProps> = ({
                       ) : (
                         <div className="w-10 h-10 bg-gray-300 rounded-full flex items-center justify-center flex-shrink-0">
                           <span className="text-gray-600 font-medium text-sm">
-                            {conversation.participantName.charAt(0).toUpperCase()}
+                            {conversation.participantName?.charAt(0).toUpperCase() || '?'}
                           </span>
                         </div>
                       )}
