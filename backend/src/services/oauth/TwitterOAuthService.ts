@@ -52,7 +52,7 @@ export class TwitterOAuthService extends OAuthBaseService {
 
     // Store code verifier in Redis with 10 minute expiry
     const redisKey = `twitter:code_verifier:${state}`;
-    redisClient.setex(redisKey, 600, codeVerifier).catch(err => {
+    redisClient.setEx(redisKey, 600, codeVerifier).catch(err => {
       console.error('[twitter] Failed to store code verifier in Redis:', err);
     });
 
