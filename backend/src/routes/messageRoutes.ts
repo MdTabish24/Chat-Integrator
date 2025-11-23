@@ -35,6 +35,57 @@ router.get('/unread/count', (req, res) => messageController.getUnreadCount(req, 
 router.post('/sync', (req, res) => messageController.syncMessages(req, res));
 
 /**
+ * @route   GET /api/messages/debug/twitter/:accountId
+ * @desc    Debug endpoint to test Twitter API directly
+ * @access  Protected
+ */
+router.get('/debug/twitter/:accountId', async (req, res) => {
+  try {
+    const { accountId } = req.params;
+    const userId = (req as any).user?.userId;
+
+    // Verify account belongs to user
+    const pool = require('../config/database').default;
+    const accountResult = await pool.query(
+      'SELECT * FROM connected_accounts WHERE id = $1 AND user_id = $2',
+      [accountId, userId]
+    );
+
+    if (accountResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Account not found' });
+    }
+
+    const account = accountResult.rows[0];
+
+    // Get Twitter adapter and fetch conversations
+    const { getAdapter } = await import('../adapters');
+    const adapter = getAdapter('twitter');
+    
+    console.log(`[debug] Fetching Twitter conversations for account ${accountId}`);
+    const conversations = await adapter.getConversations(accountId);
+    
+    console.log(`[debug] Found ${conversations.length} Twitter conversations`);
+
+    res.json({
+      success: true,
+      account: {
+        id: account.id,
+        platform: account.platform,
+        username: account.platform_username,
+      },
+      conversationsCount: conversations.length,
+      conversations: conversations.slice(0, 5), // First 5 for preview
+    });
+  } catch (error: any) {
+    console.error('[debug] Twitter API test failed:', error);
+    res.status(500).json({
+      error: error.message,
+      details: error.response?.data || error.stack,
+    });
+  }
+});
+
+/**
  * @route   GET /api/messages/:conversationId
  * @desc    Get messages for a specific conversation
  * @access  Protected
