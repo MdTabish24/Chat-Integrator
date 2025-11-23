@@ -9,5 +9,6 @@ router.post('/auth/verify', authenticateToken, telegramUserController.verifyPhon
 router.get('/:accountId/dialogs', authenticateToken, telegramUserController.getDialogs);
 router.get('/:accountId/messages/:chatId', authenticateToken, telegramUserController.getMessages);
 router.post('/:accountId/send/:chatId', authenticateToken, telegramUserController.sendMessage);
+router.post('/:accountId/sync', authenticateToken, telegramUserController.syncMessages);
 
 export default router;

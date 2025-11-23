@@ -187,6 +187,18 @@ const Dashboard: React.FC = () => {
     });
 
     try {
+      // For Telegram, trigger sync first
+      if (platform === 'telegram') {
+        const telegramAccount = connectedAccounts.find(acc => acc.platform === 'telegram');
+        if (telegramAccount) {
+          try {
+            await apiClient.post(`/api/telegram/${telegramAccount.id}/sync`);
+          } catch (syncErr) {
+            console.error('Telegram sync error:', syncErr);
+          }
+        }
+      }
+
       const response = await apiClient.get('/api/conversations', {
         params: { platform },
       });

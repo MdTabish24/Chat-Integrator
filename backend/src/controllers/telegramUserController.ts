@@ -104,3 +104,22 @@ export const sendMessage = async (req: Request, res: Response) => {
     res.status(500).json({ error: error.message });
   }
 };
+
+export const syncMessages = async (req: Request, res: Response) => {
+  try {
+    const userId = (req as any).user?.userId;
+    const { accountId } = req.params;
+
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const { telegramMessageSync } = await import('../services/telegram/TelegramMessageSync');
+    await telegramMessageSync.syncMessages(accountId);
+    
+    res.json({ success: true, message: 'Messages synced successfully' });
+  } catch (error: any) {
+    console.error('[telegram-user] Sync messages failed:', error);
+    res.status(500).json({ error: error.message });
+  }
+};
