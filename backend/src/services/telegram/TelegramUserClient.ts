@@ -65,8 +65,9 @@ class TelegramUserClientService {
     userId: string,
     phoneNumber: string,
     phoneCode: string,
-    phoneCodeHash: string
-  ): Promise<{ accountId: string; username: string }> {
+    phoneCodeHash: string,
+    password?: string
+  ): Promise<{ accountId: string; username: string; needPassword?: boolean }> {
     try {
       console.log('[telegram-user] Verifying phone code');
       
@@ -77,13 +78,31 @@ class TelegramUserClientService {
         throw new Error('Session not found. Please restart verification.');
       }
 
-      const result = await tempSession.client.invoke(
-        new Api.auth.SignIn({
-          phoneNumber,
-          phoneCodeHash,
-          phoneCode,
-        })
-      );
+      try {
+        const result = await tempSession.client.invoke(
+          new Api.auth.SignIn({
+            phoneNumber,
+            phoneCodeHash,
+            phoneCode,
+          })
+        );
+      } catch (error: any) {
+        if (error.message.includes('SESSION_PASSWORD_NEEDED')) {
+          console.log('[telegram-user] 2FA password required');
+          if (!password) {
+            return { accountId: '', username: '', needPassword: true };
+          }
+          
+          // Check password
+          await tempSession.client.invoke(
+            new Api.auth.CheckPassword({
+              password: await tempSession.client.computeCheck(password),
+            })
+          );
+        } else {
+          throw error;
+        }
+      }
 
       const me = await tempSession.client.getMe();
       const username = (me as any).username || (me as any).firstName || phoneNumber;
@@ -119,9 +138,12 @@ class TelegramUserClientService {
       this.sessions.delete(tempKey);
 
       console.log('[telegram-user] Verification successful');
-      return { accountId, username };
+      return { accountId, username, needPassword: false };
     } catch (error: any) {
       console.error('[telegram-user] Code verification failed:', error.message);
+      if (error.message.includes('SESSION_PASSWORD_NEEDED')) {
+        throw new Error('2FA_PASSWORD_REQUIRED');
+      }
       throw new Error(`Invalid verification code: ${error.message}`);
     }
   }

@@ -25,7 +25,7 @@ export const startPhoneAuth = async (req: Request, res: Response) => {
 export const verifyPhoneCode = async (req: Request, res: Response) => {
   try {
     const userId = (req as any).user?.userId;
-    const { phoneNumber, phoneCode, phoneCodeHash } = req.body;
+    const { phoneNumber, phoneCode, phoneCodeHash, password } = req.body;
 
     if (!userId) {
       return res.status(401).json({ error: 'Unauthorized' });
@@ -35,12 +35,20 @@ export const verifyPhoneCode = async (req: Request, res: Response) => {
       userId,
       phoneNumber,
       phoneCode,
-      phoneCodeHash
+      phoneCodeHash,
+      password
     );
+
+    if (result.needPassword) {
+      return res.json({ success: false, needPassword: true });
+    }
 
     res.json({ success: true, accountId: result.accountId, username: result.username });
   } catch (error: any) {
     console.error('[telegram-user] Code verification failed:', error);
+    if (error.message === '2FA_PASSWORD_REQUIRED') {
+      return res.json({ success: false, needPassword: true });
+    }
     res.status(400).json({ error: error.message });
   }
 };
