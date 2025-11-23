@@ -22,32 +22,43 @@ class TelegramUserClientService {
   }
 
   async startPhoneVerification(userId: string, phoneNumber: string): Promise<{ phoneCodeHash: string }> {
-    const stringSession = new StringSession('');
-    const client = new TelegramClient(stringSession, this.apiId, this.apiHash, {
-      connectionRetries: 5,
-    });
+    try {
+      console.log('[telegram-user] Starting phone verification for:', phoneNumber);
+      
+      const stringSession = new StringSession('');
+      const client = new TelegramClient(stringSession, this.apiId, this.apiHash, {
+        connectionRetries: 5,
+        timeout: 30000,
+      });
 
-    await client.connect();
+      await client.connect();
+      console.log('[telegram-user] Client connected');
 
-    const result = await client.sendCode(
-      {
-        apiId: this.apiId,
-        apiHash: this.apiHash,
-      },
-      phoneNumber
-    );
+      const result = await client.sendCode(
+        {
+          apiId: this.apiId,
+          apiHash: this.apiHash,
+        },
+        phoneNumber
+      );
 
-    const tempKey = `temp_${userId}_${phoneNumber}`;
-    stringSession.save();
-    this.sessions.set(tempKey, {
-      userId,
-      accountId: '',
-      phoneNumber,
-      session: stringSession.save() as unknown as string,
-      client,
-    });
+      console.log('[telegram-user] Code sent successfully');
 
-    return { phoneCodeHash: result.phoneCodeHash };
+      const tempKey = `temp_${userId}_${phoneNumber}`;
+      stringSession.save();
+      this.sessions.set(tempKey, {
+        userId,
+        accountId: '',
+        phoneNumber,
+        session: stringSession.save() as unknown as string,
+        client,
+      });
+
+      return { phoneCodeHash: result.phoneCodeHash };
+    } catch (error: any) {
+      console.error('[telegram-user] Phone verification failed:', error.message);
+      throw new Error(`Failed to send verification code: ${error.message}`);
+    }
   }
 
   async verifyPhoneCode(
@@ -56,55 +67,63 @@ class TelegramUserClientService {
     phoneCode: string,
     phoneCodeHash: string
   ): Promise<{ accountId: string; username: string }> {
-    const tempKey = `temp_${userId}_${phoneNumber}`;
-    const tempSession = this.sessions.get(tempKey);
+    try {
+      console.log('[telegram-user] Verifying phone code');
+      
+      const tempKey = `temp_${userId}_${phoneNumber}`;
+      const tempSession = this.sessions.get(tempKey);
 
-    if (!tempSession || !tempSession.client) {
-      throw new Error('Session not found. Please restart verification.');
-    }
+      if (!tempSession || !tempSession.client) {
+        throw new Error('Session not found. Please restart verification.');
+      }
 
-    const result = await tempSession.client.invoke(
-      new Api.auth.SignIn({
+      const result = await tempSession.client.invoke(
+        new Api.auth.SignIn({
+          phoneNumber,
+          phoneCodeHash,
+          phoneCode,
+        })
+      );
+
+      const me = await tempSession.client.getMe();
+      const username = (me as any).username || (me as any).firstName || phoneNumber;
+      const telegramUserId = (me as any).id.toString();
+
+      tempSession.client.session.save();
+      const sessionString = tempSession.client.session.save() as unknown as string;
+      
+      const accountResult = await pool.query(
+        `INSERT INTO connected_accounts 
+        (user_id, platform, platform_user_id, platform_username, access_token, is_active)
+        VALUES ($1, $2, $3, $4, $5, $6)
+        ON CONFLICT (user_id, platform, platform_user_id) 
+        DO UPDATE SET 
+          access_token = EXCLUDED.access_token,
+          platform_username = EXCLUDED.platform_username,
+          is_active = true,
+          updated_at = NOW()
+        RETURNING id`,
+        [userId, 'telegram', telegramUserId, username, sessionString, true]
+      );
+
+      const accountId = accountResult.rows[0].id;
+
+      this.sessions.set(accountId, {
+        userId,
+        accountId,
         phoneNumber,
-        phoneCodeHash,
-        phoneCode,
-      })
-    );
+        session: sessionString,
+        client: tempSession.client,
+      });
 
-    const me = await tempSession.client.getMe();
-    const username = (me as any).username || (me as any).firstName || phoneNumber;
-    const telegramUserId = (me as any).id.toString();
+      this.sessions.delete(tempKey);
 
-    tempSession.client.session.save();
-    const sessionString = tempSession.client.session.save() as unknown as string;
-    
-    const accountResult = await pool.query(
-      `INSERT INTO connected_accounts 
-      (user_id, platform, platform_user_id, platform_username, access_token, is_active)
-      VALUES ($1, $2, $3, $4, $5, $6)
-      ON CONFLICT (user_id, platform, platform_user_id) 
-      DO UPDATE SET 
-        access_token = EXCLUDED.access_token,
-        platform_username = EXCLUDED.platform_username,
-        is_active = true,
-        updated_at = NOW()
-      RETURNING id`,
-      [userId, 'telegram', telegramUserId, username, sessionString, true]
-    );
-
-    const accountId = accountResult.rows[0].id;
-
-    this.sessions.set(accountId, {
-      userId,
-      accountId,
-      phoneNumber,
-      session: sessionString,
-      client: tempSession.client,
-    });
-
-    this.sessions.delete(tempKey);
-
-    return { accountId, username };
+      console.log('[telegram-user] Verification successful');
+      return { accountId, username };
+    } catch (error: any) {
+      console.error('[telegram-user] Code verification failed:', error.message);
+      throw new Error(`Invalid verification code: ${error.message}`);
+    }
   }
 
   async loadSession(accountId: string): Promise<TelegramClient | null> {
