@@ -159,7 +159,20 @@ const MessageThread: React.FC<MessageThreadProps> = ({
         },
       });
 
-      const newMessages = response.data.messages || [];
+      const newMessages = (response.data.messages || []).map((m: any) => ({
+        ...m,
+        conversationId: m.conversation_id || m.conversationId,
+        platformMessageId: m.platform_message_id || m.platformMessageId,
+        senderId: m.sender_id || m.senderId,
+        senderName: m.sender_name || m.senderName,
+        messageType: m.message_type || m.messageType,
+        mediaUrl: m.media_url || m.mediaUrl,
+        isOutgoing: m.is_outgoing || m.isOutgoing,
+        isRead: m.is_read || m.isRead,
+        sentAt: m.sent_at || m.sentAt,
+        deliveredAt: m.delivered_at || m.deliveredAt,
+        createdAt: m.created_at || m.createdAt,
+      }));
       const hasMoreMessages = response.data.hasMore || false;
 
       // Backend returns messages in DESC order (newest first), reverse for chat display
