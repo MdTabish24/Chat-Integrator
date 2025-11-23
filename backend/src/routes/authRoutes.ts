@@ -1,6 +1,8 @@
 import { Router } from 'express';
 import authController from '../controllers/authController';
 import { authenticateToken } from '../middleware/auth';
+import { handleCallback } from '../controllers/oauthController';
+import { validate, oauthSchemas } from '../middleware/validation';
 
 const router = Router();
 
@@ -38,5 +40,16 @@ router.post('/logout', (req, res) => authController.logout(req, res));
  * @access  Protected
  */
 router.get('/me', authenticateToken, (req, res) => authController.getCurrentUser(req, res));
+
+/**
+ * @route   GET /api/auth/callback/:platform
+ * @desc    OAuth callback handler (Twitter uses this path)
+ * @access  Public
+ */
+router.get(
+  '/callback/:platform',
+  validate(oauthSchemas.platform, 'params'),
+  handleCallback
+);
 
 export default router;
