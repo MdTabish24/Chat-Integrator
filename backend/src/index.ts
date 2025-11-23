@@ -100,10 +100,12 @@ app.use('/api/oauth', apiUsageLogger);
 app.use('/api/messages', apiUsageLogger);
 app.use('/api/conversations', apiUsageLogger);
 
-// Apply CSRF verification to state-changing API routes (not webhooks, not auth)
-app.use('/api/oauth', verifyCsrfToken);
-app.use('/api/messages', verifyCsrfToken);
-app.use('/api/conversations', verifyCsrfToken);
+// Apply CSRF verification only in development
+if (process.env.NODE_ENV !== 'production') {
+  app.use('/api/oauth', verifyCsrfToken);
+  app.use('/api/messages', verifyCsrfToken);
+  app.use('/api/conversations', verifyCsrfToken);
+}
 
 app.use('/api/oauth', oauthRoutes);
 app.use('/api/messages', messageRoutes);
