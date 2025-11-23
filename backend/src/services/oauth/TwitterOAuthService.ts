@@ -15,7 +15,7 @@ export class TwitterOAuthService extends OAuthBaseService {
     const config: OAuthConfig = {
       clientId: process.env.TWITTER_CLIENT_ID || '',
       clientSecret: process.env.TWITTER_CLIENT_SECRET || '',
-      redirectUri: `${process.env.WEBHOOK_BASE_URL}/api/auth/callback/twitter`,
+      redirectUri: `${process.env.WEBHOOK_BASE_URL}/api/oauth/callback/twitter`,
       authorizationUrl: 'https://twitter.com/i/oauth2/authorize',
       tokenUrl: 'https://api.twitter.com/2/oauth2/token',
       scopes: ['tweet.read', 'users.read', 'dm.read', 'dm.write', 'offline.access'],
