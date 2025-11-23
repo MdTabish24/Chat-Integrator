@@ -300,7 +300,10 @@ export class MessageAggregatorService {
     const limitOffset = platform ? '$3 OFFSET $4' : '$2 OFFSET $3';
 
     const conversations = await queryMany<Conversation>(
-      `SELECT c.*, ca.platform, ca.platform_username
+      `SELECT c.id, c.account_id, c.platform_conversation_id, 
+              c.participant_name, c.participant_id, c.participant_avatar_url,
+              c.last_message_at, c.unread_count, c.created_at, c.updated_at,
+              ca.platform, ca.platform_username
        FROM conversations c
        INNER JOIN connected_accounts ca ON c.account_id = ca.id
        ${whereClause}
