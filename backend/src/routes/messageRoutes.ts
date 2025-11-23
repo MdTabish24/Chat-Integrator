@@ -61,10 +61,7 @@ router.post('/poll/:accountId', async (req, res) => {
     const { messageAggregatorService } = await import('../services/messageAggregatorService');
     console.log(`[manual-poll] Triggering manual poll for account ${accountId} (${account.platform})`);
     
-    const messages = await messageAggregatorService.fetchMessagesFromPlatform(
-      accountId,
-      account.platform
-    );
+    const messages = await messageAggregatorService.fetchMessagesForAccount(accountId);
 
     console.log(`[manual-poll] Fetched ${messages.length} messages`);
 
