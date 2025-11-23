@@ -187,6 +187,11 @@ export const getConnectedAccountById = async (id: string): Promise<any | null> =
     return null;
   }
 
+  // Telegram stores session string directly, not encrypted
+  if (account.platform === 'telegram') {
+    return account;
+  }
+
   return {
     ...account,
     access_token: decrypt(account.access_token),
