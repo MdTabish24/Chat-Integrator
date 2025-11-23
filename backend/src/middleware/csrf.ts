@@ -59,6 +59,11 @@ export const verifyCsrfToken = (req: Request, res: Response, next: NextFunction)
     return next();
   }
 
+  // Skip CSRF check for auth endpoints (registration/login)
+  if (req.path.startsWith('/api/auth/register') || req.path.startsWith('/api/auth/login')) {
+    return next();
+  }
+
   const cookieToken = req.cookies?.[CSRF_COOKIE_NAME];
   const headerToken = req.headers[CSRF_HEADER_NAME] as string;
 
