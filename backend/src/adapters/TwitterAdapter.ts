@@ -259,8 +259,11 @@ export class TwitterAdapter extends BasePlatformAdapter {
    */
   async getConversations(accountId: string): Promise<Conversation[]> {
     return this.executeWithRetry(async () => {
+      console.log(`[twitter] Fetching conversations for account ${accountId}`);
       const token = await this.getAccessToken(accountId);
       const account = await getConnectedAccountById(accountId);
+      
+      console.log(`[twitter] Account details: ${account?.platform_username} (${account?.platform_user_id})`);
       
       const url = `${this.baseUrl}/dm_conversations/with/:participant_id/dm_events`;
       
@@ -270,6 +273,8 @@ export class TwitterAdapter extends BasePlatformAdapter {
       // and extracts unique conversations
       
       const eventsUrl = `${this.baseUrl}/dm_events`;
+      console.log(`[twitter] Calling API: ${eventsUrl}`);
+      
       const response = await this.apiClient.get(eventsUrl, {
         headers: {
           Authorization: `Bearer ${token}`,
@@ -281,14 +286,19 @@ export class TwitterAdapter extends BasePlatformAdapter {
           max_results: 100,
         },
       });
+      
+      console.log(`[twitter] API Response status: ${response.status}`);
 
       const events: TwitterDMEvent[] = response.data.data || [];
+      console.log(`[twitter] Found ${events.length} DM events`);
+      
       const users: Record<string, TwitterUser> = {};
 
       if (response.data.includes?.users) {
         for (const user of response.data.includes.users) {
           users[user.id] = user;
         }
+        console.log(`[twitter] Found ${Object.keys(users).length} users in response`);
       }
 
       const conversationsMap = new Map<string, Conversation>();
@@ -328,7 +338,9 @@ export class TwitterAdapter extends BasePlatformAdapter {
         }
       }
 
-      return Array.from(conversationsMap.values());
+      const conversations = Array.from(conversationsMap.values());
+      console.log(`[twitter] Extracted ${conversations.length} unique conversations`);
+      return conversations;
     }, accountId);
   }
 
