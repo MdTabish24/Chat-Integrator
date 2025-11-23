@@ -88,14 +88,16 @@ import webhookRoutes from './routes/webhookRoutes';
 import { rateLimiter } from './middleware/rateLimiter';
 import { apiUsageLogger } from './middleware/apiUsageLogger';
 
+// Auth routes (no CSRF required)
+app.use('/api/auth', authRoutes);
+
 // Apply rate limiting and API usage logging to all API routes
 app.use('/api', rateLimiter);
 app.use('/api', apiUsageLogger);
 
-// Apply CSRF verification to state-changing API routes (not webhooks)
+// Apply CSRF verification to state-changing API routes (not webhooks, not auth)
 app.use('/api', verifyCsrfToken);
 
-app.use('/api/auth', authRoutes);
 app.use('/api/oauth', oauthRoutes);
 app.use('/api/messages', messageRoutes);
 app.use('/api/conversations', conversationRoutes);
