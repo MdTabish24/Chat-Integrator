@@ -38,7 +38,7 @@ const Accounts: React.FC = () => {
       setLoading(true);
       setError(null);
       const response = await apiClient.get('/api/oauth/accounts');
-      setConnectedAccounts(response.data);
+      setConnectedAccounts(response.data.accounts || []);
     } catch (err: any) {
       const errorMessage = err.response?.data?.error?.message || 'Failed to fetch connected accounts';
       setError(errorMessage);
