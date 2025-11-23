@@ -38,11 +38,12 @@ class TelegramUserClientService {
     );
 
     const tempKey = `temp_${userId}_${phoneNumber}`;
+    stringSession.save();
     this.sessions.set(tempKey, {
       userId,
       accountId: '',
       phoneNumber,
-      session: String(stringSession.save() || ''),
+      session: stringSession.save() as unknown as string,
       client,
     });
 
@@ -74,7 +75,8 @@ class TelegramUserClientService {
     const username = (me as any).username || (me as any).firstName || phoneNumber;
     const telegramUserId = (me as any).id.toString();
 
-    const sessionString = String(tempSession.client.session.save() || '');
+    tempSession.client.session.save();
+    const sessionString = tempSession.client.session.save() as unknown as string;
     
     const accountResult = await pool.query(
       `INSERT INTO connected_accounts 
@@ -96,7 +98,7 @@ class TelegramUserClientService {
       userId,
       accountId,
       phoneNumber,
-      session: String(sessionString),
+      session: sessionString,
       client: tempSession.client,
     });
 
