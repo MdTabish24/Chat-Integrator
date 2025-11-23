@@ -91,14 +91,14 @@ class TelegramMessageSyncService {
       console.error('[telegram-sync] Initial sync failed:', error);
     }
 
-    // Sync every 30 seconds
+    // Sync every 5 seconds for real-time feel
     setInterval(async () => {
       try {
         await this.syncMessages(accountId);
       } catch (error) {
         console.error('[telegram-sync] Periodic sync failed:', error);
       }
-    }, 30000);
+    }, 5000);
   }
 }
 
