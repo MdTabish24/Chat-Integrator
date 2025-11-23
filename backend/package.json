@@ -30,7 +30,8 @@
     "jsonwebtoken": "^9.0.2",
     "pg": "^8.11.3",
     "redis": "^4.6.10",
-    "socket.io": "^4.6.2"
+    "socket.io": "^4.6.2",
+    "telegram-login-button": "^0.1.0"
   },
   "devDependencies": {
     "@types/bcrypt": "^5.0.2",

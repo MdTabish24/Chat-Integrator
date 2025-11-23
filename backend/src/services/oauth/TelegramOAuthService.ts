@@ -36,12 +36,12 @@ export class TelegramOAuthService extends OAuthBaseService {
    * @returns Authorization URL for Telegram Login Widget
    */
   generateAuthorizationUrl(state: string): string {
-    // For Telegram, we'll use direct bot link instead of OAuth widget
-    // User needs to start the bot and send /start command
     const botUsername = process.env.TELEGRAM_BOT_USERNAME || 'your_bot';
+    const redirectUri = encodeURIComponent(this.config.redirectUri);
     
-    // Store state in the URL for later verification
-    return `https://t.me/${botUsername}?start=${state}`;
+    // Return URL that will render Telegram Login Widget
+    // Frontend will handle the widget rendering
+    return `${process.env.FRONTEND_URL || 'https://chatintegrator.onrender.com'}/auth/telegram?state=${state}&bot=${botUsername}&redirect=${redirectUri}`;
   }
 
   /**

@@ -7,6 +7,7 @@ import Register from './pages/Register';
 import Dashboard from './pages/Dashboard';
 import Accounts from './pages/Accounts';
 import OAuthCallback from './pages/OAuthCallback';
+import { TelegramAuth } from './pages/TelegramAuth';
 
 function App() {
   return (
@@ -33,6 +34,14 @@ function App() {
               }
             />
             <Route path="/connect" element={<OAuthCallback />} />
+            <Route
+              path="/auth/telegram"
+              element={
+                <ProtectedRoute>
+                  <TelegramAuth />
+                </ProtectedRoute>
+              }
+            />
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
           </Routes>
         </ToastProvider>

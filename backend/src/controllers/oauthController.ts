@@ -85,12 +85,16 @@ export const initiateConnection = async (req: Request, res: Response): Promise<v
 
 /**
  * Handle OAuth callback
- * GET /api/oauth/callback/:platform
+ * GET/POST /api/oauth/callback/:platform
  */
 export const handleCallback = async (req: Request, res: Response) => {
   try {
     const platform = req.params.platform as Platform;
-    const { code, state, error, error_description } = req.query;
+    
+    // For Telegram, data comes in POST body
+    const isTelegram = platform === 'telegram';
+    const data = isTelegram ? req.body : req.query;
+    const { code, state, error, error_description } = data;
 
     // Check for OAuth errors
     if (error) {
@@ -131,11 +135,17 @@ export const handleCallback = async (req: Request, res: Response) => {
     // Get OAuth service
     const oauthService = getOAuthService(platform);
 
-    // Exchange code for tokens
-    const tokens = await oauthService.exchangeCodeForToken(code as string, { state: state as string });
-
-    // Get user info from platform
-    const userInfo = await oauthService.getUserInfo(tokens.accessToken);
+    // For Telegram, validate auth data and get user info directly
+    let tokens, userInfo;
+    if (platform === 'telegram') {
+      // Telegram sends user data directly
+      tokens = await oauthService.exchangeCodeForToken('', data);
+      userInfo = await oauthService.getUserInfo(tokens.accessToken, data);
+    } else {
+      // Standard OAuth flow
+      tokens = await oauthService.exchangeCodeForToken(code as string, { state: state as string });
+      userInfo = await oauthService.getUserInfo(tokens.accessToken);
+    }
 
     // Store tokens securely
     const accountId = await oauthService.storeTokens(
