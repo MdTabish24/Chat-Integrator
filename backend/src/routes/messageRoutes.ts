@@ -58,8 +58,8 @@ router.get('/debug/twitter/:accountId', async (req, res) => {
     const account = accountResult.rows[0];
 
     // Get Twitter adapter and fetch conversations
-    const { getAdapter } = await import('../adapters');
-    const adapter = getAdapter('twitter');
+    const { AdapterFactory } = await import('../adapters');
+    const adapter = AdapterFactory.getAdapter('twitter');
     
     console.log(`[debug] Fetching Twitter conversations for account ${accountId}`);
     const conversations = await adapter.getConversations(accountId);
