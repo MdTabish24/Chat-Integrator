@@ -139,11 +139,15 @@ const startServer = async () => {
 
     // Run database migrations
     console.log('Running database migrations...');
-    const fs = await import('fs');
-    const path = await import('path');
-    const initSql = fs.readFileSync(path.join(__dirname, '../db/init.sql'), 'utf-8');
-    await pool.query(initSql);
-    console.log('Database migrations completed');
+    try {
+      const fs = await import('fs');
+      const path = await import('path');
+      const initSql = fs.readFileSync(path.join(__dirname, '../db/init.sql'), 'utf-8');
+      await pool.query(initSql);
+      console.log('Database migrations completed');
+    } catch (migrationError) {
+      console.error('Migration error (continuing anyway):', migrationError);
+    }
 
     // Initialize WebSocket service
     websocketService.initialize(httpServer);
