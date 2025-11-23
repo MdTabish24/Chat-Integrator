@@ -2,6 +2,7 @@ import { TelegramClient } from 'telegram';
 import { StringSession } from 'telegram/sessions';
 import { Api } from 'telegram/tl';
 import pool from '../../config/database';
+import { NewMessage } from 'telegram/events';
 
 interface TelegramSession {
   userId: string;
@@ -140,6 +141,15 @@ class TelegramUserClientService {
       this.sessions.delete(tempKey);
 
       console.log('[telegram-user] Verification successful');
+      
+      // Start message sync
+      try {
+        const { telegramMessageSync } = await import('./TelegramMessageSync');
+        await telegramMessageSync.startPeriodicSync(accountId);
+      } catch (error) {
+        console.error('[telegram-user] Failed to start message sync:', error);
+      }
+      
       return { accountId, username, needPassword: false };
     } catch (error: any) {
       console.error('[telegram-user] Code verification failed:', error.message);
@@ -178,6 +188,22 @@ class TelegramUserClientService {
       session: sessionString,
       client,
     });
+
+    // Add event listener for new messages
+    client.addEventHandler(async (event: any) => {
+      try {
+        const message = event.message;
+        if (!message || !message.text) return;
+
+        console.log('[telegram-user] New message received:', message.text);
+        
+        // Sync this conversation
+        const { telegramMessageSync } = await import('./TelegramMessageSync');
+        await telegramMessageSync.syncMessages(accountId);
+      } catch (error) {
+        console.error('[telegram-user] Event handler error:', error);
+      }
+    }, new NewMessage({}));
 
     return client;
   }
