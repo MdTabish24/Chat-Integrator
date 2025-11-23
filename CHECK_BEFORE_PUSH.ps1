@@ -1,4 +1,14 @@
-# PowerShell Script to Check for Secrets Before Push
+Create your account
+Or sign in to existing account
+
+CSRF token is missing
+Email address
+fiza8983khan@gmail.com
+Password
+••••••••
+Confirm Password
+••••••••
+Create account# PowerShell Script to Check for Secrets Before Push
 
 Write-Host "🔍 Checking for sensitive files..." -ForegroundColor Yellow
 Write-Host ""
