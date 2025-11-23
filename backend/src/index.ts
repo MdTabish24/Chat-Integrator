@@ -97,6 +97,17 @@ app.use('/api/messages', messageRoutes);
 app.use('/api/conversations', conversationRoutes);
 app.use('/api/webhooks', webhookRoutes);
 
+// Serve frontend static files in production
+if (process.env.NODE_ENV === 'production') {
+  const path = require('path');
+  app.use(express.static(path.join(__dirname, '../../frontend/dist')));
+  app.get('*', (req, res) => {
+    if (!req.path.startsWith('/api') && !req.path.startsWith('/health')) {
+      res.sendFile(path.join(__dirname, '../../frontend/dist/index.html'));
+    }
+  });
+}
+
 // Error handling middleware (must be last)
 app.use(errorHandler);
 
