@@ -51,19 +51,19 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   const login = async (email: string, password: string) => {
     const response = await apiClient.post('/api/auth/login', { email, password });
-    const { accessToken, refreshToken, user: userData } = response.data;
+    const { tokens, user: userData } = response.data;
     
-    localStorage.setItem('access_token', accessToken);
-    localStorage.setItem('refresh_token', refreshToken);
+    localStorage.setItem('access_token', tokens.accessToken);
+    localStorage.setItem('refresh_token', tokens.refreshToken);
     setUser(userData);
   };
 
   const register = async (email: string, password: string) => {
     const response = await apiClient.post('/api/auth/register', { email, password });
-    const { accessToken, refreshToken, user: userData } = response.data;
+    const { tokens, user: userData } = response.data;
     
-    localStorage.setItem('access_token', accessToken);
-    localStorage.setItem('refresh_token', refreshToken);
+    localStorage.setItem('access_token', tokens.accessToken);
+    localStorage.setItem('refresh_token', tokens.refreshToken);
     setUser(userData);
   };
 
