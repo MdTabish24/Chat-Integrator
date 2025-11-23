@@ -38,7 +38,13 @@ const Accounts: React.FC = () => {
       setLoading(true);
       setError(null);
       const response = await apiClient.get('/api/oauth/accounts');
-      setConnectedAccounts(response.data.accounts || []);
+      const accounts = (response.data.accounts || []).map((acc: any) => ({
+        ...acc,
+        isActive: acc.is_active !== undefined ? acc.is_active : acc.isActive,
+        platformUsername: acc.platform_username || acc.platformUsername,
+        platformUserId: acc.platform_user_id || acc.platformUserId,
+      }));
+      setConnectedAccounts(accounts);
     } catch (err: any) {
       const errorMessage = err.response?.data?.error?.message || 'Failed to fetch connected accounts';
       setError(errorMessage);
@@ -108,7 +114,7 @@ const Accounts: React.FC = () => {
   };
 
   const isConnected = (platform: Platform): boolean => {
-    return connectedAccounts.some(acc => acc.platform === platform && acc.isActive);
+    return connectedAccounts.some(acc => acc.platform === platform && acc.isActive !== false);
   };
 
   return (
