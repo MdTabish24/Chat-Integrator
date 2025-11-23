@@ -203,12 +203,18 @@ const Dashboard: React.FC = () => {
         params: { platform },
       });
       
-      const conversations = response.data.conversations || [];
-      console.log('Loaded conversations for', platform, ':', conversations.map(c => ({
-        id: c.id,
-        name: c.participantName || c.participant_name,
-        date: c.lastMessageAt || c.last_message_at
-      })));
+      const conversations = (response.data.conversations || []).map((c: any) => ({
+        ...c,
+        participantName: c.participant_name || c.participantName,
+        participantId: c.participant_id || c.participantId,
+        participantAvatarUrl: c.participant_avatar_url || c.participantAvatarUrl,
+        lastMessageAt: c.last_message_at || c.lastMessageAt,
+        unreadCount: c.unread_count || c.unreadCount || 0,
+        accountId: c.account_id || c.accountId,
+        platformConversationId: c.platform_conversation_id || c.platformConversationId,
+        createdAt: c.created_at || c.createdAt,
+        updatedAt: c.updated_at || c.updatedAt,
+      }));
       
       setPlatformsData((prev) => {
         const updated = new Map(prev);
