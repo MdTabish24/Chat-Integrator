@@ -123,3 +123,28 @@ export const syncMessages = async (req: Request, res: Response) => {
     res.status(500).json({ error: error.message });
   }
 };
+
+export const resetAndSync = async (req: Request, res: Response) => {
+  try {
+    const userId = (req as any).user?.userId;
+    const { accountId } = req.params;
+
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const pool = (await import('../config/database')).default;
+    
+    // Delete all conversations and messages for this account
+    await pool.query('DELETE FROM conversations WHERE account_id = $1', [accountId]);
+    
+    // Resync
+    const { telegramMessageSync } = await import('../services/telegram/TelegramMessageSync');
+    await telegramMessageSync.syncMessages(accountId);
+    
+    res.json({ success: true, message: 'Reset and synced successfully' });
+  } catch (error: any) {
+    console.error('[telegram-user] Reset failed:', error);
+    res.status(500).json({ error: error.message });
+  }
+};

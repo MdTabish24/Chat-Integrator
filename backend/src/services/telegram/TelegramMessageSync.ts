@@ -32,6 +32,10 @@ class TelegramMessageSyncService {
         for (const message of messages) {
           if (!message.text) continue;
 
+          // Import encryption utility
+          const { encrypt } = await import('../../utils/encryption');
+          const encryptedContent = encrypt(message.text);
+
           // Insert message and track unread status
           await pool.query(
             `INSERT INTO messages (conversation_id, platform_message_id, content, sender_id, sender_name, sent_at, is_outgoing, is_read)
@@ -40,12 +44,12 @@ class TelegramMessageSyncService {
             [
               conversationId,
               message.id.toString(),
-              message.text,
+              encryptedContent,
               message.senderId || 'unknown',
               'Telegram User',
               new Date(message.date * 1000),
               message.out,
-              message.out, // Mark outgoing messages as read
+              true, // Mark all synced messages as read initially
             ]
           );
         }
