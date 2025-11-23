@@ -3,21 +3,7 @@ import { getOAuthService } from '../services/oauth';
 import { Platform } from '../types';
 import { platformRateLimitService } from '../services/platformRateLimitService';
 import crypto from 'crypto';
-
-// Store state parameters temporarily (in production, use Redis)
-const stateStore = new Map<string, { userId: string; platform: Platform; timestamp: number }>();
-
-// Clean up old state entries every 10 minutes
-setInterval(() => {
-  const now = Date.now();
-  const tenMinutes = 10 * 60 * 1000;
-  
-  for (const [state, data] of stateStore.entries()) {
-    if (now - data.timestamp > tenMinutes) {
-      stateStore.delete(state);
-    }
-  }
-}, 10 * 60 * 1000);
+import redisClient from '../config/redis';
 
 /**
  * Initiate OAuth connection for a platform
@@ -61,7 +47,10 @@ export const initiateConnection = async (req: Request, res: Response): Promise<v
 
     // Generate state parameter for CSRF protection
     const state = crypto.randomBytes(32).toString('hex');
-    stateStore.set(state, { userId, platform, timestamp: Date.now() });
+    
+    // Store state in Redis with 10 minute expiry
+    const stateData = JSON.stringify({ userId, platform, timestamp: Date.now() });
+    await redisClient.setEx(`oauth:state:${state}`, 600, stateData);
 
     // Get OAuth service and generate authorization URL
     const oauthService = getOAuthService(platform);
@@ -115,9 +104,10 @@ export const handleCallback = async (req: Request, res: Response) => {
       });
     }
 
-    // Verify state parameter
-    const stateData = stateStore.get(state as string);
-    if (!stateData || stateData.platform !== platform) {
+    // Verify state parameter from Redis
+    const stateDataStr = await redisClient.get(`oauth:state:${state}`);
+    if (!stateDataStr) {
+      console.error('[oauth] State not found in Redis:', state);
       return res.status(400).json({
         error: {
           code: 'INVALID_STATE',
@@ -127,8 +117,20 @@ export const handleCallback = async (req: Request, res: Response) => {
       });
     }
 
-    // Clean up state
-    stateStore.delete(state as string);
+    const stateData = JSON.parse(stateDataStr);
+    if (stateData.platform !== platform) {
+      console.error('[oauth] Platform mismatch:', { expected: platform, actual: stateData.platform });
+      return res.status(400).json({
+        error: {
+          code: 'INVALID_STATE',
+          message: 'Invalid or expired state parameter',
+          retryable: false,
+        },
+      });
+    }
+
+    // Clean up state from Redis
+    await redisClient.del(`oauth:state:${state}`);
 
     const { userId } = stateData;
 
