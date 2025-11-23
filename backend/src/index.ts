@@ -131,6 +131,15 @@ app.use(errorHandler);
 // Initialize connections and start server
 const startServer = async () => {
   try {
+    // Start server FIRST to bind port immediately
+    httpServer.listen(PORT, () => {
+      console.log(`Server is running on port ${PORT}`);
+      console.log(`Environment: ${process.env.NODE_ENV}`);
+    });
+
+    // Then initialize background services
+    console.log('Initializing background services...');
+
     // Connect to Redis
     await connectRedis();
     console.log('Redis connected successfully');
@@ -176,12 +185,8 @@ const startServer = async () => {
       }
     }
 
-    // Start server
-    httpServer.listen(PORT, () => {
-      console.log(`Server is running on port ${PORT}`);
-      console.log(`Environment: ${process.env.NODE_ENV}`);
-      console.log(`WebSocket server ready for connections`);
-    });
+    console.log('WebSocket server ready for connections');
+    console.log('All services initialized successfully');
   } catch (error) {
     console.error('Failed to start server:', error);
     process.exit(1);
