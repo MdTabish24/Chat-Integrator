@@ -35,6 +35,58 @@ router.get('/unread/count', (req, res) => messageController.getUnreadCount(req, 
 router.post('/sync', (req, res) => messageController.syncMessages(req, res));
 
 /**
+ * @route   POST /api/messages/poll/:accountId
+ * @desc    Manually trigger polling for an account
+ * @access  Protected
+ */
+router.post('/poll/:accountId', async (req, res) => {
+  try {
+    const { accountId } = req.params;
+    const userId = (req as any).user?.userId;
+
+    // Verify account belongs to user
+    const pool = require('../config/database').default;
+    const accountResult = await pool.query(
+      'SELECT * FROM connected_accounts WHERE id = $1 AND user_id = $2 AND is_active = true',
+      [accountId, userId]
+    );
+
+    if (accountResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Account not found or inactive' });
+    }
+
+    const account = accountResult.rows[0];
+
+    // Manually trigger polling
+    const { messageAggregatorService } = await import('../services/messageAggregatorService');
+    console.log(`[manual-poll] Triggering manual poll for account ${accountId} (${account.platform})`);
+    
+    const messages = await messageAggregatorService.fetchMessagesFromPlatform(
+      accountId,
+      account.platform
+    );
+
+    console.log(`[manual-poll] Fetched ${messages.length} messages`);
+
+    res.json({
+      success: true,
+      account: {
+        id: account.id,
+        platform: account.platform,
+        username: account.platform_username,
+      },
+      messageCount: messages.length,
+    });
+  } catch (error: any) {
+    console.error('[manual-poll] Failed:', error);
+    res.status(500).json({
+      error: error.message,
+      details: error.response?.data || error.stack,
+    });
+  }
+});
+
+/**
  * @route   GET /api/messages/debug/twitter/:accountId
  * @desc    Debug endpoint to test Twitter API directly
  * @access  Protected
