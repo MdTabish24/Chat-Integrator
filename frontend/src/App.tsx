@@ -8,6 +8,7 @@ import Dashboard from './pages/Dashboard';
 import Accounts from './pages/Accounts';
 import OAuthCallback from './pages/OAuthCallback';
 import { TelegramAuth } from './pages/TelegramAuth';
+import { TelegramPhoneAuth } from './pages/TelegramPhoneAuth';
 
 function App() {
   return (
@@ -39,6 +40,14 @@ function App() {
               element={
                 <ProtectedRoute>
                   <TelegramAuth />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/auth/telegram-phone"
+              element={
+                <ProtectedRoute>
+                  <TelegramPhoneAuth />
                 </ProtectedRoute>
               }
             />

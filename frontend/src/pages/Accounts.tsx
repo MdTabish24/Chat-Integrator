@@ -53,7 +53,13 @@ const Accounts: React.FC = () => {
       setConnectingPlatform(platform);
       setError(null);
       
-      // Initiate OAuth flow
+      // For Telegram, use phone authentication
+      if (platform === 'telegram') {
+        navigate('/auth/telegram-phone');
+        return;
+      }
+      
+      // Initiate OAuth flow for other platforms
       const response = await apiClient.get(`/api/oauth/connect/${platform}`);
       const { authorizationUrl } = response.data;
       

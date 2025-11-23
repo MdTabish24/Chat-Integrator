@@ -83,6 +83,7 @@ import oauthRoutes from './routes/oauthRoutes';
 import messageRoutes from './routes/messageRoutes';
 import conversationRoutes from './routes/conversationRoutes';
 import webhookRoutes from './routes/webhookRoutes';
+import telegramUserRoutes from './routes/telegramUserRoutes';
 
 // Import middleware
 import { rateLimiter } from './middleware/rateLimiter';
@@ -111,6 +112,7 @@ app.use('/api/oauth', oauthRoutes);
 app.use('/api/messages', messageRoutes);
 app.use('/api/conversations', conversationRoutes);
 app.use('/api/webhooks', webhookRoutes);
+app.use('/api/telegram', telegramUserRoutes);
 
 // Serve frontend static files in production
 if (process.env.NODE_ENV === 'production') {
