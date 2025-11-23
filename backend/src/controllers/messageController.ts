@@ -108,14 +108,41 @@ class MessageController {
       }
 
       // Send message through platform adapter
-      const { AdapterFactory } = await import('../adapters/AdapterFactory');
-      const adapter = AdapterFactory.getAdapter(conversation.platform);
+      let sentMessage;
       
-      const sentMessage = await adapter.sendMessage(
-        conversation.accountId,
-        conversation.platformConversationId,
-        content
-      );
+      if (conversation.platform === 'telegram') {
+        // Use TelegramUserClient for user-based Telegram
+        const { telegramUserClient } = await import('../services/telegram/TelegramUserClient');
+        await telegramUserClient.sendMessage(
+          conversation.accountId,
+          conversation.platformConversationId,
+          content
+        );
+        
+        // Create message object
+        sentMessage = {
+          id: '',
+          conversationId: conversationId,
+          platformMessageId: Date.now().toString(),
+          senderId: 'me',
+          senderName: 'You',
+          content,
+          messageType: 'text',
+          isOutgoing: true,
+          isRead: true,
+          sentAt: new Date(),
+          createdAt: new Date(),
+        };
+      } else {
+        const { AdapterFactory } = await import('../adapters/AdapterFactory');
+        const adapter = AdapterFactory.getAdapter(conversation.platform);
+        
+        sentMessage = await adapter.sendMessage(
+          conversation.accountId,
+          conversation.platformConversationId,
+          content
+        );
+      }
 
       // Store the sent message
       const storedMessage = await messageAggregatorService.storeMessage(
