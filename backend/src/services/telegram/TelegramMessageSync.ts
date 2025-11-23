@@ -15,17 +15,21 @@ class TelegramMessageSyncService {
         const dialogName = dialog.name || 'Unknown Chat';
         const dialogDate = dialog.date ? new Date(dialog.date * 1000) : new Date();
         
+        // Generate avatar URL using UI Avatars API
+        const avatarUrl = `https://ui-avatars.com/api/?name=${encodeURIComponent(dialogName)}&background=random&size=128`;
+        
         // Create or update conversation
         const conversationResult = await pool.query(
-          `INSERT INTO conversations (account_id, platform_conversation_id, participant_name, participant_id, last_message_at)
-           VALUES ($1, $2, $3, $4, $5)
+          `INSERT INTO conversations (account_id, platform_conversation_id, participant_name, participant_id, participant_avatar_url, last_message_at)
+           VALUES ($1, $2, $3, $4, $5, $6)
            ON CONFLICT (account_id, platform_conversation_id)
            DO UPDATE SET 
              participant_name = EXCLUDED.participant_name,
+             participant_avatar_url = EXCLUDED.participant_avatar_url,
              last_message_at = EXCLUDED.last_message_at,
              updated_at = NOW()
            RETURNING id`,
-          [accountId, dialogId, dialogName, dialogId, dialogDate]
+          [accountId, dialogId, dialogName, dialogId, avatarUrl, dialogDate]
         );
 
         const conversationId = conversationResult.rows[0].id;

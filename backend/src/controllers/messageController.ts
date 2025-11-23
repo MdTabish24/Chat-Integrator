@@ -130,8 +130,8 @@ class MessageController {
           messageType: 'text',
           isOutgoing: true,
           isRead: true,
-          sentAt: new Date(),
-          createdAt: new Date(),
+          sentAt: new Date().toISOString(),
+          createdAt: new Date().toISOString(),
         };
       } else {
         const { AdapterFactory } = await import('../adapters/AdapterFactory');
