@@ -74,7 +74,7 @@ class TelegramUserClientService {
     const username = (me as any).username || (me as any).firstName || phoneNumber;
     const telegramUserId = (me as any).id.toString();
 
-    const sessionString = tempSession.client.session.save();
+    const sessionString = tempSession.client.session.save() as string;
     
     const accountResult = await pool.query(
       `INSERT INTO connected_accounts 

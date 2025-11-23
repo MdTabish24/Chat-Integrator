@@ -140,7 +140,7 @@ export const handleCallback = async (req: Request, res: Response) => {
     if (platform === 'telegram') {
       // Telegram sends user data directly
       tokens = await oauthService.exchangeCodeForToken('', data);
-      userInfo = await oauthService.getUserInfo(tokens.accessToken, data);
+      userInfo = await oauthService.getUserInfo(tokens.accessToken);
     } else {
       // Standard OAuth flow
       tokens = await oauthService.exchangeCodeForToken(code as string, { state: state as string });
