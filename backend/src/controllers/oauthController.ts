@@ -95,8 +95,9 @@ export const handleCallback = async (req: Request, res: Response) => {
     // Check for OAuth errors
     if (error) {
       console.error(`[oauth] ${platform} authorization error:`, error_description || error);
+      const frontendUrl = process.env.FRONTEND_URL || process.env.WEBHOOK_BASE_URL || 'https://chatintegrator.onrender.com';
       return res.redirect(
-        `${process.env.FRONTEND_URL}/connect?error=${error}&platform=${platform}`
+        `${frontendUrl}/accounts?error=${error}&platform=${platform}`
       );
     }
 
@@ -156,14 +157,16 @@ export const handleCallback = async (req: Request, res: Response) => {
     }
 
     // Redirect to frontend success page
+    const frontendUrl = process.env.FRONTEND_URL || process.env.WEBHOOK_BASE_URL || 'https://chatintegrator.onrender.com';
     res.redirect(
-      `${process.env.FRONTEND_URL}/connect?success=true&platform=${platform}&accountId=${accountId}`
+      `${frontendUrl}/accounts?success=true&platform=${platform}&accountId=${accountId}`
     );
   } catch (error: any) {
     console.error('[oauth] Callback handling failed:', error);
     const platform = req.params.platform;
+    const frontendUrl = process.env.FRONTEND_URL || process.env.WEBHOOK_BASE_URL || 'https://chatintegrator.onrender.com';
     res.redirect(
-      `${process.env.FRONTEND_URL}/connect?error=callback_failed&platform=${platform}&message=${encodeURIComponent(error.message)}`
+      `${frontendUrl}/accounts?error=callback_failed&platform=${platform}&message=${encodeURIComponent(error.message)}`
     );
   }
 };

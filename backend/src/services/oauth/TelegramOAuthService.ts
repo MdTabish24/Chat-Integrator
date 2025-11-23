@@ -36,17 +36,12 @@ export class TelegramOAuthService extends OAuthBaseService {
    * @returns Authorization URL for Telegram Login Widget
    */
   generateAuthorizationUrl(state: string): string {
-    const botId = this.botToken.split(':')[0]; // Extract bot ID from token
-    const baseUrl = process.env.WEBHOOK_BASE_URL || process.env.FRONTEND_URL || 'https://chatintegrator.onrender.com';
+    // For Telegram, we'll use direct bot link instead of OAuth widget
+    // User needs to start the bot and send /start command
+    const botUsername = process.env.TELEGRAM_BOT_USERNAME || 'your_bot';
     
-    const params = new URLSearchParams({
-      bot_id: botId,
-      origin: baseUrl,
-      request_access: 'write',
-      return_to: `${baseUrl}/api/auth/callback/telegram?state=${state}`,
-    });
-
-    return `https://oauth.telegram.org/auth?${params.toString()}`;
+    // Store state in the URL for later verification
+    return `https://t.me/${botUsername}?start=${state}`;
   }
 
   /**
