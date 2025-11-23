@@ -144,7 +144,44 @@ class MessageController {
         );
       }
 
-      // Store the sent message
+      // For Telegram, manually store the message without creating new conversation
+      if (conversation.platform === 'telegram') {
+        const { encrypt } = await import('../utils/encryption');
+        const encryptedContent = encrypt(content);
+        
+        const { query } = await import('../db/queryHelpers');
+        const result = await query(
+          `INSERT INTO messages (conversation_id, platform_message_id, sender_id, sender_name, content, message_type, is_outgoing, is_read, sent_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+           RETURNING *`,
+          [
+            conversationId,
+            sentMessage.platformMessageId,
+            'me',
+            'You',
+            encryptedContent,
+            'text',
+            true,
+            true,
+            sentMessage.sentAt
+          ]
+        );
+        
+        const storedMessage = {
+          ...result.rows[0],
+          content,
+          conversationId,
+          isOutgoing: true,
+        };
+        
+        res.status(201).json({
+          message: storedMessage,
+          success: true
+        });
+        return;
+      }
+      
+      // Store the sent message for other platforms
       const storedMessage = await messageAggregatorService.storeMessage(
         sentMessage,
         conversation.accountId
