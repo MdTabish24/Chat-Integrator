@@ -345,13 +345,26 @@ class MessageController {
    */
   private async getConversationDetails(conversationId: string): Promise<any> {
     const { queryOne } = await import('../db/queryHelpers');
-    return queryOne(
+    const result = await queryOne(
       `SELECT c.*, ca.platform, ca.id as account_id
        FROM conversations c
        INNER JOIN connected_accounts ca ON c.account_id = ca.id
        WHERE c.id = $1`,
       [conversationId]
     );
+    
+    if (result) {
+      return {
+        ...result,
+        accountId: result.account_id,
+        platformConversationId: result.platform_conversation_id,
+        participantName: result.participant_name,
+        participantId: result.participant_id,
+        lastMessageAt: result.last_message_at,
+        unreadCount: result.unread_count,
+      };
+    }
+    return null;
   }
 
   /**
