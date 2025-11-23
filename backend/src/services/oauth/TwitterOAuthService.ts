@@ -1,6 +1,7 @@
 import { OAuthBaseService, OAuthConfig } from './OAuthBaseService';
 import crypto from 'crypto';
 import dotenv from 'dotenv';
+import redisClient from '../../config/redis';
 
 dotenv.config();
 
@@ -9,7 +10,6 @@ dotenv.config();
  * Implements OAuth 2.0 with PKCE (Proof Key for Code Exchange)
  */
 export class TwitterOAuthService extends OAuthBaseService {
-  private codeVerifierStore: Map<string, string> = new Map();
 
   constructor() {
     const config: OAuthConfig = {
@@ -50,13 +50,11 @@ export class TwitterOAuthService extends OAuthBaseService {
     const codeVerifier = this.generateCodeVerifier();
     const codeChallenge = this.generateCodeChallenge(codeVerifier);
 
-    // Store code verifier for later use in token exchange
-    this.codeVerifierStore.set(state, codeVerifier);
-
-    // Clean up old verifiers (older than 10 minutes)
-    setTimeout(() => {
-      this.codeVerifierStore.delete(state);
-    }, 10 * 60 * 1000);
+    // Store code verifier in Redis with 10 minute expiry
+    const redisKey = `twitter:code_verifier:${state}`;
+    redisClient.setex(redisKey, 600, codeVerifier).catch(err => {
+      console.error('[twitter] Failed to store code verifier in Redis:', err);
+    });
 
     const params = new URLSearchParams({
       client_id: this.config.clientId,
@@ -83,8 +81,12 @@ export class TwitterOAuthService extends OAuthBaseService {
       throw new Error('State parameter is required for Twitter OAuth');
     }
 
-    const codeVerifier = this.codeVerifierStore.get(state);
+    // Retrieve code verifier from Redis
+    const redisKey = `twitter:code_verifier:${state}`;
+    const codeVerifier = await redisClient.get(redisKey);
+    
     if (!codeVerifier) {
+      console.error('[twitter] Code verifier not found in Redis for state:', state);
       throw new Error('Code verifier not found. Authorization may have expired.');
     }
 
@@ -111,8 +113,8 @@ export class TwitterOAuthService extends OAuthBaseService {
         }
       );
 
-      // Clean up code verifier
-      this.codeVerifierStore.delete(state);
+      // Clean up code verifier from Redis
+      await redisClient.del(redisKey);
 
       return this.parseTokenResponse(response.data);
     } catch (error: any) {

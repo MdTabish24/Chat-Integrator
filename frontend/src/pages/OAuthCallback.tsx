@@ -34,10 +34,10 @@ const OAuthCallback: React.FC = () => {
         setStatus('success');
         setMessage(`Successfully connected your ${platform} account!`);
 
-        // Redirect to accounts page after 2 seconds
+        // Redirect to accounts page after 1.5 seconds with state to trigger refresh
         setTimeout(() => {
-          navigate('/accounts');
-        }, 2000);
+          navigate('/accounts', { state: { refresh: true } });
+        }, 1500);
         return;
       }
 

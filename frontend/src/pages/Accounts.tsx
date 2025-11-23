@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useToast } from '../contexts/ToastContext';
 import apiClient from '../config/api';
 import { ConnectedAccount, PlatformConfig, Platform } from '../types';
@@ -21,6 +21,7 @@ const platformConfigs: PlatformConfig[] = [
 
 const Accounts: React.FC = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const { showSuccess, showError: showToastError } = useToast();
   const [connectedAccounts, setConnectedAccounts] = useState<ConnectedAccount[]>([]);
   const [loading, setLoading] = useState(true);
@@ -32,6 +33,15 @@ const Accounts: React.FC = () => {
   useEffect(() => {
     fetchConnectedAccounts();
   }, []);
+
+  // Refresh accounts when redirected from OAuth callback
+  useEffect(() => {
+    if (location.state?.refresh) {
+      fetchConnectedAccounts();
+      // Clear the state to prevent refresh on subsequent renders
+      window.history.replaceState({}, document.title);
+    }
+  }, [location]);
 
   const fetchConnectedAccounts = async () => {
     try {
@@ -55,6 +65,12 @@ const Accounts: React.FC = () => {
   };
 
   const handleConnect = async (platform: Platform) => {
+    // Prevent connecting if already connected
+    if (isConnected(platform)) {
+      showToastError(`${platform} is already connected`);
+      return;
+    }
+
     try {
       setConnectingPlatform(platform);
       setError(null);
