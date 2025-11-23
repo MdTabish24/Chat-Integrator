@@ -285,19 +285,25 @@ export class MessagePollingService {
     platform: Platform,
     userId: string
   ): Promise<void> {
-    // Check if platform needs polling
-    if (WEBHOOK_ENABLED_PLATFORMS.includes(platform)) {
+    try {
+      // Check if platform needs polling
+      if (WEBHOOK_ENABLED_PLATFORMS.includes(platform)) {
+        console.log(
+          `Platform ${platform} uses webhooks, skipping polling setup`
+        );
+        return;
+      }
+
       console.log(
-        `Platform ${platform} uses webhooks, skipping polling setup`
+        `Adding account ${accountId} (${platform}) to polling schedule`
       );
-      return;
+
+      await this.schedulePollingJob(accountId, platform, userId);
+      console.log(`Successfully scheduled polling for account ${accountId}`);
+    } catch (error) {
+      console.error(`Failed to add account ${accountId} to polling:`, error);
+      throw error;
     }
-
-    console.log(
-      `Adding account ${accountId} (${platform}) to polling schedule`
-    );
-
-    await this.schedulePollingJob(accountId, platform, userId);
   }
 
   /**
