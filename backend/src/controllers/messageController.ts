@@ -119,6 +119,16 @@ class MessageController {
           content
         );
         
+        // Trigger immediate sync to fetch any replies
+        setTimeout(async () => {
+          try {
+            const { telegramMessageSync } = await import('../services/telegram/TelegramMessageSync');
+            await telegramMessageSync.syncMessages(conversation.accountId);
+          } catch (err) {
+            console.error('Post-send sync failed:', err);
+          }
+        }, 2000); // Wait 2 seconds for reply
+        
         // Create message object
         sentMessage = {
           id: '',
@@ -172,6 +182,13 @@ class MessageController {
           content,
           conversationId,
           isOutgoing: true,
+          sentAt: result.rows[0].sent_at,
+          createdAt: result.rows[0].created_at,
+          senderId: result.rows[0].sender_id,
+          senderName: result.rows[0].sender_name,
+          platformMessageId: result.rows[0].platform_message_id,
+          messageType: result.rows[0].message_type,
+          isRead: result.rows[0].is_read,
         };
         
         res.status(201).json({
