@@ -160,6 +160,21 @@ const startServer = async () => {
     await messagePollingService.initialize();
     console.log('Message polling service initialized');
 
+    // One-time cleanup: Reset Telegram conversations
+    try {
+      console.log('[startup] Resetting Telegram conversations...');
+      await pool.query(`DELETE FROM conversations WHERE account_id IN (SELECT id FROM connected_accounts WHERE platform = 'telegram')`);
+      
+      const accounts = await pool.query(`SELECT id FROM connected_accounts WHERE platform = 'telegram' AND is_active = true`);
+      for (const account of accounts.rows) {
+        const { telegramMessageSync } = await import('./services/telegram/TelegramMessageSync');
+        await telegramMessageSync.syncMessages(account.id);
+      }
+      console.log('[startup] Telegram conversations reset complete');
+    } catch (error) {
+      console.error('[startup] Telegram reset failed:', error);
+    }
+
     // Setup Telegram webhook
     const telegramToken = process.env.TELEGRAM_BOT_TOKEN;
     if (telegramToken) {
