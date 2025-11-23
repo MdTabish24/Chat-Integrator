@@ -158,6 +158,22 @@ const startServer = async () => {
     await messagePollingService.initialize();
     console.log('Message polling service initialized');
 
+    // Setup Telegram webhook
+    const telegramToken = process.env.TELEGRAM_BOT_TOKEN;
+    if (telegramToken) {
+      const webhookUrl = `${process.env.WEBHOOK_BASE_URL || 'https://chatintegrator.onrender.com'}/api/webhooks/telegram`;
+      try {
+        const axios = await import('axios');
+        await axios.default.post(`https://api.telegram.org/bot${telegramToken}/setWebhook`, {
+          url: webhookUrl,
+          allowed_updates: ['message', 'edited_message']
+        });
+        console.log('Telegram webhook set successfully:', webhookUrl);
+      } catch (error) {
+        console.error('Failed to set Telegram webhook:', error);
+      }
+    }
+
     // Start server
     httpServer.listen(PORT, () => {
       console.log(`Server is running on port ${PORT}`);
