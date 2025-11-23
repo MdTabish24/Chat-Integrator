@@ -214,12 +214,12 @@ class TelegramUserClientService {
 
     const dialogs = await client.getDialogs({ limit });
     return dialogs.map((d) => ({
-      id: d.id,
-      name: d.name || d.title,
+      id: d.id?.toString() || 'unknown',
+      name: d.name || d.title || 'Unknown',
       isUser: d.isUser,
       isGroup: d.isGroup,
-      unreadCount: d.unreadCount,
-      date: d.date,
+      unreadCount: d.unreadCount || 0,
+      date: d.date || Math.floor(Date.now() / 1000),
     }));
   }
 

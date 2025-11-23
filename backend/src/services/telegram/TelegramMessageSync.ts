@@ -11,6 +11,10 @@ class TelegramMessageSyncService {
       console.log(`[telegram-sync] Found ${dialogs.length} dialogs`);
 
       for (const dialog of dialogs) {
+        const dialogId = dialog.id?.toString() || 'unknown';
+        const dialogName = dialog.name || 'Unknown Chat';
+        const dialogDate = dialog.date ? new Date(dialog.date * 1000) : new Date();
+        
         // Create or update conversation
         const conversationResult = await pool.query(
           `INSERT INTO conversations (account_id, platform_conversation_id, participant_name, participant_id, last_message_at)
@@ -21,7 +25,7 @@ class TelegramMessageSyncService {
              last_message_at = EXCLUDED.last_message_at,
              updated_at = NOW()
            RETURNING id`,
-          [accountId, dialog.id.toString(), dialog.name, dialog.id.toString(), new Date(dialog.date * 1000)]
+          [accountId, dialogId, dialogName, dialogId, dialogDate]
         );
 
         const conversationId = conversationResult.rows[0].id;
