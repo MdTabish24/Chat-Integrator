@@ -203,11 +203,12 @@ const Dashboard: React.FC = () => {
         params: { platform },
       });
       
-      console.log('API Response:', response.data);
-      console.log('Conversations:', response.data.conversations);
-      
       const conversations = response.data.conversations || [];
-      console.log('Parsed conversations:', conversations);
+      console.log('Loaded conversations for', platform, ':', conversations.map(c => ({
+        id: c.id,
+        name: c.participantName || c.participant_name,
+        date: c.lastMessageAt || c.last_message_at
+      })));
       
       setPlatformsData((prev) => {
         const updated = new Map(prev);

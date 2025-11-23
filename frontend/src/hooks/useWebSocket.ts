@@ -147,7 +147,7 @@ export const useWebSocket = (callbacks: WebSocketHookCallbacks = {}) => {
     return () => {
       disconnect();
     };
-  }, [connect, disconnect]);
+  }, []);
 
   return {
     isConnected,
