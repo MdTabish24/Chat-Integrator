@@ -336,32 +336,4 @@ export class TwitterAdapter extends BasePlatformAdapter {
     }, accountId);
   }
 
-  /**
-   * Determine message type from event
-   */
-  private getMessageType(event: TwitterDMEvent): 'text' | 'image' | 'video' | 'file' {
-    if (!event.attachments || event.attachments.length === 0) {
-      return 'text';
-    }
-
-    const attachment = event.attachments[0];
-    if (attachment.type === 'media') {
-      // Would need to check media type from media_key
-      return 'image';
-    }
-
-    return 'file';
-  }
-
-  /**
-   * Get media URL from event
-   */
-  private getMediaUrl(event: TwitterDMEvent): string | undefined {
-    if (!event.attachments || event.attachments.length === 0) {
-      return undefined;
-    }
-
-    const attachment = event.attachments[0];
-    return attachment.media_key || attachment.url;
-  }
 }
