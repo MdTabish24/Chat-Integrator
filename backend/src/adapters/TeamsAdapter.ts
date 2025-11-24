@@ -152,11 +152,22 @@ export class TeamsAdapter extends BasePlatformAdapter {
       
       // Get all chats for the user
       const chatsUrl = `${this.baseUrl}/me/chats`;
-      const chatsResponse = await this.apiClient.get(chatsUrl, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
+      
+      let chatsResponse;
+      try {
+        chatsResponse = await this.apiClient.get(chatsUrl, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+      } catch (error: any) {
+        // Personal Microsoft accounts don't support /me/chats endpoint
+        if (error.response?.status === 403) {
+          console.warn('[teams] Personal Microsoft accounts do not support Teams chat API. Please use a Work/School account.');
+          return []; // Return empty array instead of throwing error
+        }
+        throw error;
+      }
 
       const chats: TeamsChat[] = chatsResponse.data.value || [];
       const allMessages: Message[] = [];
@@ -278,14 +289,24 @@ export class TeamsAdapter extends BasePlatformAdapter {
       
       const url = `${this.baseUrl}/me/chats`;
       
-      const response = await this.apiClient.get(url, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-        params: {
-          $expand: 'members',
-        },
-      });
+      let response;
+      try {
+        response = await this.apiClient.get(url, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+          params: {
+            $expand: 'members',
+          },
+        });
+      } catch (error: any) {
+        // Personal Microsoft accounts don't support /me/chats endpoint
+        if (error.response?.status === 403) {
+          console.warn('[teams] Personal Microsoft accounts do not support Teams chat API. Please use a Work/School account.');
+          return []; // Return empty array instead of throwing error
+        }
+        throw error;
+      }
 
       const teamsChats: TeamsChat[] = response.data.value || [];
       const conversations: Conversation[] = [];
