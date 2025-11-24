@@ -12,18 +12,17 @@ import { RateLimitError, PlatformAPIError } from '../adapters/PlatformAdapter';
  * - Instagram: Supports webhooks via Facebook Graph API
  * - WhatsApp: Supports webhooks via Cloud API
  * - Facebook: Supports webhooks via Graph API
- * - Teams: Supports webhooks via Microsoft Graph subscriptions
  * 
  * Platforms that need polling:
  * - Twitter: Webhook requires premium API access (polling for free tier)
  * - LinkedIn: Limited webhook support, polling recommended
+ * - Teams: Using polling for now (webhook setup requires complex Microsoft Graph subscriptions)
  */
 const WEBHOOK_ENABLED_PLATFORMS: Platform[] = [
   'telegram',
   'instagram',
   'whatsapp',
-  'facebook',
-  'teams'
+  'facebook'
 ];
 
 /**

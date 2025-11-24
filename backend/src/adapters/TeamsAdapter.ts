@@ -109,8 +109,8 @@ export class TeamsAdapter extends BasePlatformAdapter {
     }
 
     try {
-      const clientId = process.env.TEAMS_CLIENT_ID;
-      const clientSecret = process.env.TEAMS_CLIENT_SECRET;
+      const clientId = process.env.MICROSOFT_CLIENT_ID;
+      const clientSecret = process.env.MICROSOFT_CLIENT_SECRET;
 
       if (!clientId || !clientSecret) {
         throw new Error('Microsoft Teams OAuth credentials not configured');
