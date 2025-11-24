@@ -12,9 +12,7 @@ import ErrorDisplay from '../components/ErrorDisplay';
 const platformConfigs: PlatformConfig[] = [
   { id: 'telegram', name: 'Telegram', icon: '📱', color: 'bg-blue-500' },
   { id: 'twitter', name: 'Twitter/X', icon: '🐦', color: 'bg-sky-500' },
-  { id: 'twitter-dm', name: 'Twitter DMs', icon: '💬', color: 'bg-sky-600', isWebView: true, webViewUrl: 'https://twitter.com/messages' },
   { id: 'linkedin', name: 'LinkedIn', icon: '💼', color: 'bg-blue-700' },
-  { id: 'linkedin-dm', name: 'LinkedIn DMs', icon: '💼', color: 'bg-blue-800', isWebView: true, webViewUrl: 'https://www.linkedin.com/messaging/' },
   { id: 'instagram', name: 'Instagram', icon: '📷', color: 'bg-pink-500' },
   { id: 'whatsapp', name: 'WhatsApp', icon: '💬', color: 'bg-green-500' },
   { id: 'facebook', name: 'Facebook', icon: '👥', color: 'bg-blue-600' },
@@ -66,13 +64,7 @@ const Accounts: React.FC = () => {
     }
   };
 
-  const handleConnect = async (platform: Platform, webViewUrl?: string) => {
-    // Handle webview platforms (Twitter DMs, LinkedIn DMs)
-    if (webViewUrl) {
-      window.open(webViewUrl, '_blank', 'width=800,height=600,menubar=no,toolbar=no,location=no');
-      return;
-    }
-
+  const handleConnect = async (platform: Platform) => {
     // Prevent connecting if already connected
     if (isConnected(platform)) {
       showToastError(`${platform} is already connected`);
@@ -179,9 +171,9 @@ const Accounts: React.FC = () => {
                   <PlatformCard
                     key={platform.id}
                     platform={platform}
-                    isConnected={platform.isWebView ? false : isConnected(platform.id)}
+                    isConnected={isConnected(platform.id)}
                     isConnecting={connectingPlatform === platform.id}
-                    onConnect={() => handleConnect(platform.id, platform.webViewUrl)}
+                    onConnect={() => handleConnect(platform.id)}
                   />
                 ))}
               </div>

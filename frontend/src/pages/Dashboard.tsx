@@ -140,6 +140,39 @@ const Dashboard: React.FC = () => {
           });
         }
       });
+
+      // Add webview platforms (Twitter DMs, LinkedIn DMs) if base platforms are connected
+      const hasTwitter = accounts.some((acc: ConnectedAccount) => acc.platform === 'twitter');
+      const hasLinkedIn = accounts.some((acc: ConnectedAccount) => acc.platform === 'linkedin');
+
+      if (hasTwitter) {
+        const config = PLATFORM_CONFIGS['twitter-dm'];
+        newPlatformsData.set('twitter-dm', {
+          platform: 'twitter-dm',
+          name: config.name,
+          icon: config.icon,
+          color: config.color,
+          unreadCount: 0,
+          conversations: [],
+          isExpanded: false,
+          isLoading: false,
+        });
+      }
+
+      if (hasLinkedIn) {
+        const config = PLATFORM_CONFIGS['linkedin-dm'];
+        newPlatformsData.set('linkedin-dm', {
+          platform: 'linkedin-dm',
+          name: config.name,
+          icon: config.icon,
+          color: config.color,
+          unreadCount: 0,
+          conversations: [],
+          isExpanded: false,
+          isLoading: false,
+        });
+      }
+
       setPlatformsData(newPlatformsData);
 
       // Load unread counts

@@ -107,10 +107,20 @@ const DashboardPlatformCard: React.FC<DashboardPlatformCardProps> = ({
         </div>
       </div>
 
-      {/* Expanded Content - Conversation List */}
+      {/* Expanded Content - Conversation List or WebView */}
       {isExpanded && (
         <div className="p-4">
-          {isLoading ? (
+          {/* WebView for Twitter DMs and LinkedIn DMs */}
+          {(platform === 'twitter-dm' || platform === 'linkedin-dm') ? (
+            <div className="w-full" style={{ height: '600px' }}>
+              <iframe
+                src={platform === 'twitter-dm' ? 'https://twitter.com/messages' : 'https://www.linkedin.com/messaging/'}
+                className="w-full h-full border-0 rounded-lg"
+                title={`${platformName} Messages`}
+                sandbox="allow-same-origin allow-scripts allow-forms allow-popups"
+              />
+            </div>
+          ) : isLoading ? (
             <div className="py-8">
               <LoadingSpinner size="lg" text="Loading conversations..." />
             </div>

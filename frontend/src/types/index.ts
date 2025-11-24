@@ -61,6 +61,4 @@ export interface PlatformConfig {
   name: string;
   icon: string;
   color: string;
-  isWebView?: boolean;
-  webViewUrl?: string;
 }
