@@ -255,42 +255,36 @@ export class TwitterAdapter extends BasePlatformAdapter {
   }
 
   /**
-   * Get conversations
+   * Get conversations (using Mentions instead of DMs for free tier)
    */
   async getConversations(accountId: string): Promise<Conversation[]> {
     return this.executeWithRetry(async () => {
-      console.log(`[twitter] Fetching conversations for account ${accountId}`);
+      console.log(`[twitter] Fetching mentions for account ${accountId}`);
       const token = await this.getAccessToken(accountId);
       const account = await getConnectedAccountById(accountId);
       
       console.log(`[twitter] Account details: ${account?.platform_username} (${account?.platform_user_id})`);
       
-      const url = `${this.baseUrl}/dm_conversations/with/:participant_id/dm_events`;
+      // Use mentions endpoint instead of DMs (free tier compatible)
+      const mentionsUrl = `${this.baseUrl}/users/${account?.platform_user_id}/mentions`;
+      console.log(`[twitter] Calling API: ${mentionsUrl}`);
       
-      // Twitter API v2 requires fetching conversations by participant
-      // For a complete list, we'd need to track participants separately
-      // This is a simplified implementation that gets recent DM events
-      // and extracts unique conversations
-      
-      const eventsUrl = `${this.baseUrl}/dm_events`;
-      console.log(`[twitter] Calling API: ${eventsUrl}`);
-      
-      const response = await this.apiClient.get(eventsUrl, {
+      const response = await this.apiClient.get(mentionsUrl, {
         headers: {
           Authorization: `Bearer ${token}`,
         },
         params: {
-          'dm_event.fields': 'id,text,event_type,created_at,sender_id,participant_ids,conversation_id',
+          'tweet.fields': 'id,text,created_at,author_id,conversation_id',
           'user.fields': 'id,name,username,profile_image_url',
-          expansions: 'sender_id,participant_ids',
+          expansions: 'author_id',
           max_results: 100,
         },
       });
       
       console.log(`[twitter] API Response status: ${response.status}`);
 
-      const events: TwitterDMEvent[] = response.data.data || [];
-      console.log(`[twitter] Found ${events.length} DM events`);
+      const mentions = response.data.data || [];
+      console.log(`[twitter] Found ${mentions.length} mentions`);
       
       const users: Record<string, TwitterUser> = {};
 
@@ -303,35 +297,29 @@ export class TwitterAdapter extends BasePlatformAdapter {
 
       const conversationsMap = new Map<string, Conversation>();
 
-      for (const event of events) {
-        const conversationId = event.conversation_id;
+      for (const mention of mentions) {
+        const conversationId = mention.conversation_id || mention.id;
+        const authorId = mention.author_id;
         
         if (!conversationsMap.has(conversationId)) {
-          // Find the other participant (not the account owner)
-          const otherParticipantId = event.participant_ids.find(
-            (id) => id !== account!.platform_user_id
-          );
+          const author = users[authorId];
           
-          if (otherParticipantId) {
-            const participant = users[otherParticipantId];
-            
-            conversationsMap.set(conversationId, {
-              id: '',
-              accountId,
-              platformConversationId: conversationId,
-              participantName: participant ? `@${participant.username}` : otherParticipantId,
-              participantId: otherParticipantId,
-              participantAvatarUrl: participant?.profile_image_url,
-              lastMessageAt: new Date(event.created_at),
-              unreadCount: 0,
-              createdAt: new Date(),
-              updatedAt: new Date(),
-            });
-          }
+          conversationsMap.set(conversationId, {
+            id: '',
+            accountId,
+            platformConversationId: conversationId,
+            participantName: author ? `@${author.username}` : authorId,
+            participantId: authorId,
+            participantAvatarUrl: author?.profile_image_url,
+            lastMessageAt: new Date(mention.created_at),
+            unreadCount: 0,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          });
         } else {
           // Update last message time if newer
           const existing = conversationsMap.get(conversationId)!;
-          const messageDate = new Date(event.created_at);
+          const messageDate = new Date(mention.created_at);
           if (messageDate > existing.lastMessageAt) {
             existing.lastMessageAt = messageDate;
           }
