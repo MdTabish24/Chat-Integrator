@@ -28,7 +28,14 @@ const PlatformCard: React.FC<PlatformCardProps> = ({
         </h3>
 
         {/* Connection Status */}
-        {isConnected ? (
+        {platform.isWebView ? (
+          <button
+            onClick={onConnect}
+            className="w-full py-2 px-4 rounded font-medium transition-colors bg-blue-600 text-white hover:bg-blue-700"
+          >
+            Open Chat
+          </button>
+        ) : isConnected ? (
           <div className="flex items-center text-green-600 mb-4">
             <svg
               className="w-5 h-5 mr-1"

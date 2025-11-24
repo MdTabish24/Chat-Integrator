@@ -1,4 +1,4 @@
-export type Platform = 'telegram' | 'twitter' | 'linkedin' | 'instagram' | 'whatsapp' | 'facebook' | 'teams';
+export type Platform = 'telegram' | 'twitter' | 'twitter-dm' | 'linkedin' | 'linkedin-dm' | 'instagram' | 'whatsapp' | 'facebook' | 'teams';
 
 export interface User {
   id: string;
@@ -61,4 +61,6 @@ export interface PlatformConfig {
   name: string;
   icon: string;
   color: string;
+  isWebView?: boolean;
+  webViewUrl?: string;
 }

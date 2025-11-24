@@ -26,7 +26,9 @@ interface PlatformData {
 const PLATFORM_CONFIGS: Record<Platform, { name: string; icon: string; color: string }> = {
   telegram: { name: 'Telegram', icon: '✈️', color: 'bg-blue-500' },
   twitter: { name: 'Twitter/X', icon: '🐦', color: 'bg-sky-500' },
+  'twitter-dm': { name: 'Twitter DMs', icon: '💬', color: 'bg-sky-600' },
   linkedin: { name: 'LinkedIn', icon: '💼', color: 'bg-blue-700' },
+  'linkedin-dm': { name: 'LinkedIn DMs', icon: '💼', color: 'bg-blue-800' },
   instagram: { name: 'Instagram', icon: '📷', color: 'bg-pink-500' },
   whatsapp: { name: 'WhatsApp', icon: '💬', color: 'bg-green-500' },
   facebook: { name: 'Facebook', icon: '👥', color: 'bg-blue-600' },
