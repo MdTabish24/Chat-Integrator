@@ -16,7 +16,7 @@ export class MicrosoftTeamsOAuthService extends OAuthBaseService {
     const config: OAuthConfig = {
       clientId: process.env.MICROSOFT_CLIENT_ID || '',
       clientSecret: process.env.MICROSOFT_CLIENT_SECRET || '',
-      redirectUri: `${process.env.WEBHOOK_BASE_URL}/api/auth/callback/teams`,
+      redirectUri: `${process.env.WEBHOOK_BASE_URL}/api/oauth/callback/teams`,
       authorizationUrl: `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/authorize`,
       tokenUrl: `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`,
       scopes: [
