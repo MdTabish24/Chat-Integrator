@@ -227,11 +227,14 @@ export class WebhookController {
     try {
       // Handle verification challenge
       if (req.query['hub.mode'] === 'subscribe' && req.query['hub.verify_token']) {
-        const verifyToken = process.env.INSTAGRAM_VERIFY_TOKEN || '';
+        const verifyToken = 'instagram_verify_token_123'; // Hardcoded for now
+        console.log('[instagram-webhook] Verification request:', req.query);
         if (req.query['hub.verify_token'] === verifyToken) {
+          console.log('[instagram-webhook] Verification successful');
           res.status(200).send(req.query['hub.challenge']);
           return;
         } else {
+          console.log('[instagram-webhook] Verification failed - token mismatch');
           res.status(403).json({ error: 'Invalid verify token' });
           return;
         }
