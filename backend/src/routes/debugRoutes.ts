@@ -48,4 +48,36 @@ router.get('/polling/stats', authenticateToken, async (req: Request, res: Respon
   }
 });
 
+/**
+ * Check Instagram OAuth configuration
+ * GET /api/debug/instagram-config
+ */
+router.get('/instagram-config', async (req: Request, res: Response) => {
+  try {
+    const instagramAppId = process.env.INSTAGRAM_APP_ID;
+    const instagramAppSecret = process.env.INSTAGRAM_APP_SECRET;
+    const webhookBaseUrl = process.env.WEBHOOK_BASE_URL;
+    
+    res.json({
+      success: true,
+      config: {
+        appIdConfigured: !!instagramAppId,
+        appIdLength: instagramAppId?.length || 0,
+        appIdFirstChars: instagramAppId?.substring(0, 4) || 'NOT SET',
+        appSecretConfigured: !!instagramAppSecret,
+        appSecretLength: instagramAppSecret?.length || 0,
+        webhookBaseUrl: webhookBaseUrl || 'NOT SET',
+        redirectUri: `${webhookBaseUrl}/api/auth/callback/instagram`,
+        authUrl: `https://www.facebook.com/v18.0/dialog/oauth?client_id=${instagramAppId || 'MISSING'}&redirect_uri=${webhookBaseUrl}/api/auth/callback/instagram`
+      }
+    });
+  } catch (error: any) {
+    console.error('Error checking Instagram config:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
 export default router;
