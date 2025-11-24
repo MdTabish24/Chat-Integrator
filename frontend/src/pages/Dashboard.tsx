@@ -43,6 +43,7 @@ const Dashboard: React.FC = () => {
   const [totalUnread, setTotalUnread] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
+  const [selectedPlatform, setSelectedPlatform] = useState<Platform | null>(null);
 
   // WebSocket callbacks
   const handleUnreadCountUpdate = useCallback((data: any) => {
@@ -268,13 +269,15 @@ const Dashboard: React.FC = () => {
   };
 
   // Handle conversation click
-  const handleConversationClick = (conversationId: string) => {
+  const handleConversationClick = (conversationId: string, platform: Platform) => {
     setSelectedConversationId(conversationId);
+    setSelectedPlatform(platform);
   };
 
   // Handle message thread close
   const handleCloseMessageThread = () => {
     setSelectedConversationId(null);
+    setSelectedPlatform(null);
   };
 
   // Handle message sent
@@ -413,6 +416,7 @@ const Dashboard: React.FC = () => {
       {selectedConversationId && (
         <MessageThread
           conversationId={selectedConversationId}
+          platform={selectedPlatform || undefined}
           onClose={handleCloseMessageThread}
           onMessageSent={handleMessageSent}
         />

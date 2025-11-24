@@ -11,12 +11,14 @@ import { useToast } from '../contexts/ToastContext';
 
 interface MessageThreadProps {
   conversationId: string;
+  platform?: string;
   onClose: () => void;
   onMessageSent?: () => void;
 }
 
 const MessageThread: React.FC<MessageThreadProps> = ({
   conversationId,
+  platform,
   onClose,
   onMessageSent,
 }) => {
@@ -497,11 +499,17 @@ const MessageThread: React.FC<MessageThreadProps> = ({
         )}
 
         {/* Message Input */}
-        <MessageInput
-          onSendMessage={handleSendMessage}
-          disabled={isLoading || !!error}
-          placeholder="Type a message..."
-        />
+        {platform !== 'twitter' ? (
+          <MessageInput
+            onSendMessage={handleSendMessage}
+            disabled={isLoading || !!error}
+            placeholder="Type a message..."
+          />
+        ) : (
+          <div className="p-4 bg-gray-50 border-t border-gray-200 text-center text-sm text-gray-500">
+            Twitter mentions are read-only. Reply directly on Twitter.
+          </div>
+        )}
       </div>
     </div>
   );

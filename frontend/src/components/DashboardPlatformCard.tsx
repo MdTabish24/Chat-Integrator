@@ -15,10 +15,11 @@ interface DashboardPlatformCardProps {
   isLoading?: boolean;
   error?: string;
   onExpand: () => void;
-  onConversationClick: (conversationId: string) => void;
+  onConversationClick: (conversationId: string, platform: Platform) => void;
 }
 
 const DashboardPlatformCard: React.FC<DashboardPlatformCardProps> = ({
+  platform,
   platformName,
   platformIcon,
   platformColor,
@@ -150,7 +151,7 @@ const DashboardPlatformCard: React.FC<DashboardPlatformCardProps> = ({
                   key={conversation.id}
                   onClick={(e) => {
                     e.stopPropagation();
-                    onConversationClick(conversation.id);
+                    onConversationClick(conversation.id, platform);
                   }}
                   className={`p-4 rounded-lg border cursor-pointer transition-colors ${
                     conversation.unreadCount > 0
