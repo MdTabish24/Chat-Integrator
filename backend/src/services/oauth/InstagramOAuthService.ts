@@ -16,7 +16,8 @@ export class InstagramOAuthService extends OAuthBaseService {
       authorizationUrl: 'https://www.facebook.com/v18.0/dialog/oauth',
       tokenUrl: 'https://graph.facebook.com/v18.0/oauth/access_token',
       scopes: [
-        'public_profile',
+        'instagram_basic',
+        'instagram_manage_messages',
         'pages_show_list',
       ],
     };
