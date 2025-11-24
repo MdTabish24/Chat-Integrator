@@ -190,7 +190,7 @@ export class TeamsAdapter extends BasePlatformAdapter {
 
             allMessages.push({
               id: '',
-              conversationId: '',
+              conversationId: chat.id, // Use Teams chat ID
               platformMessageId: msg.id,
               senderId,
               senderName: msg.from.user?.displayName || senderId,
