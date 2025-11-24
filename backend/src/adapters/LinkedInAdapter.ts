@@ -68,14 +68,95 @@ export class LinkedInAdapter extends BasePlatformAdapter {
   }
 
   /**
-   * Fetch messages from LinkedIn (placeholder - requires Business Page)
-   * Note: LinkedIn messaging only works for Business Pages, not personal accounts
+   * Fetch messages from LinkedIn Business Pages
+   * Note: Works ONLY for Business Pages where user is admin
    */
   async fetchMessages(accountId: string, since?: Date): Promise<Message[]> {
-    console.log(`[linkedin] LinkedIn messaging requires Business Page access`);
-    console.log(`[linkedin] Personal account messaging is not supported by LinkedIn API`);
-    // Return empty array - LinkedIn messaging not available for personal accounts
-    return [];
+    return this.executeWithRetry(async () => {
+      const token = await this.getAccessToken(accountId);
+      const account = await getConnectedAccountById(accountId);
+      
+      try {
+        // Step 1: Get organizations (Business Pages) user manages
+        const orgsResponse = await this.apiClient.get(
+          `${this.baseUrl}/organizationalEntityAcls?q=roleAssignee&role=ADMINISTRATOR&projection=(elements*(organizationalTarget~(localizedName,id)))`,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+              'LinkedIn-Version': '202311',
+            },
+          }
+        );
+
+        const organizations = orgsResponse.data.elements || [];
+        
+        if (organizations.length === 0) {
+          console.log('[linkedin] No Business Pages found. User must be admin of a Company Page.');
+          return [];
+        }
+
+        console.log(`[linkedin] Found ${organizations.length} Business Page(s)`);
+        
+        const allMessages: Message[] = [];
+
+        // Step 2: Fetch messages for each Business Page
+        for (const org of organizations) {
+          const orgId = org['organizationalTarget~']?.id;
+          const orgName = org['organizationalTarget~']?.localizedName;
+          
+          if (!orgId) continue;
+
+          console.log(`[linkedin] Fetching messages for page: ${orgName}`);
+
+          // Get conversations for this organization
+          const conversationsUrl = `${this.baseUrl}/socialActions?q=actor&actor=urn:li:organization:${orgId}&count=50`;
+          
+          const conversationsResponse = await this.apiClient.get(conversationsUrl, {
+            headers: {
+              Authorization: `Bearer ${token}`,
+              'LinkedIn-Version': '202311',
+            },
+          });
+
+          const conversations = conversationsResponse.data.elements || [];
+          
+          // Process each conversation
+          for (const conv of conversations) {
+            // Extract message data
+            if (conv.commentary) {
+              const message: Message = {
+                id: '',
+                conversationId: orgId,
+                platformMessageId: conv.id || conv.$URN,
+                senderId: conv.actor || 'unknown',
+                senderName: orgName || 'LinkedIn User',
+                content: conv.commentary,
+                messageType: 'text',
+                isOutgoing: false,
+                isRead: false,
+                sentAt: new Date(conv.created?.time || Date.now()),
+                createdAt: new Date(),
+              };
+
+              // Filter by date if provided
+              if (!since || message.sentAt >= since) {
+                allMessages.push(message);
+              }
+            }
+          }
+        }
+
+        console.log(`[linkedin] Fetched ${allMessages.length} messages from Business Pages`);
+        return allMessages;
+        
+      } catch (error: any) {
+        if (error.response?.status === 403) {
+          console.log('[linkedin] Access denied. Make sure you are admin of a Business Page and have correct permissions.');
+          return [];
+        }
+        throw error;
+      }
+    }, accountId);
   }
 
   /**
