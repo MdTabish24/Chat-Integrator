@@ -5,23 +5,26 @@ import Bull from 'bull';
  */
 
 // Get Redis connection options optimized for Upstash
-const redisOptions = {
-  host: process.env.REDIS_HOST || 'localhost',
-  port: parseInt(process.env.REDIS_PORT || '6379'),
-  password: process.env.REDIS_PASSWORD,
-  maxRetriesPerRequest: 3,
-  enableReadyCheck: false,
-  connectTimeout: 10000, // 10 seconds
-  keepAlive: 30000, // Keep connection alive
-  family: 4, // Force IPv4
-  lazyConnect: false,
-  retryStrategy: (times: number) => {
-    if (times > 3) {
-      return null;
-    }
-    return Math.min(times * 1000, 3000);
-  }
-};
+// Support both REDIS_URL and individual REDIS_HOST/PORT/PASSWORD
+const redisOptions = process.env.REDIS_URL 
+  ? process.env.REDIS_URL 
+  : {
+      host: process.env.REDIS_HOST || 'localhost',
+      port: parseInt(process.env.REDIS_PORT || '6379'),
+      password: process.env.REDIS_PASSWORD,
+      maxRetriesPerRequest: 3,
+      enableReadyCheck: false,
+      connectTimeout: 10000,
+      keepAlive: 30000,
+      family: 4,
+      lazyConnect: false,
+      retryStrategy: (times: number) => {
+        if (times > 3) {
+          return null;
+        }
+        return Math.min(times * 1000, 3000);
+      }
+    };
 
 /**
  * Queue for retrying failed webhook processing
