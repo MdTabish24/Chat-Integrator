@@ -117,10 +117,13 @@ const Dashboard: React.FC = () => {
   // Load connected accounts
   const loadConnectedAccounts = useCallback(async () => {
     try {
+      console.log('🔍 [DEBUG] Loading connected accounts...');
       setIsLoadingAccounts(true);
       setError(null);
       const response = await apiClient.get('/api/oauth/accounts');
+      console.log('✅ [DEBUG] API Response:', response.data);
       const accounts = response.data.accounts || [];
+      console.log('📊 [DEBUG] Connected accounts:', accounts);
       setConnectedAccounts(accounts);
 
       // Initialize platform data for connected accounts
@@ -178,7 +181,9 @@ const Dashboard: React.FC = () => {
       // Load unread counts
       await loadUnreadCounts();
     } catch (err: any) {
-      console.error('Error loading connected accounts:', err);
+      console.error('❌ [DEBUG] Error loading connected accounts:', err);
+      console.error('❌ [DEBUG] Error response:', err.response?.data);
+      console.error('❌ [DEBUG] Error status:', err.response?.status);
       const errorMessage = err.response?.data?.error || 'Failed to load connected accounts';
       setError(errorMessage);
       showError(errorMessage);
@@ -213,6 +218,7 @@ const Dashboard: React.FC = () => {
 
   // Load conversations for a specific platform
   const loadConversationsForPlatform = async (platform: Platform) => {
+    console.log(`🔍 [DEBUG] Loading conversations for platform: ${platform}`);
     setPlatformsData((prev) => {
       const updated = new Map(prev);
       const platformData = updated.get(platform);
@@ -222,7 +228,7 @@ const Dashboard: React.FC = () => {
       return updated;
     });
 
-    try {
+    try{
       // For Telegram, trigger sync first
       if (platform === 'telegram') {
         const telegramAccount = connectedAccounts.find(acc => acc.platform === 'telegram');
@@ -238,6 +244,7 @@ const Dashboard: React.FC = () => {
       const response = await apiClient.get('/api/conversations', {
         params: { platform },
       });
+      console.log(`✅ [DEBUG] Conversations response for ${platform}:`, response.data);
       
       const conversations = (response.data.conversations || []).map((c: any) => ({
         ...c,
@@ -266,7 +273,8 @@ const Dashboard: React.FC = () => {
         return updated;
       });
     } catch (err: any) {
-      console.error(`Error loading conversations for ${platform}:`, err);
+      console.error(`❌ [DEBUG] Error loading conversations for ${platform}:`, err);
+      console.error(`❌ [DEBUG] Error response:`, err.response?.data);
       setPlatformsData((prev) => {
         const updated = new Map(prev);
         const platformData = updated.get(platform);

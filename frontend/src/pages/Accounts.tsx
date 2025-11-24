@@ -45,17 +45,23 @@ const Accounts: React.FC = () => {
 
   const fetchConnectedAccounts = async () => {
     try {
+      console.log('🔍 [ACCOUNTS DEBUG] Fetching connected accounts...');
       setLoading(true);
       setError(null);
       const response = await apiClient.get('/api/oauth/accounts');
+      console.log('✅ [ACCOUNTS DEBUG] API Response:', response.data);
       const accounts = (response.data.accounts || []).map((acc: any) => ({
         ...acc,
         isActive: acc.is_active !== undefined ? acc.is_active : acc.isActive,
         platformUsername: acc.platform_username || acc.platformUsername,
         platformUserId: acc.platform_user_id || acc.platformUserId,
       }));
+      console.log('📊 [ACCOUNTS DEBUG] Processed accounts:', accounts);
       setConnectedAccounts(accounts);
     } catch (err: any) {
+      console.error('❌ [ACCOUNTS DEBUG] Error:', err);
+      console.error('❌ [ACCOUNTS DEBUG] Error response:', err.response?.data);
+      console.error('❌ [ACCOUNTS DEBUG] Error status:', err.response?.status);
       const errorMessage = err.response?.data?.error?.message || 'Failed to fetch connected accounts';
       setError(errorMessage);
       showToastError(errorMessage);
@@ -65,8 +71,10 @@ const Accounts: React.FC = () => {
   };
 
   const handleConnect = async (platform: Platform) => {
+    console.log(`🔗 [ACCOUNTS DEBUG] Attempting to connect: ${platform}`);
     // Prevent connecting if already connected
     if (isConnected(platform)) {
+      console.warn(`⚠️ [ACCOUNTS DEBUG] ${platform} is already connected`);
       showToastError(`${platform} is already connected`);
       return;
     }
@@ -82,12 +90,18 @@ const Accounts: React.FC = () => {
       }
       
       // Initiate OAuth flow for other platforms
+      console.log(`🔍 [ACCOUNTS DEBUG] Initiating OAuth for ${platform}`);
       const response = await apiClient.get(`/api/oauth/connect/${platform}`);
+      console.log(`✅ [ACCOUNTS DEBUG] OAuth response:`, response.data);
       const { authorizationUrl } = response.data;
+      console.log(`🔗 [ACCOUNTS DEBUG] Redirecting to: ${authorizationUrl}`);
       
       // Redirect to OAuth provider
       window.location.href = authorizationUrl;
     } catch (err: any) {
+      console.error(`❌ [ACCOUNTS DEBUG] Connect error for ${platform}:`, err);
+      console.error(`❌ [ACCOUNTS DEBUG] Error response:`, err.response?.data);
+      console.error(`❌ [ACCOUNTS DEBUG] Error status:`, err.response?.status);
       const errorMessage = err.response?.data?.error?.message || `Failed to connect ${platform}`;
       setError(errorMessage);
       showToastError(errorMessage);
