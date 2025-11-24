@@ -15,7 +15,7 @@ export class LinkedInOAuthService extends OAuthBaseService {
       redirectUri: `${process.env.WEBHOOK_BASE_URL}/api/oauth/callback/linkedin`,
       authorizationUrl: 'https://www.linkedin.com/oauth/v2/authorization',
       tokenUrl: 'https://www.linkedin.com/oauth/v2/accessToken',
-      scopes: ['r_liteprofile', 'r_emailaddress', 'w_member_social'],
+      scopes: ['r_liteprofile', 'w_member_social'],
     };
 
     super('linkedin', config);
