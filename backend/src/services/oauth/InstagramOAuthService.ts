@@ -129,59 +129,26 @@ export class InstagramOAuthService extends OAuthBaseService {
    */
   async getUserInfo(accessToken: string): Promise<{ userId: string; username: string }> {
     try {
-      // First, get Facebook user's pages
-      const pagesResponse = await this.httpClient.get(
-        'https://graph.facebook.com/v18.0/me/accounts',
+      // Get Facebook user info (works with public_profile)
+      const userResponse = await this.httpClient.get(
+        'https://graph.facebook.com/v18.0/me',
         {
           params: {
+            fields: 'id,name',
             access_token: accessToken,
           },
         }
       );
 
-      if (!pagesResponse.data.data || pagesResponse.data.data.length === 0) {
-        throw new Error('No Facebook pages found. Instagram Business requires a Facebook page.');
-      }
-
-      // Get the first page (or let user select in a real implementation)
-      const page = pagesResponse.data.data[0];
-      const pageAccessToken = page.access_token;
-
-      // Get Instagram Business account connected to the page
-      const igAccountResponse = await this.httpClient.get(
-        `https://graph.facebook.com/v18.0/${page.id}`,
-        {
-          params: {
-            fields: 'instagram_business_account',
-            access_token: pageAccessToken,
-          },
-        }
-      );
-
-      const igAccountId = igAccountResponse.data.instagram_business_account?.id;
-
-      if (!igAccountId) {
-        throw new Error('No Instagram Business account connected to this Facebook page.');
-      }
-
-      // Get Instagram account details
-      const igDetailsResponse = await this.httpClient.get(
-        `https://graph.facebook.com/v18.0/${igAccountId}`,
-        {
-          params: {
-            fields: 'id,username,name',
-            access_token: pageAccessToken,
-          },
-        }
-      );
-
+      // For Development mode, just return Facebook user info
+      // In production with proper permissions, fetch Instagram Business account
       return {
-        userId: igDetailsResponse.data.id,
-        username: igDetailsResponse.data.username || igDetailsResponse.data.name || 'Instagram User',
+        userId: userResponse.data.id,
+        username: userResponse.data.name || 'Facebook User',
       };
     } catch (error: any) {
       console.error('[instagram] Failed to get user info:', error.response?.data || error.message);
-      throw new Error('Failed to retrieve Instagram Business account information');
+      throw new Error('Failed to retrieve user information');
     }
   }
 
