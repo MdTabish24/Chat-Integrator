@@ -68,25 +68,14 @@ export class LinkedInAdapter extends BasePlatformAdapter {
   }
 
   /**
-   * Fetch messages from LinkedIn conversations
+   * Fetch messages from LinkedIn (placeholder - requires Business Page)
+   * Note: LinkedIn messaging only works for Business Pages, not personal accounts
    */
   async fetchMessages(accountId: string, since?: Date): Promise<Message[]> {
-    return this.executeWithRetry(async () => {
-      const token = await this.getAccessToken(accountId);
-      const account = await getConnectedAccountById(accountId);
-      
-      // First, get conversations
-      const conversationsUrl = `${this.baseUrl}/conversations`;
-      const conversationsResponse = await this.apiClient.get(conversationsUrl, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'X-Restli-Protocol-Version': '2.0.0',
-        },
-        params: {
-          q: 'participant',
-          participant: `urn:li:person:${account!.platform_user_id}`,
-        },
-      });
+    console.log(`[linkedin] LinkedIn messaging requires Business Page access`);
+    console.log(`[linkedin] Personal account messaging is not supported by LinkedIn API`);
+    // Return empty array - LinkedIn messaging not available for personal accounts
+    return [];
 
       const conversations: LinkedInConversation[] = conversationsResponse.data.elements || [];
       const allMessages: Message[] = [];
@@ -142,82 +131,32 @@ export class LinkedInAdapter extends BasePlatformAdapter {
   }
 
   /**
-   * Send a message to a LinkedIn conversation
+   * Send a message (not supported - requires Business Page)
    */
   async sendMessage(
     accountId: string,
     conversationId: string,
     content: string
   ): Promise<Message> {
-    return this.executeWithRetry(async () => {
-      const token = await this.getAccessToken(accountId);
-      const account = await getConnectedAccountById(accountId);
-      
-      const url = `${this.baseUrl}/conversationMessages`;
-
-      const response = await this.apiClient.post(
-        url,
-        {
-          conversation: `urn:li:conversation:${conversationId}`,
-          body: content,
-          from: `urn:li:person:${account!.platform_user_id}`,
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json',
-            'X-Restli-Protocol-Version': '2.0.0',
-          },
-        }
-      );
-
-      const messageUrn = response.headers['x-restli-id'] || response.data.id;
-
-      return {
-        id: '',
-        conversationId: '',
-        platformMessageId: this.extractIdFromUrn(messageUrn),
-        senderId: account!.platform_user_id,
-        senderName: account!.platform_username || account!.platform_user_id,
-        content,
-        messageType: 'text',
-        isOutgoing: true,
-        isRead: false,
-        sentAt: new Date(),
-        deliveredAt: new Date(),
-        createdAt: new Date(),
-      };
-    }, accountId);
+    throw new Error('LinkedIn messaging requires Business Page access. Personal account messaging is not supported.');
   }
 
   /**
-   * Mark message as read (not directly supported by LinkedIn API)
+   * Mark message as read (not supported)
    */
   async markAsRead(accountId: string, messageId: string): Promise<void> {
-    // LinkedIn Messaging API doesn't have a direct endpoint to mark messages as read
-    // This is a no-op
+    console.log(`[linkedin] markAsRead not supported for personal accounts`);
   }
 
   /**
-   * Get all conversations
+   * Get all conversations (placeholder - requires Business Page)
+   * Note: LinkedIn messaging only works for Business Pages
    */
   async getConversations(accountId: string): Promise<Conversation[]> {
-    return this.executeWithRetry(async () => {
-      const token = await this.getAccessToken(accountId);
-      const account = await getConnectedAccountById(accountId);
-      
-      const url = `${this.baseUrl}/conversations`;
-      
-      const response = await this.apiClient.get(url, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'X-Restli-Protocol-Version': '2.0.0',
-        },
-        params: {
-          q: 'participant',
-          participant: `urn:li:person:${account!.platform_user_id}`,
-        },
-      });
+    console.log(`[linkedin] LinkedIn messaging requires Business Page access`);
+    console.log(`[linkedin] Personal account messaging is not supported by LinkedIn API`);
+    // Return empty array - LinkedIn messaging not available for personal accounts
+    return [];
 
       const linkedInConversations: LinkedInConversation[] = response.data.elements || [];
       const conversations: Conversation[] = [];

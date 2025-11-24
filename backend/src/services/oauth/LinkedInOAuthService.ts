@@ -15,7 +15,7 @@ export class LinkedInOAuthService extends OAuthBaseService {
       redirectUri: `${process.env.WEBHOOK_BASE_URL}/api/oauth/callback/linkedin`,
       authorizationUrl: 'https://www.linkedin.com/oauth/v2/authorization',
       tokenUrl: 'https://www.linkedin.com/oauth/v2/accessToken',
-      scopes: ['profile', 'openid', 'w_member_social'],
+      scopes: ['profile', 'openid', 'w_organization_social', 'r_organization_social'],
     };
 
     super('linkedin', config);
@@ -86,27 +86,25 @@ export class LinkedInOAuthService extends OAuthBaseService {
   }
 
   /**
-   * Get LinkedIn user information
+   * Get LinkedIn user information using OpenID Connect
    * @param accessToken - Access token
    * @returns User ID and username
    */
   async getUserInfo(accessToken: string): Promise<{ userId: string; username: string }> {
     try {
-      // Get user profile
-      const profileResponse = await this.httpClient.get('https://api.linkedin.com/v2/me', {
+      // Use OpenID Connect userinfo endpoint
+      const profileResponse = await this.httpClient.get('https://api.linkedin.com/v2/userinfo', {
         headers: {
           Authorization: `Bearer ${accessToken}`,
         },
       });
 
-      const userId = profileResponse.data.id;
-      const firstName = profileResponse.data.localizedFirstName || '';
-      const lastName = profileResponse.data.localizedLastName || '';
-      const username = `${firstName} ${lastName}`.trim() || 'LinkedIn User';
+      const userId = profileResponse.data.sub; // OpenID Connect subject identifier
+      const name = profileResponse.data.name || profileResponse.data.given_name || 'LinkedIn User';
 
       return {
         userId,
-        username,
+        username: name,
       };
     } catch (error: any) {
       console.error('[linkedin] Failed to get user info:', error.response?.data || error.message);
