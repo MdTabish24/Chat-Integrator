@@ -3,15 +3,12 @@ import { BasePlatformAdapter } from './BasePlatformAdapter';
 import { Message, Conversation } from '../types';
 import { getConnectedAccountById, updateAccountTokens } from '../db/queryHelpers';
 
-interface TwitterDMEvent {
+interface TwitterMention {
   id: string;
   text: string;
-  event_type: string;
   created_at: string;
-  sender_id: string;
-  participant_ids: string[];
+  author_id: string;
   conversation_id: string;
-  attachments?: TwitterAttachment[];
 }
 
 interface TwitterAttachment {
@@ -135,18 +132,19 @@ export class TwitterAdapter extends BasePlatformAdapter {
   }
 
   /**
-   * Fetch direct messages
+   * Fetch mentions (free tier compatible)
    */
   async fetchMessages(accountId: string, since?: Date): Promise<Message[]> {
     return this.executeWithRetry(async () => {
+      console.log(`[twitter] Fetching mentions for account ${accountId}`);
       const token = await this.getAccessToken(accountId);
       const account = await getConnectedAccountById(accountId);
       
-      const url = `${this.baseUrl}/dm_events`;
+      const url = `${this.baseUrl}/users/${account?.platform_user_id}/mentions`;
       const params: any = {
-        'dm_event.fields': 'id,text,event_type,created_at,sender_id,participant_ids,attachments',
+        'tweet.fields': 'id,text,created_at,author_id,conversation_id',
         'user.fields': 'id,name,username,profile_image_url',
-        expansions: 'sender_id,participant_ids',
+        expansions: 'author_id',
         max_results: 100,
       };
 
@@ -161,7 +159,9 @@ export class TwitterAdapter extends BasePlatformAdapter {
         params,
       });
 
-      const events: TwitterDMEvent[] = response.data.data || [];
+      const mentions = response.data.data || [];
+      console.log(`[twitter] Found ${mentions.length} mentions`);
+      
       const users: Record<string, TwitterUser> = {};
 
       // Build user lookup map
@@ -173,34 +173,32 @@ export class TwitterAdapter extends BasePlatformAdapter {
 
       const messages: Message[] = [];
 
-      for (const event of events) {
-        if (event.event_type === 'MessageCreate') {
-          const sender = users[event.sender_id];
-          const isOutgoing = event.sender_id === account!.platform_user_id;
+      for (const mention of mentions) {
+        const author = users[mention.author_id];
+        const isOutgoing = mention.author_id === account!.platform_user_id;
 
-          messages.push({
-            id: '',
-            conversationId: '',
-            platformMessageId: event.id,
-            senderId: event.sender_id,
-            senderName: sender ? `@${sender.username}` : event.sender_id,
-            content: event.text,
-            messageType: this.getMessageType(event),
-            mediaUrl: this.getMediaUrl(event),
-            isOutgoing,
-            isRead: false,
-            sentAt: new Date(event.created_at),
-            createdAt: new Date(),
-          });
-        }
+        messages.push({
+          id: '',
+          conversationId: '',
+          platformMessageId: mention.id,
+          senderId: mention.author_id,
+          senderName: author ? `@${author.username}` : mention.author_id,
+          content: mention.text,
+          messageType: 'text',
+          isOutgoing,
+          isRead: false,
+          sentAt: new Date(mention.created_at),
+          createdAt: new Date(),
+        });
       }
 
+      console.log(`[twitter] Converted ${messages.length} mentions to messages`);
       return messages;
     }, accountId);
   }
 
   /**
-   * Send a direct message
+   * Send a reply tweet (free tier compatible)
    */
   async sendMessage(
     accountId: string,
@@ -208,15 +206,20 @@ export class TwitterAdapter extends BasePlatformAdapter {
     content: string
   ): Promise<Message> {
     return this.executeWithRetry(async () => {
+      console.log(`[twitter] Sending reply to conversation ${conversationId}`);
       const token = await this.getAccessToken(accountId);
       const account = await getConnectedAccountById(accountId);
       
-      const url = `${this.baseUrl}/dm_conversations/${conversationId}/messages`;
+      // Use tweets endpoint to reply
+      const url = `${this.baseUrl}/tweets`;
 
       const response = await this.apiClient.post(
         url,
         {
           text: content,
+          reply: {
+            in_reply_to_tweet_id: conversationId
+          }
         },
         {
           headers: {
@@ -226,12 +229,13 @@ export class TwitterAdapter extends BasePlatformAdapter {
         }
       );
 
-      const event = response.data.data;
+      const tweet = response.data.data;
+      console.log(`[twitter] Reply sent successfully: ${tweet.id}`);
 
       return {
         id: '',
         conversationId: '',
-        platformMessageId: event.dm_event_id,
+        platformMessageId: tweet.id,
         senderId: account!.platform_user_id,
         senderName: account!.platform_username || account!.platform_user_id,
         content,
@@ -246,12 +250,12 @@ export class TwitterAdapter extends BasePlatformAdapter {
   }
 
   /**
-   * Mark message as read (not directly supported by Twitter API v2)
+   * Mark message as read (not supported for mentions)
    */
   async markAsRead(accountId: string, messageId: string): Promise<void> {
-    // Twitter API v2 doesn't have a direct endpoint to mark DMs as read
-    // This would require using the v1.1 API or is not supported
-    // This is a no-op for now
+    // Mentions don't have a "read" status in Twitter API
+    // This is a no-op
+    console.log(`[twitter] markAsRead called for ${messageId} (no-op for mentions)`);
   }
 
   /**
