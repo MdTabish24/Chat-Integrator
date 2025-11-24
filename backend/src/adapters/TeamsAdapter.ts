@@ -54,7 +54,7 @@ interface TeamsTokenResponse {
 export class TeamsAdapter extends BasePlatformAdapter {
   private apiClient: AxiosInstance;
   private readonly baseUrl = 'https://graph.microsoft.com/v1.0';
-  private readonly tokenUrl = 'https://login.microsoftonline.com/common/oauth2/v2.0/token';
+  private readonly tokenUrl = 'https://login.microsoftonline.com/consumers/oauth2/v2.0/token';
 
   constructor() {
     super('teams');

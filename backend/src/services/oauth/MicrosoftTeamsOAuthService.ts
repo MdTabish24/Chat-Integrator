@@ -11,7 +11,8 @@ export class MicrosoftTeamsOAuthService extends OAuthBaseService {
   private tenantId: string;
 
   constructor() {
-    const tenantId = process.env.MICROSOFT_TENANT_ID || 'common';
+    // Use 'consumers' for personal Microsoft accounts, 'common' for both, or specific tenant ID for org accounts
+    const tenantId = process.env.MICROSOFT_TENANT_ID || 'consumers';
 
     const config: OAuthConfig = {
       clientId: process.env.MICROSOFT_CLIENT_ID || '',
