@@ -15,7 +15,9 @@ if (process.env.REDIS_URL) {
     host: url.hostname,
     port: parseInt(url.port || '6379'),
     password: url.password,
-    tls: url.protocol === 'rediss:' ? {} : undefined, // Enable TLS for rediss://
+    tls: {
+      rejectUnauthorized: false // Required for Upstash
+    },
     maxRetriesPerRequest: 3,
     enableReadyCheck: false,
     connectTimeout: 10000,
@@ -23,9 +25,12 @@ if (process.env.REDIS_URL) {
     family: 4,
     retryStrategy: (times: number) => {
       if (times > 3) {
+        console.error('Redis max retries reached for Bull queue');
         return null;
       }
-      return Math.min(times * 1000, 3000);
+      const delay = Math.min(times * 1000, 3000);
+      console.log(`Redis retry attempt ${times}, waiting ${delay}ms`);
+      return delay;
     }
   };
 } else {
@@ -33,6 +38,9 @@ if (process.env.REDIS_URL) {
     host: process.env.REDIS_HOST || 'localhost',
     port: parseInt(process.env.REDIS_PORT || '6379'),
     password: process.env.REDIS_PASSWORD,
+    tls: process.env.REDIS_HOST?.includes('upstash.io') ? {
+      rejectUnauthorized: false
+    } : undefined,
     maxRetriesPerRequest: 3,
     enableReadyCheck: false,
     connectTimeout: 10000,
@@ -40,9 +48,12 @@ if (process.env.REDIS_URL) {
     family: 4,
     retryStrategy: (times: number) => {
       if (times > 3) {
+        console.error('Redis max retries reached for Bull queue');
         return null;
       }
-      return Math.min(times * 1000, 3000);
+      const delay = Math.min(times * 1000, 3000);
+      console.log(`Redis retry attempt ${times}, waiting ${delay}ms`);
+      return delay;
     }
   };
 }
@@ -85,7 +96,7 @@ webhookRetryQueue.on('completed', (job) => {
 });
 
 webhookRetryQueue.on('failed', (job, err) => {
-  console.error(`Webhook retry job ${job?.id} failed:`, err.message);
+  console.error(`Webhook retry job ${job?.id} failed:`, err?.message || err);
 });
 
 messagePollingQueue.on('completed', (job) => {
@@ -93,7 +104,7 @@ messagePollingQueue.on('completed', (job) => {
 });
 
 messagePollingQueue.on('failed', (job, err) => {
-  console.error(`Message polling job ${job?.id} failed:`, err.message);
+  console.error(`Message polling job ${job?.id} failed:`, err?.message || err);
 });
 
 // Graceful shutdown
