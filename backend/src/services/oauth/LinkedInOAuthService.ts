@@ -12,7 +12,7 @@ export class LinkedInOAuthService extends OAuthBaseService {
     const config: OAuthConfig = {
       clientId: process.env.LINKEDIN_CLIENT_ID || '',
       clientSecret: process.env.LINKEDIN_CLIENT_SECRET || '',
-      redirectUri: `${process.env.WEBHOOK_BASE_URL}/api/auth/callback/linkedin`,
+      redirectUri: `${process.env.WEBHOOK_BASE_URL}/api/oauth/callback/linkedin`,
       authorizationUrl: 'https://www.linkedin.com/oauth/v2/authorization',
       tokenUrl: 'https://www.linkedin.com/oauth/v2/accessToken',
       scopes: ['r_liteprofile', 'r_emailaddress', 'w_member_social'],
