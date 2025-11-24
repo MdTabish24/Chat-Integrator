@@ -76,58 +76,6 @@ export class LinkedInAdapter extends BasePlatformAdapter {
     console.log(`[linkedin] Personal account messaging is not supported by LinkedIn API`);
     // Return empty array - LinkedIn messaging not available for personal accounts
     return [];
-
-      const conversations: LinkedInConversation[] = conversationsResponse.data.elements || [];
-      const allMessages: Message[] = [];
-
-      // Fetch messages for each conversation
-      for (const conversation of conversations) {
-        const conversationId = this.extractIdFromUrn(conversation.entityUrn);
-        const messagesUrl = `${this.baseUrl}/conversationMessages`;
-        
-        const params: any = {
-          q: 'conversation',
-          conversation: conversation.entityUrn,
-          sortOrder: 'DESCENDING',
-        };
-
-        if (since) {
-          params.createdAfter = since.getTime();
-        }
-
-        const messagesResponse = await this.apiClient.get(messagesUrl, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            'X-Restli-Protocol-Version': '2.0.0',
-          },
-          params,
-        });
-
-        const linkedInMessages: LinkedInMessage[] = messagesResponse.data.elements || [];
-
-        for (const msg of linkedInMessages) {
-          const senderId = this.extractIdFromUrn(msg.from);
-          const isOutgoing = senderId === account!.platform_user_id;
-
-          allMessages.push({
-            id: '',
-            conversationId: '',
-            platformMessageId: this.extractIdFromUrn(msg.entityUrn),
-            senderId,
-            senderName: senderId,
-            content: msg.body,
-            messageType: this.getMessageType(msg),
-            mediaUrl: this.getMediaUrl(msg),
-            isOutgoing,
-            isRead: false,
-            sentAt: new Date(msg.createdAt),
-            createdAt: new Date(),
-          });
-        }
-      }
-
-      return allMessages;
-    }, accountId);
   }
 
   /**
@@ -157,56 +105,6 @@ export class LinkedInAdapter extends BasePlatformAdapter {
     console.log(`[linkedin] Personal account messaging is not supported by LinkedIn API`);
     // Return empty array - LinkedIn messaging not available for personal accounts
     return [];
-
-      const linkedInConversations: LinkedInConversation[] = response.data.elements || [];
-      const conversations: Conversation[] = [];
-
-      for (const conv of linkedInConversations) {
-        // Find the other participant
-        const otherParticipantUrn = conv.participants.find(
-          (p) => !p.includes(account!.platform_user_id)
-        );
-
-        if (otherParticipantUrn) {
-          const participantId = this.extractIdFromUrn(otherParticipantUrn);
-          
-          // Fetch participant profile for name
-          let participantName = participantId;
-          let avatarUrl: string | undefined;
-
-          try {
-            const profileUrl = `${this.baseUrl}/people/${participantId}`;
-            const profileResponse = await this.apiClient.get(profileUrl, {
-              headers: {
-                Authorization: `Bearer ${token}`,
-              },
-            });
-
-            const profile: LinkedInProfile = profileResponse.data;
-            participantName = `${profile.firstName} ${profile.lastName}`;
-            avatarUrl = profile.profilePicture?.displayImage;
-          } catch (error) {
-            // If profile fetch fails, use ID as name
-            console.error('Failed to fetch LinkedIn profile:', error);
-          }
-
-          conversations.push({
-            id: '',
-            accountId,
-            platformConversationId: this.extractIdFromUrn(conv.entityUrn),
-            participantName,
-            participantId,
-            participantAvatarUrl: avatarUrl,
-            lastMessageAt: new Date(conv.lastActivityAt),
-            unreadCount: 0,
-            createdAt: new Date(),
-            updatedAt: new Date(),
-          });
-        }
-      }
-
-      return conversations;
-    }, accountId);
   }
 
   /**
