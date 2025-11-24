@@ -112,13 +112,141 @@ const DashboardPlatformCard: React.FC<DashboardPlatformCardProps> = ({
         <div className="p-4">
           {/* WebView for Twitter DMs and LinkedIn DMs */}
           {(platform === 'twitter-dm' || platform === 'linkedin-dm') ? (
-            <div className="w-full" style={{ height: '600px' }}>
-              <iframe
-                src={platform === 'twitter-dm' ? 'https://twitter.com/messages' : 'https://www.linkedin.com/messaging/'}
-                className="w-full h-full border-0 rounded-lg"
-                title={`${platformName} Messages`}
-                sandbox="allow-same-origin allow-scripts allow-forms allow-popups"
-              />
+            <div className="py-8 px-4">
+              <div className="max-w-2xl mx-auto">
+                {/* Header */}
+                <div className="text-center mb-8">
+                  <div className={`w-16 h-16 ${platformColor} rounded-full flex items-center justify-center text-3xl mx-auto mb-4`}>
+                    {platformIcon}
+                  </div>
+                  <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                    {platformName}
+                  </h3>
+                  <p className="text-sm text-gray-600">
+                    {platform === 'twitter-dm' 
+                      ? 'Manage your Twitter Direct Messages'
+                      : 'Manage your LinkedIn Messages'}
+                  </p>
+                </div>
+
+                {/* Action Buttons */}
+                <div className="grid grid-cols-1 gap-4">
+                  {/* View All Messages */}
+                  <button
+                    onClick={() => {
+                      const url = platform === 'twitter-dm' 
+                        ? 'https://twitter.com/messages' 
+                        : 'https://www.linkedin.com/messaging/';
+                      window.open(url, `${platform}-messages`, 'width=1200,height=800,resizable=yes,scrollbars=yes');
+                    }}
+                    className="flex items-center justify-between p-4 bg-white border-2 border-gray-200 rounded-lg hover:border-blue-500 hover:bg-blue-50 transition-all group"
+                  >
+                    <div className="flex items-center">
+                      <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center mr-4 group-hover:bg-blue-200 transition-colors">
+                        <svg
+                          className="w-6 h-6 text-blue-600"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
+                          />
+                        </svg>
+                      </div>
+                      <div className="text-left">
+                        <p className="font-medium text-gray-900">View All Messages</p>
+                        <p className="text-sm text-gray-500">Open your inbox and conversations</p>
+                      </div>
+                    </div>
+                    <svg
+                      className="w-5 h-5 text-gray-400 group-hover:text-blue-600 transition-colors"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M9 5l7 7-7 7"
+                      />
+                    </svg>
+                  </button>
+
+                  {/* Compose New Message */}
+                  <button
+                    onClick={() => {
+                      const url = platform === 'twitter-dm' 
+                        ? 'https://twitter.com/messages/compose' 
+                        : 'https://www.linkedin.com/messaging/compose/';
+                      window.open(url, `${platform}-compose`, 'width=600,height=700,resizable=yes,scrollbars=yes');
+                    }}
+                    className="flex items-center justify-between p-4 bg-white border-2 border-gray-200 rounded-lg hover:border-green-500 hover:bg-green-50 transition-all group"
+                  >
+                    <div className="flex items-center">
+                      <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center mr-4 group-hover:bg-green-200 transition-colors">
+                        <svg
+                          className="w-6 h-6 text-green-600"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M12 4v16m8-8H4"
+                          />
+                        </svg>
+                      </div>
+                      <div className="text-left">
+                        <p className="font-medium text-gray-900">Compose New Message</p>
+                        <p className="text-sm text-gray-500">Start a new conversation</p>
+                      </div>
+                    </div>
+                    <svg
+                      className="w-5 h-5 text-gray-400 group-hover:text-green-600 transition-colors"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M9 5l7 7-7 7"
+                      />
+                    </svg>
+                  </button>
+                </div>
+
+                {/* Info Box */}
+                <div className="mt-6 p-4 bg-blue-50 rounded-lg border border-blue-200">
+                  <div className="flex items-start">
+                    <svg
+                      className="w-5 h-5 text-blue-600 mt-0.5 mr-3 flex-shrink-0"
+                      fill="currentColor"
+                      viewBox="0 0 20 20"
+                    >
+                      <path
+                        fillRule="evenodd"
+                        d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z"
+                        clipRule="evenodd"
+                      />
+                    </svg>
+                    <div className="text-left">
+                      <p className="text-sm font-medium text-blue-900">Auto-Login Enabled</p>
+                      <p className="text-xs text-blue-700 mt-1">
+                        Uses your existing browser session. No repeated logins needed!
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
           ) : isLoading ? (
             <div className="py-8">

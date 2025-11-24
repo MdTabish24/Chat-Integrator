@@ -294,8 +294,9 @@ const Dashboard: React.FC = () => {
           isExpanded: newIsExpanded,
         });
 
-        // Load conversations when expanding
-        if (newIsExpanded && platformData.conversations.length === 0) {
+        // Load conversations when expanding (skip for webview platforms)
+        const isWebViewPlatform = platform === 'twitter-dm' || platform === 'linkedin-dm';
+        if (newIsExpanded && platformData.conversations.length === 0 && !isWebViewPlatform) {
           loadConversationsForPlatform(platform);
         }
       }
