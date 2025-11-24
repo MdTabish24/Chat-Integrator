@@ -16,7 +16,7 @@ import { RateLimitError, PlatformAPIError } from '../adapters/PlatformAdapter';
  * Platforms that need polling:
  * - Twitter: Webhook requires premium API access (polling for free tier)
  * - LinkedIn: Limited webhook support, polling recommended
- * - Teams: Using polling for now (webhook setup requires complex Microsoft Graph subscriptions)
+ * - Teams: Using polling for work/school accounts (personal accounts not supported)
  */
 const WEBHOOK_ENABLED_PLATFORMS: Platform[] = [
   'telegram',
