@@ -61,7 +61,7 @@ MIDDLEWARE = [
     # Custom middleware
     'apps.core.middleware.auth.JWTAuthenticationMiddleware',
     'apps.core.middleware.ratelimit.RateLimitMiddleware',
-    'apps.core.middleware.exceptions.ErrorHandlerMiddleware',
+    'apps.core.exceptions.ErrorHandlerMiddleware',
     'apps.core.middleware.usage_logger.APIUsageLoggerMiddleware',
 ]
 
