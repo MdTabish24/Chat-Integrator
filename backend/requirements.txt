@@ -8,12 +8,11 @@ psycopg2-binary==2.9.9
 dj-database-url==2.1.0
 
 # Redis & Caching
-redis==5.0.0
+redis==4.6.0
 django-redis==5.4.0
 
 # Task Queue
 celery==5.3.4
-celery[redis]==5.3.4
 
 # WebSocket Support
 channels==4.0.0
