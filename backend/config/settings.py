@@ -159,7 +159,9 @@ CORS_ALLOW_HEADERS = ['Content-Type', 'Authorization', 'X-CSRF-Token']
 
 # Security Settings
 # Migrated from backend/src/middleware/security.ts
-SECURE_SSL_REDIRECT = not DEBUG
+# Note: Render handles HTTPS, so we don't need SECURE_SSL_REDIRECT
+SECURE_SSL_REDIRECT = False  # Render already provides HTTPS
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')  # Trust Render's proxy
 SECURE_HSTS_SECONDS = 31536000 if not DEBUG else 0
 SECURE_HSTS_INCLUDE_SUBDOMAINS = not DEBUG
 SECURE_HSTS_PRELOAD = not DEBUG
