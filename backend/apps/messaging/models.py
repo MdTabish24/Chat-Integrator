@@ -51,7 +51,7 @@ class Message(models.Model):
         indexes = [
             models.Index(fields=['conversation']),
             models.Index(fields=['-sent_at']),
-            models.Index(fields=['is_read'], condition=models.Q(is_read=False)),
+            models.Index(fields=['is_read'], condition=models.Q(is_read=False), name='idx_messages_unread'),
         ]
         ordering = ['-sent_at']
     
