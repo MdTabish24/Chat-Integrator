@@ -8,7 +8,6 @@ from django.contrib import admin
 from django.urls import path, include
 from django.http import JsonResponse
 from django.db import connection
-from apps.websocket.services import websocket_service
 
 def health_check(request):
     """
@@ -20,26 +19,16 @@ def health_check(request):
         with connection.cursor() as cursor:
             cursor.execute("SELECT 1")
         
-        # Get WebSocket stats
-        ws_stats = websocket_service.get_stats()
-        
         return JsonResponse({
             'status': 'ok',
-            'timestamp': request.build_absolute_uri(),
             'services': {
                 'database': 'connected',
                 'redis': 'connected',
-                'websocket': {
-                    'status': 'active',
-                    'connections': ws_stats['total_connections'],
-                    'authenticatedUsers': ws_stats['authenticated_users']
-                }
             }
         })
     except Exception as e:
         return JsonResponse({
             'status': 'error',
-            'timestamp': request.build_absolute_uri(),
             'error': 'Service unavailable',
             'details': str(e)
         }, status=503)
