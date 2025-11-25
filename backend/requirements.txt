@@ -7,7 +7,7 @@ django-cors-headers==4.3.0
 psycopg2-binary==2.9.9
 dj-database-url==2.1.0
 
-# Redis & Caching
+# Redis & Caching (Compatible with Celery)
 redis==4.6.0
 django-redis==5.4.0
 
@@ -25,9 +25,9 @@ bcrypt==4.1.2
 python-dotenv==1.0.0
 cryptography==42.0.0
 
-# HTTP Requests
+# HTTP Requests (Compatible with python-telegram-bot)
 requests==2.31.0
-httpx==0.26.0
+httpx==0.25.2
 
 # Platform SDKs
 python-telegram-bot==20.7
