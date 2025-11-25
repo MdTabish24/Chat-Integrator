@@ -9,7 +9,7 @@ from abc import ABC, abstractmethod
 from typing import List, Optional, Dict, Any
 from dataclasses import dataclass
 
-from apps.messages.models import Message
+from apps.messaging.models import Message
 from apps.conversations.models import Conversation
 
 

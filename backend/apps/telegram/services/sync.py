@@ -11,7 +11,7 @@ from django.db import transaction
 
 from .client import telegram_user_client
 from apps.conversations.models import Conversation
-from apps.messages.models import Message
+from apps.messaging.models import Message
 from apps.core.utils.crypto import encrypt
 
 

@@ -66,7 +66,7 @@ urlpatterns = [
     # API routes (migrated from backend/src/routes/)
     path('api/auth/', include('apps.authentication.urls')),
     path('api/oauth/', include('apps.oauth.urls')),
-    path('api/messages/', include('apps.messages.urls')),
+    path('api/messages/', include('apps.messaging.urls')),
     path('api/conversations/', include('apps.conversations.urls')),
     path('api/webhooks/', include('apps.webhooks.urls')),
     path('api/telegram/', include('apps.telegram.urls')),

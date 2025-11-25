@@ -186,7 +186,7 @@ class TelegramUserClientService:
         
         # Bot API doesn't have direct history fetch
         # We'll use stored messages from database
-        from apps.messages.models import Message
+        from apps.messaging.models import Message
         from apps.conversations.models import Conversation
         
         try:

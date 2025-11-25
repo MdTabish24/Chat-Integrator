@@ -14,7 +14,7 @@ from .views import (
     UnreadCountView,
 )
 
-app_name = 'messages'
+app_name = 'messaging'
 
 urlpatterns = [
     # GET /api/messages

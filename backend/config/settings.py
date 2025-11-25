@@ -40,11 +40,12 @@ INSTALLED_APPS = [
     'apps.authentication',
     'apps.oauth',
     'apps.conversations',
-    'apps.messages',
+    'apps.messaging',  # Renamed to avoid conflict with django.contrib.messages
     'apps.webhooks',
     'apps.telegram',
     'apps.platforms',
     'apps.websocket',
+    'apps.debug',
 ]
 
 MIDDLEWARE = [

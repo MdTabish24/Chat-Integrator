@@ -26,7 +26,7 @@ app.autodiscover_tasks()
 # Migrated from messagePollingQueue (backend/src/config/queues.ts)
 app.conf.beat_schedule = {
     'poll-messages-every-30-seconds': {
-        'task': 'apps.messages.tasks.poll_all_accounts_messages',
+        'task': 'apps.messaging.tasks.poll_all_accounts_messages',
         'schedule': 30.0,  # Every 30 seconds
     },
     'cleanup-expired-tokens-daily': {
