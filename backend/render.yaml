@@ -1,0 +1,115 @@
+services:
+  # Django Backend (Web Service)
+  - type: web
+    name: messaging-hub-backend
+    runtime: python
+    plan: free
+    region: oregon
+    buildCommand: pip install -r requirements.txt && python manage.py collectstatic --noinput && python manage.py migrate
+    startCommand: daphne -b 0.0.0.0 -p $PORT config.asgi:application
+    envVars:
+      - key: SECRET_KEY
+        generateValue: true
+      - key: DEBUG
+        value: False
+      - key: PYTHON_VERSION
+        value: 3.11.0
+      - key: ALLOWED_HOSTS
+        value: .onrender.com
+      - key: CORS_ORIGINS
+        sync: false
+      - key: DATABASE_URL
+        fromDatabase:
+          name: messaging-hub-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          name: messaging-hub-redis
+          type: redis
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_REFRESH_SECRET
+        generateValue: true
+      - key: ENCRYPTION_KEY
+        generateValue: true
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TWITTER_CLIENT_ID
+        sync: false
+      - key: TWITTER_CLIENT_SECRET
+        sync: false
+      - key: FACEBOOK_APP_ID
+        sync: false
+      - key: FACEBOOK_APP_SECRET
+        sync: false
+      - key: INSTAGRAM_APP_ID
+        sync: false
+      - key: INSTAGRAM_APP_SECRET
+        sync: false
+      - key: WHATSAPP_PHONE_NUMBER_ID
+        sync: false
+      - key: WHATSAPP_ACCESS_TOKEN
+        sync: false
+      - key: LINKEDIN_CLIENT_ID
+        sync: false
+      - key: LINKEDIN_CLIENT_SECRET
+        sync: false
+      - key: MICROSOFT_CLIENT_ID
+        sync: false
+      - key: MICROSOFT_CLIENT_SECRET
+        sync: false
+      - key: MICROSOFT_TENANT_ID
+        sync: false
+      - key: WEBHOOK_BASE_URL
+        value: https://messaging-hub-backend.onrender.com
+
+  # Celery Worker (Background Worker)
+  - type: worker
+    name: messaging-hub-celery-worker
+    runtime: python
+    plan: free
+    region: oregon
+    buildCommand: pip install -r requirements.txt
+    startCommand: celery -A config worker -l info
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: messaging-hub-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          name: messaging-hub-redis
+          type: redis
+          property: connectionString
+
+  # Celery Beat (Scheduler)
+  - type: worker
+    name: messaging-hub-celery-beat
+    runtime: python
+    plan: free
+    region: oregon
+    buildCommand: pip install -r requirements.txt
+    startCommand: celery -A config beat -l info
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: messaging-hub-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          name: messaging-hub-redis
+          type: redis
+          property: connectionString
+
+  # Redis
+  - type: redis
+    name: messaging-hub-redis
+    plan: free
+    maxmemoryPolicy: allkeys-lru
+
+databases:
+  - name: messaging-hub-db
+    plan: free
+    databaseName: messaging_hub
+    user: messaging_hub_user

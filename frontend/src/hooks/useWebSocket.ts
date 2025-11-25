@@ -4,7 +4,7 @@ import { Message, Conversation, Platform } from '../types';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 
   (typeof window !== 'undefined' && window.location.origin) || 
-  'http://localhost:3000';
+  'http://localhost:8000';
 
 interface UnreadCountUpdate {
   unreadCounts: Record<Platform, number>;

@@ -1,0 +1,115 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:14-alpine
+    container_name: messaging-hub-postgres
+    environment:
+      POSTGRES_DB: messaging_hub
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U postgres" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: messaging-hub-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend_django
+      dockerfile: Dockerfile
+    container_name: messaging-hub-backend-django
+    ports:
+      - "8000:8000"
+    environment:
+      - DEBUG=True
+      - SECRET_KEY=your-secret-key-here-change-in-production
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/messaging_hub
+      - REDIS_URL=redis://redis:6379/0
+      - ALLOWED_HOSTS=localhost,127.0.0.1
+      - CORS_ORIGINS=http://localhost:5173
+      - JWT_SECRET=your-jwt-secret-change-in-production
+      - JWT_REFRESH_SECRET=your-refresh-secret-change-in-production
+      - ENCRYPTION_KEY=your-encryption-key-change-in-production
+    volumes:
+      - ./backend_django:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: >
+      sh -c "python manage.py migrate &&
+             python manage.py collectstatic --noinput &&
+             daphne -b 0.0.0.0 -p 8000 config.asgi:application"
+
+  celery-worker:
+    build:
+      context: ./backend_django
+      dockerfile: Dockerfile
+    container_name: messaging-hub-celery-worker
+    environment:
+      - DEBUG=True
+      - SECRET_KEY=your-secret-key-here-change-in-production
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/messaging_hub
+      - REDIS_URL=redis://redis:6379/0
+    volumes:
+      - ./backend_django:/app
+    depends_on:
+      - postgres
+      - redis
+    command: celery -A config worker -l info
+
+  celery-beat:
+    build:
+      context: ./backend_django
+      dockerfile: Dockerfile
+    container_name: messaging-hub-celery-beat
+    environment:
+      - DEBUG=True
+      - SECRET_KEY=your-secret-key-here-change-in-production
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/messaging_hub
+      - REDIS_URL=redis://redis:6379/0
+    volumes:
+      - ./backend_django:/app
+    depends_on:
+      - postgres
+      - redis
+    command: celery -A config beat -l info
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: messaging-hub-frontend
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_API_BASE_URL=http://localhost:8000
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    depends_on:
+      - backend
+    command: npm run dev
+
+volumes:
+  postgres_data:
+  redis_data:

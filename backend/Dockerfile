@@ -1,13 +1,24 @@
-FROM node:20-alpine
+FROM python:3.11-slim
 
 WORKDIR /app
 
-COPY package*.json ./
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    gcc \
+    postgresql-client \
+    && rm -rf /var/lib/apt/lists/*
 
-RUN npm install
+# Copy requirements first for better caching
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
+# Copy project files
 COPY . .
 
-EXPOSE 3000
+# Expose port
+EXPOSE 8000
 
-CMD ["npm", "run", "dev"]
+# Run migrations and start server
+CMD python manage.py migrate && \
+    python manage.py collectstatic --noinput && \
+    daphne -b 0.0.0.0 -p 8000 config.asgi:application
