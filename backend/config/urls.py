@@ -43,6 +43,10 @@ def csrf_token_view(request):
         'csrfToken': get_token(request)
     })
 
+from django.conf import settings
+from django.conf.urls.static import static
+from django.views.generic import TemplateView
+
 urlpatterns = [
     path('admin/', admin.site.urls),
     
@@ -61,3 +65,7 @@ urlpatterns = [
     path('api/telegram/', include('apps.telegram.urls')),
     path('api/debug/', include('apps.debug.urls')),
 ]
+
+# Serve static files in production
+if not settings.DEBUG:
+    urlpatterns += static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)

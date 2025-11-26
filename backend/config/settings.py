@@ -143,6 +143,11 @@ USE_TZ = True
 STATIC_URL = 'static/'
 STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 
+# Frontend static files (if serving from Django)
+STATICFILES_DIRS = [
+    os.path.join(BASE_DIR, '../frontend/dist'),
+] if os.path.exists(os.path.join(BASE_DIR, '../frontend/dist')) else []
+
 # Default primary key field type
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
