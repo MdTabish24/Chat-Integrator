@@ -11,17 +11,10 @@ class Migration(migrations.Migration):
 
     operations = [
         migrations.RunSQL(
-            # Add column if it doesn't exist
+            # Add column if it doesn't exist (MySQL compatible)
             sql="""
-            DO $$ 
-            BEGIN
-                IF NOT EXISTS (
-                    SELECT 1 FROM information_schema.columns 
-                    WHERE table_name='refresh_tokens' AND column_name='revoked_at'
-                ) THEN
-                    ALTER TABLE refresh_tokens ADD COLUMN revoked_at TIMESTAMP NULL;
-                END IF;
-            END $$;
+            ALTER TABLE refresh_tokens 
+            ADD COLUMN IF NOT EXISTS revoked_at DATETIME NULL;
             """,
             reverse_sql="ALTER TABLE refresh_tokens DROP COLUMN IF EXISTS revoked_at;"
         ),
