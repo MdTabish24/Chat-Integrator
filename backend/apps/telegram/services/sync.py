@@ -8,6 +8,7 @@ from typing import Optional
 from datetime import datetime
 from django.utils import timezone
 from django.db import transaction
+from asgiref.sync import sync_to_async
 
 from .client import telegram_user_client
 from apps.conversations.models import Conversation
@@ -47,54 +48,57 @@ class TelegramMessageSyncService:
                 from urllib.parse import quote
                 avatar_url = f'https://ui-avatars.com/api/?name={quote(dialog_name)}&background=random&size=128'
                 
-                # Create or update conversation
-                with transaction.atomic():
-                    conversation, created = Conversation.objects.update_or_create(
-                        account_id=account_id,
-                        platform_conversation_id=dialog_id,
-                        defaults={
-                            'participant_name': dialog_name,
-                            'participant_id': dialog_id,
-                            'participant_avatar_url': avatar_url,
-                            'last_message_at': dialog_date,
-                        }
-                    )
-                    
-                    conversation_id = str(conversation.id)
-                    
-                    # Get messages from this conversation
-                    messages = await telegram_user_client.get_messages(account_id, dialog_id, 20)
-                    
-                    for message in messages:
-                        if not message.get('text'):
-                            continue
-                        
-                        # Encrypt content
-                        encrypted_content = encrypt(message['text'])
-                        
-                        # Insert message (ignore duplicates)
-                        Message.objects.get_or_create(
-                            conversation=conversation,
-                            platform_message_id=str(message['id']),
+                # Create or update conversation (async-safe)
+                @sync_to_async
+                def save_conversation_and_messages(dialog_id, dialog_name, avatar_url, dialog_date, messages_list):
+                    with transaction.atomic():
+                        conversation, created = Conversation.objects.update_or_create(
+                            account_id=account_id,
+                            platform_conversation_id=dialog_id,
                             defaults={
-                                'content': encrypted_content,
-                                'sender_id': message.get('senderId', 'unknown'),
-                                'sender_name': 'Telegram User',
-                                'sent_at': datetime.fromtimestamp(message['date']),
-                                'is_outgoing': message.get('out', False),
-                                'is_read': True,  # Mark synced messages as read
+                                'participant_name': dialog_name,
+                                'participant_id': dialog_id,
+                                'participant_avatar_url': avatar_url,
+                                'last_message_at': dialog_date,
                             }
                         )
-                    
-                    # Update unread count
-                    unread_count = Message.objects.filter(
-                        conversation=conversation,
-                        is_read=False,
-                        is_outgoing=False
-                    ).count()
-                    
-                    conversation.unread_count = unread_count
-                    conversation.save()
+                        
+                        for message in messages_list:
+                            if not message.get('text'):
+                                continue
+                            
+                            # Encrypt content
+                            encrypted_content = encrypt(message['text'])
+                            
+                            # Insert message (ignore duplicates)
+                            Message.objects.get_or_create(
+                                conversation=conversation,
+                                platform_message_id=str(message['id']),
+                                defaults={
+                                    'content': encrypted_content,
+                                    'sender_id': message.get('senderId', 'unknown'),
+                                    'sender_name': 'Telegram User',
+                                    'sent_at': datetime.fromtimestamp(message['date']),
+                                    'is_outgoing': message.get('out', False),
+                                    'is_read': True,
+                                }
+                            )
+                        
+                        # Update unread count
+                        unread_count = Message.objects.filter(
+                            conversation=conversation,
+                            is_read=False,
+                            is_outgoing=False
+                        ).count()
+                        
+                        conversation.unread_count = unread_count
+                        conversation.save()
+                
+                # Get messages from this conversation
+                messages = await telegram_user_client.get_messages(account_id, dialog_id, 20)
+                
+                # Save to database
+                await save_conversation_and_messages(dialog_id, dialog_name, avatar_url, dialog_date, messages)
             
             print(f'[telegram-sync] Synced {len(dialogs)} conversations for account {account_id}')
         

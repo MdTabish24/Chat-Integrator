@@ -129,20 +129,25 @@ class TelegramUserClientService:
             # Save session string
             session_string = client.session.save()
             
-            # Store in database
+            # Store in database (async-safe)
             from apps.oauth.models import ConnectedAccount
-            account, created = ConnectedAccount.objects.update_or_create(
-                user_id=user_id,
-                platform='telegram',
-                platform_user_id=telegram_user_id,
-                defaults={
-                    'platform_username': username,
-                    'access_token': encrypt(session_string),
-                    'is_active': True,
-                }
-            )
+            from asgiref.sync import sync_to_async
             
-            account_id = str(account.id)
+            @sync_to_async
+            def save_account():
+                account, created = ConnectedAccount.objects.update_or_create(
+                    user_id=user_id,
+                    platform='telegram',
+                    platform_user_id=telegram_user_id,
+                    defaults={
+                        'platform_username': username,
+                        'access_token': encrypt(session_string),
+                        'is_active': True,
+                    }
+                )
+                return str(account.id)
+            
+            account_id = await save_account()
             
             # Store active session
             self.sessions[account_id] = client
@@ -179,12 +184,18 @@ class TelegramUserClientService:
         if account_id in self.sessions:
             return self.sessions[account_id]
         
-        try:
-            account = ConnectedAccount.objects.get(
+        from asgiref.sync import sync_to_async
+        
+        @sync_to_async
+        def get_account():
+            return ConnectedAccount.objects.get(
                 id=account_id,
                 platform='telegram',
                 is_active=True
             )
+        
+        try:
+            account = await get_account()
             
             # Get session string
             session_string = decrypt(account.access_token)
@@ -264,27 +275,32 @@ class TelegramUserClientService:
         # We'll use stored messages from database
         from apps.messaging.models import Message
         from apps.conversations.models import Conversation
+        from asgiref.sync import sync_to_async
         
-        try:
-            conversation = Conversation.objects.get(
-                platform_conversation_id=chat_id,
-                account_id=account_id
-            )
+        @sync_to_async
+        def get_messages_from_db():
+            try:
+                conversation = Conversation.objects.get(
+                    platform_conversation_id=chat_id,
+                    account_id=account_id
+                )
+                
+                messages = Message.objects.filter(
+                    conversation=conversation
+                ).order_by('-sent_at')[:limit]
+                
+                return [{
+                    'id': str(msg.id),
+                    'text': msg.content,
+                    'senderId': msg.sender_id,
+                    'date': msg.sent_at.timestamp(),
+                    'out': msg.is_outgoing,
+                } for msg in messages]
             
-            messages = Message.objects.filter(
-                conversation=conversation
-            ).order_by('-sent_at')[:limit]
-            
-            return [{
-                'id': str(msg.id),
-                'text': msg.content,
-                'senderId': msg.sender_id,
-                'date': msg.sent_at.timestamp(),
-                'out': msg.is_outgoing,
-            } for msg in messages]
+            except Conversation.DoesNotExist:
+                return []
         
-        except Conversation.DoesNotExist:
-            return []
+        return await get_messages_from_db()
     
     async def send_message(self, account_id: str, chat_id: str, text: str) -> None:
         """
