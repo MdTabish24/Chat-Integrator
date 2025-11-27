@@ -209,7 +209,7 @@ class CurrentUserView(APIView):
     GET /api/auth/me
     Migrated from: getCurrentUser() in authController.ts
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]  # Check JWT in middleware instead
     
     def get(self, request):
         try:

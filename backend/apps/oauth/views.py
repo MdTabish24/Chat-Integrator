@@ -58,7 +58,7 @@ class InitiateConnectionView(APIView):
     GET /api/oauth/connect/:platform
     Migrated from: initiateConnection() in oauthController.ts
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]  # Check JWT in middleware
     
     def get(self, request, platform):
         try:
@@ -241,7 +241,7 @@ class ConnectedAccountsView(APIView):
     GET /api/oauth/accounts
     Migrated from: getConnectedAccounts() in oauthController.ts
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]  # Check JWT in middleware
     
     def get(self, request):
         try:
@@ -285,7 +285,7 @@ class DisconnectAccountView(APIView):
     DELETE /api/oauth/disconnect/:accountId
     Migrated from: disconnectAccount() in oauthController.ts
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]  # Check JWT in middleware
     
     def delete(self, request, account_id):
         try:
@@ -362,7 +362,7 @@ class RefreshTokenView(APIView):
     POST /api/oauth/refresh/:accountId
     Migrated from: refreshToken() in oauthController.ts
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]  # Check JWT in middleware
     
     def post(self, request, account_id):
         try:
