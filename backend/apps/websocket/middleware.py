@@ -25,6 +25,9 @@ class JWTAuthMiddleware(BaseMiddleware):
         
         token = query_params.get('token', [None])[0]
         
+        # Create anonymous user object for Channels
+        from channels.auth import AnonymousUser
+        
         if token:
             try:
                 # Verify JWT token
@@ -34,17 +37,18 @@ class JWTAuthMiddleware(BaseMiddleware):
                     algorithms=[settings.JWT_ALGORITHM]
                 )
                 
-                # Add user info to scope
+                # Add user info to scope (Channels expects this format)
                 scope['user'] = {
                     'user_id': payload.get('userId'),
                     'email': payload.get('email'),
+                    'is_authenticated': True,
                 }
             
             except jwt.ExpiredSignatureError:
-                scope['user'] = None
+                scope['user'] = AnonymousUser()
             except jwt.InvalidTokenError:
-                scope['user'] = None
+                scope['user'] = AnonymousUser()
         else:
-            scope['user'] = None
+            scope['user'] = AnonymousUser()
         
         return await super().__call__(scope, receive, send)
