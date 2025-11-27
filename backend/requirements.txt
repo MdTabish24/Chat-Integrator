@@ -30,7 +30,7 @@ requests==2.31.0
 httpx==0.25.2
 
 # Platform SDKs
-python-telegram-bot==20.7
+Telethon==1.36.0
 tweepy==4.14.0
 
 # Validation & Sanitization
