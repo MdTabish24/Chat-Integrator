@@ -54,7 +54,7 @@ class RefreshToken(models.Model):
     """
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='refresh_tokens')
-    token = models.TextField()
+    token = models.CharField(max_length=500)  # Changed from TextField for MySQL index compatibility
     expires_at = models.DateTimeField()
     created_at = models.DateTimeField(auto_now_add=True)
     revoked_at = models.DateTimeField(null=True, blank=True)

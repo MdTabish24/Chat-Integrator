@@ -32,13 +32,13 @@ class Message(models.Model):
     platform_message_id = models.CharField(max_length=255)
     sender_id = models.CharField(max_length=255)
     sender_name = models.CharField(max_length=255, null=True, blank=True)
-    content = models.TextField()
+    content = models.TextField()  # No index on this, so OK for MySQL
     message_type = models.CharField(
         max_length=50,
         choices=MESSAGE_TYPE_CHOICES,
         default='text'
     )
-    media_url = models.TextField(null=True, blank=True)
+    media_url = models.CharField(max_length=1000, null=True, blank=True)  # MySQL compatible
     is_outgoing = models.BooleanField(default=False)
     is_read = models.BooleanField(default=False)
     sent_at = models.DateTimeField()

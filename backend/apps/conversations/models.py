@@ -24,7 +24,7 @@ class Conversation(models.Model):
     platform_conversation_id = models.CharField(max_length=255)
     participant_name = models.CharField(max_length=255, null=True, blank=True)
     participant_id = models.CharField(max_length=255, null=True, blank=True)
-    participant_avatar_url = models.TextField(null=True, blank=True)
+    participant_avatar_url = models.CharField(max_length=1000, null=True, blank=True)  # MySQL compatible
     last_message_at = models.DateTimeField(null=True, blank=True)
     unread_count = models.IntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)

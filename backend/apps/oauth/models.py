@@ -35,8 +35,8 @@ class ConnectedAccount(models.Model):
     platform = models.CharField(max_length=50, choices=PLATFORM_CHOICES)
     platform_user_id = models.CharField(max_length=255)
     platform_username = models.CharField(max_length=255, null=True, blank=True)
-    access_token = models.TextField()
-    refresh_token = models.TextField(null=True, blank=True)
+    access_token = models.CharField(max_length=2000)  # MySQL compatible, long enough for tokens
+    refresh_token = models.CharField(max_length=2000, null=True, blank=True)
     token_expires_at = models.DateTimeField(null=True, blank=True)
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
