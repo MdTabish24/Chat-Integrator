@@ -3,8 +3,8 @@ Django==5.0
 djangorestframework==3.14.0
 django-cors-headers==4.3.0
 
-# Database
-psycopg2-binary==2.9.9
+# Database (MySQL instead of PostgreSQL)
+mysqlclient==2.2.0
 dj-database-url==2.1.0
 
 # Redis & Caching (Compatible with Celery)
