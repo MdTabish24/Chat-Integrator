@@ -87,7 +87,7 @@ class VerifyPhoneCodeView(AsyncAPIView):
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
 
-class GetDialogsView(APIView):
+class GetDialogsView(AsyncAPIView):
     """
     Get dialogs (conversations)
     
@@ -96,12 +96,12 @@ class GetDialogsView(APIView):
     """
     permission_classes = [AllowAny]
     
-    def get(self, request, account_id):
+    async def get(self, request, account_id):
         try:
             if not hasattr(request, 'user_jwt') or not request.user_jwt:
                 return Response({'error': 'Unauthorized'}, status=status.HTTP_401_UNAUTHORIZED)
             
-            dialogs = async_to_sync(telegram_user_client.get_dialogs)(account_id)
+            dialogs = await telegram_user_client.get_dialogs(account_id)
             return Response({'dialogs': dialogs})
         
         except Exception as e:
@@ -109,7 +109,7 @@ class GetDialogsView(APIView):
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-class GetMessagesView(APIView):
+class GetMessagesView(AsyncAPIView):
     """
     Get messages from a chat
     
@@ -118,12 +118,12 @@ class GetMessagesView(APIView):
     """
     permission_classes = [AllowAny]
     
-    def get(self, request, account_id, chat_id):
+    async def get(self, request, account_id, chat_id):
         try:
             if not hasattr(request, 'user_jwt') or not request.user_jwt:
                 return Response({'error': 'Unauthorized'}, status=status.HTTP_401_UNAUTHORIZED)
             
-            messages = async_to_sync(telegram_user_client.get_messages)(account_id, chat_id)
+            messages = await telegram_user_client.get_messages(account_id, chat_id)
             return Response({'messages': messages})
         
         except Exception as e:
@@ -131,7 +131,7 @@ class GetMessagesView(APIView):
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-class SendMessageView(APIView):
+class SendMessageView(AsyncAPIView):
     """
     Send a message
     
@@ -140,7 +140,7 @@ class SendMessageView(APIView):
     """
     permission_classes = [AllowAny]
     
-    def post(self, request, account_id, chat_id):
+    async def post(self, request, account_id, chat_id):
         try:
             if not hasattr(request, 'user_jwt') or not request.user_jwt:
                 return Response({'error': 'Unauthorized'}, status=status.HTTP_401_UNAUTHORIZED)
@@ -149,7 +149,7 @@ class SendMessageView(APIView):
             if not text:
                 return Response({'error': 'Text required'}, status=status.HTTP_400_BAD_REQUEST)
             
-            async_to_sync(telegram_user_client.send_message)(account_id, chat_id, text)
+            await telegram_user_client.send_message(account_id, chat_id, text)
             return Response({'success': True})
         
         except Exception as e:
@@ -157,7 +157,7 @@ class SendMessageView(APIView):
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-class SyncMessagesView(APIView):
+class SyncMessagesView(AsyncAPIView):
     """
     Sync messages
     
@@ -166,12 +166,12 @@ class SyncMessagesView(APIView):
     """
     permission_classes = [AllowAny]
     
-    def post(self, request, account_id):
+    async def post(self, request, account_id):
         try:
             if not hasattr(request, 'user_jwt') or not request.user_jwt:
                 return Response({'error': 'Unauthorized'}, status=status.HTTP_401_UNAUTHORIZED)
             
-            async_to_sync(telegram_message_sync.sync_messages)(account_id)
+            await telegram_message_sync.sync_messages(account_id)
             return Response({'success': True, 'message': 'Messages synced successfully'})
         
         except Exception as e:
@@ -179,7 +179,7 @@ class SyncMessagesView(APIView):
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-class ResetAndSyncView(APIView):
+class ResetAndSyncView(AsyncAPIView):
     """
     Reset and sync
     
@@ -188,16 +188,22 @@ class ResetAndSyncView(APIView):
     """
     permission_classes = [AllowAny]
     
-    def post(self, request, account_id):
+    async def post(self, request, account_id):
         try:
             if not hasattr(request, 'user_jwt') or not request.user_jwt:
                 return Response({'error': 'Unauthorized'}, status=status.HTTP_401_UNAUTHORIZED)
             
-            # Delete all conversations for this account
-            Conversation.objects.filter(account_id=account_id).delete()
+            # Delete all conversations for this account (async-safe)
+            from asgiref.sync import sync_to_async
+            
+            @sync_to_async
+            def delete_conversations():
+                Conversation.objects.filter(account_id=account_id).delete()
+            
+            await delete_conversations()
             
             # Resync
-            async_to_sync(telegram_message_sync.sync_messages)(account_id)
+            await telegram_message_sync.sync_messages(account_id)
             
             return Response({'success': True, 'message': 'Reset and synced successfully'})
         
