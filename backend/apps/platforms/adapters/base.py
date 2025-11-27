@@ -151,11 +151,11 @@ class BasePlatformAdapter(ABC):
             # This will log to api_usage_logs table
             from django.db import connection
             with connection.cursor() as cursor:
+                # MySQL compatible - use INSERT IGNORE
                 cursor.execute(
                     """
-                    INSERT INTO api_usage_logs (account_id, platform, endpoint, request_count, timestamp)
+                    INSERT IGNORE INTO api_usage_logs (account_id, platform, endpoint, request_count, timestamp)
                     VALUES (%s, %s, %s, %s, NOW())
-                    ON CONFLICT DO NOTHING
                     """,
                     [account_id, self.platform, endpoint, 1]
                 )

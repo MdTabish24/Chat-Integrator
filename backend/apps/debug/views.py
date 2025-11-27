@@ -7,7 +7,7 @@ Migrated from backend/src/routes/debugRoutes.ts
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny
 from django.conf import settings
 
 
@@ -18,7 +18,7 @@ class TriggerPollingView(APIView):
     POST /api/debug/polling/:accountId
     Migrated from: debugRoutes.ts
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
     
     def post(self, request, account_id):
         try:
@@ -44,7 +44,7 @@ class PollingStatsView(APIView):
     GET /api/debug/polling/stats
     Migrated from: debugRoutes.ts
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
     
     def get(self, request):
         try:

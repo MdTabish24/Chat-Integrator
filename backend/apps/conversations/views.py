@@ -7,7 +7,7 @@ Migrated from backend/src/controllers/messageController.ts (getConversations)
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny
 
 from .models import Conversation
 from apps.oauth.models import ConnectedAccount
@@ -21,7 +21,7 @@ class ConversationsListView(APIView):
     GET /api/conversations
     Migrated from: getConversations() in messageController.ts
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
     
     def get(self, request):
         try:
@@ -71,7 +71,7 @@ class ConversationDetailView(APIView):
     
     GET /api/conversations/:conversationId
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
     
     def get(self, request, conversation_id):
         try:

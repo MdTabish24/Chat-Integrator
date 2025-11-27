@@ -7,7 +7,7 @@ Migrated from backend/src/controllers/telegramUserController.ts
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny
 from asgiref.sync import async_to_sync
 
 from .services.client import telegram_user_client
@@ -22,7 +22,7 @@ class StartPhoneAuthView(APIView):
     POST /api/telegram/auth/phone
     Migrated from: startPhoneAuth() in telegramUserController.ts
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
     
     def post(self, request):
         try:
@@ -54,7 +54,7 @@ class VerifyPhoneCodeView(APIView):
     POST /api/telegram/auth/verify
     Migrated from: verifyPhoneCode() in telegramUserController.ts
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
     
     def post(self, request):
         try:
@@ -94,7 +94,7 @@ class GetDialogsView(APIView):
     GET /api/telegram/:accountId/dialogs
     Migrated from: getDialogs() in telegramUserController.ts
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
     
     def get(self, request, account_id):
         try:
@@ -116,7 +116,7 @@ class GetMessagesView(APIView):
     GET /api/telegram/:accountId/messages/:chatId
     Migrated from: getMessages() in telegramUserController.ts
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
     
     def get(self, request, account_id, chat_id):
         try:
@@ -138,7 +138,7 @@ class SendMessageView(APIView):
     POST /api/telegram/:accountId/send/:chatId
     Migrated from: sendMessage() in telegramUserController.ts
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
     
     def post(self, request, account_id, chat_id):
         try:
@@ -164,7 +164,7 @@ class SyncMessagesView(APIView):
     POST /api/telegram/:accountId/sync
     Migrated from: syncMessages() in telegramUserController.ts
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
     
     def post(self, request, account_id):
         try:
@@ -186,7 +186,7 @@ class ResetAndSyncView(APIView):
     POST /api/telegram/:accountId/reset
     Migrated from: resetAndSync() in telegramUserController.ts
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
     
     def post(self, request, account_id):
         try:

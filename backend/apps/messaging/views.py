@@ -8,7 +8,7 @@ from django.db.models import Q
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny
 
 from .models import Message
 from apps.conversations.models import Conversation
@@ -23,7 +23,7 @@ class MessagesListView(APIView):
     GET /api/messages
     Migrated from: getMessages() in messageController.ts
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]  # Check JWT in middleware
     
     def get(self, request):
         try:
@@ -69,7 +69,7 @@ class ConversationMessagesView(APIView):
     GET /api/messages/:conversationId
     Migrated from: getConversationMessages() in messageController.ts
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
     
     def get(self, request, conversation_id):
         try:
@@ -126,7 +126,7 @@ class SendMessageView(APIView):
     POST /api/messages/:conversationId/send
     Migrated from: sendMessage() in messageController.ts
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
     
     def post(self, request, conversation_id):
         try:
@@ -196,7 +196,7 @@ class MarkMessageReadView(APIView):
     PATCH /api/messages/:messageId/read
     Migrated from: markAsRead() in messageController.ts
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
     
     def patch(self, request, message_id):
         try:
@@ -246,7 +246,7 @@ class MarkConversationReadView(APIView):
     PATCH /api/messages/conversation/:conversationId/read
     Migrated from: markConversationAsRead() in messageController.ts
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
     
     def patch(self, request, conversation_id):
         try:
@@ -298,7 +298,7 @@ class UnreadCountView(APIView):
     GET /api/messages/unread/count
     Migrated from: getUnreadCount() in messageController.ts
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
     
     def get(self, request):
         try:

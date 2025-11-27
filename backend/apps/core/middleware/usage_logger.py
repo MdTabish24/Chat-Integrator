@@ -42,11 +42,11 @@ class APIUsageLoggerMiddleware(MiddlewareMixin):
         # Log to database asynchronously (in practice, use Celery for this)
         try:
             with connection.cursor() as cursor:
+                # MySQL compatible - use INSERT IGNORE instead of ON CONFLICT
                 cursor.execute(
                     """
-                    INSERT INTO api_usage_logs (user_id, endpoint, request_count, timestamp)
+                    INSERT IGNORE INTO api_usage_logs (user_id, endpoint, request_count, timestamp)
                     VALUES (%s, %s, %s, NOW())
-                    ON CONFLICT DO NOTHING
                     """,
                     [user_id, endpoint, 1]
                 )
