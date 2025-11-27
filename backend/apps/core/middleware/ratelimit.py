@@ -56,9 +56,15 @@ class RateLimitMiddleware(MiddlewareMixin):
         window_start = now - self.window_ms
         
         try:
+            from redis.exceptions import ConnectionError as RedisConnectionError
+            
             # Get all requests in current window from Redis
             # We'll use a simple list approach since Django cache doesn't support sorted sets natively
-            requests_data = cache.get(key, [])
+            try:
+                requests_data = cache.get(key, [])
+            except (RedisConnectionError, Exception) as e:
+                print(f'Rate limiter Redis error: {e}')
+                return None  # Allow request if Redis is down
             
             # Remove old entries outside the time window
             requests_data = [ts for ts in requests_data if ts > window_start]
