@@ -1,4 +1,4 @@
-# Generated migration for authentication app
+# Generated migration for authentication app (MySQL compatible)
 
 from django.db import migrations, models
 import django.db.models.deletion
@@ -31,7 +31,7 @@ class Migration(migrations.Migration):
             name='RefreshToken',
             fields=[
                 ('id', models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
-                ('token', models.TextField()),
+                ('token', models.CharField(max_length=500)),
                 ('expires_at', models.DateTimeField()),
                 ('created_at', models.DateTimeField(auto_now_add=True)),
                 ('revoked_at', models.DateTimeField(blank=True, null=True)),
