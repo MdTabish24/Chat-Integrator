@@ -106,19 +106,20 @@ class TelegramUserClientService:
             raise Exception('Session not found. Please restart verification.')
         
         try:
-            # Sign in with code
-            try:
-                await client.sign_in(phone_number, phone_code, phone_code_hash=phone_code_hash)
-            except Exception as e:
-                if 'SESSION_PASSWORD_NEEDED' in str(e):
-                    print('[telegram-user] 2FA password required')
-                    if not password:
+            # If password provided, directly sign in with password (2FA flow)
+            if password:
+                print('[telegram-user] Signing in with 2FA password')
+                await client.sign_in(password=password)
+            else:
+                # Sign in with code first
+                try:
+                    await client.sign_in(phone_number, phone_code, phone_code_hash=phone_code_hash)
+                except Exception as e:
+                    if 'SESSION_PASSWORD_NEEDED' in str(e) or 'Two-steps verification' in str(e):
+                        print('[telegram-user] 2FA password required')
                         return {'accountId': '', 'username': '', 'needPassword': True}
-                    
-                    # Sign in with password
-                    await client.sign_in(password=password)
-                else:
-                    raise
+                    else:
+                        raise
             
             # Get user info
             me = await client.get_me()
