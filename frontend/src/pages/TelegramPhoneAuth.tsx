@@ -42,11 +42,20 @@ export const TelegramPhoneAuth = () => {
 
       if (response.data.needPassword) {
         setStep('password');
+        setError(''); // Clear error when showing password field
       } else if (response.data.success) {
         navigate('/accounts?success=telegram');
       }
     } catch (err: any) {
-      setError(err.response?.data?.error || 'Invalid code');
+      const errorMsg = err.response?.data?.error || 'Invalid code';
+      
+      // Check if 2FA required from error message
+      if (errorMsg.includes('password is required') || errorMsg.includes('2FA')) {
+        setStep('password');
+        setError('Two-factor authentication is enabled. Please enter your password.');
+      } else {
+        setError(errorMsg);
+      }
     } finally {
       setLoading(false);
     }
