@@ -8,14 +8,14 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import AllowAny
-from asgiref.sync import async_to_sync
+from adrf.views import APIView as AsyncAPIView
 
 from .services.client import telegram_user_client
 from .services.sync import telegram_message_sync
 from apps.conversations.models import Conversation
 
 
-class StartPhoneAuthView(APIView):
+class StartPhoneAuthView(AsyncAPIView):
     """
     Start phone authentication
     
@@ -24,7 +24,7 @@ class StartPhoneAuthView(APIView):
     """
     permission_classes = [AllowAny]
     
-    def post(self, request):
+    async def post(self, request):
         try:
             if not hasattr(request, 'user_jwt') or not request.user_jwt:
                 return Response({'error': 'Unauthorized'}, status=status.HTTP_401_UNAUTHORIZED)
@@ -35,7 +35,7 @@ class StartPhoneAuthView(APIView):
             if not phone_number:
                 return Response({'error': 'Phone number required'}, status=status.HTTP_400_BAD_REQUEST)
             
-            result = async_to_sync(telegram_user_client.start_phone_verification)(user_id, phone_number)
+            result = await telegram_user_client.start_phone_verification(user_id, phone_number)
             
             return Response({
                 'success': True,
@@ -47,7 +47,7 @@ class StartPhoneAuthView(APIView):
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-class VerifyPhoneCodeView(APIView):
+class VerifyPhoneCodeView(AsyncAPIView):
     """
     Verify phone code
     
@@ -56,7 +56,7 @@ class VerifyPhoneCodeView(APIView):
     """
     permission_classes = [AllowAny]
     
-    def post(self, request):
+    async def post(self, request):
         try:
             if not hasattr(request, 'user_jwt') or not request.user_jwt:
                 return Response({'error': 'Unauthorized'}, status=status.HTTP_401_UNAUTHORIZED)
@@ -67,7 +67,7 @@ class VerifyPhoneCodeView(APIView):
             phone_code_hash = request.data.get('phoneCodeHash')
             password = request.data.get('password')
             
-            result = async_to_sync(telegram_user_client.verify_phone_code)(
+            result = await telegram_user_client.verify_phone_code(
                 user_id, phone_number, phone_code, phone_code_hash, password
             )
             

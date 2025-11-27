@@ -1,6 +1,7 @@
 # Django Core
 Django==5.0
 djangorestframework==3.14.0
+adrf==0.1.6
 django-cors-headers==4.3.0
 
 # Database (MySQL instead of PostgreSQL)
