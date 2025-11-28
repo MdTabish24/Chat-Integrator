@@ -35,12 +35,16 @@ class MessagingConsumer(AsyncWebsocketConsumer):
             await self.close(code=4001)
             return
         
-        # Join user-specific room
+        # Join user-specific room (gracefully handle Redis failures)
         self.user_room = f'user_{self.user_id}'
-        await self.channel_layer.group_add(
-            self.user_room,
-            self.channel_name
-        )
+        try:
+            if self.channel_layer:
+                await self.channel_layer.group_add(
+                    self.user_room,
+                    self.channel_name
+                )
+        except Exception as e:
+            print(f'[websocket] Redis error (non-fatal): {e}')
         
         await self.accept()
         

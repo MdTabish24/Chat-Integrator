@@ -182,34 +182,59 @@ X_FRAME_OPTIONS = 'DENY'
 # Migrated from backend/src/config/redis.ts
 REDIS_URL = config('REDIS_URL', default='redis://localhost:6379/0')
 
+# Configure cache with SSL support for Upstash
+CACHE_OPTIONS = {
+    'CLIENT_CLASS': 'django_redis.client.DefaultClient',
+    'CONNECTION_POOL_KWARGS': {
+        'max_connections': 50,
+        'retry_on_timeout': True,
+    },
+    'SOCKET_CONNECT_TIMEOUT': 30,
+    'SOCKET_TIMEOUT': 30,
+}
+
+if 'rediss://' in REDIS_URL:
+    CACHE_OPTIONS['CONNECTION_POOL_KWARGS']['ssl_cert_reqs'] = None
+
 CACHES = {
     'default': {
         'BACKEND': 'django_redis.cache.RedisCache',
         'LOCATION': REDIS_URL,
-        'OPTIONS': {
-            'CLIENT_CLASS': 'django_redis.client.DefaultClient',
-            'CONNECTION_POOL_KWARGS': {
-                'max_connections': 50,
-                'retry_on_timeout': True,
-            },
-            'SOCKET_CONNECT_TIMEOUT': 30,
-            'SOCKET_TIMEOUT': 30,
-        }
+        'OPTIONS': CACHE_OPTIONS
     }
 }
 
 # Channels Configuration (WebSocket)
 # Migrated from backend/src/services/websocketService.ts
-CHANNEL_LAYERS = {
-    'default': {
-        'BACKEND': 'channels_redis.core.RedisChannelLayer',
-        'CONFIG': {
-            'hosts': [REDIS_URL],
-            'capacity': 1500,
-            'expiry': 10,
+import ssl
+
+# Parse Redis URL for Upstash
+if 'rediss://' in REDIS_URL:
+    # Upstash uses SSL
+    CHANNEL_LAYERS = {
+        'default': {
+            'BACKEND': 'channels_redis.core.RedisChannelLayer',
+            'CONFIG': {
+                'hosts': [{
+                    'address': REDIS_URL,
+                    'ssl': ssl.SSLContext(ssl.PROTOCOL_TLS),
+                }],
+                'capacity': 1500,
+                'expiry': 10,
+            },
         },
-    },
-}
+    }
+else:
+    CHANNEL_LAYERS = {
+        'default': {
+            'BACKEND': 'channels_redis.core.RedisChannelLayer',
+            'CONFIG': {
+                'hosts': [REDIS_URL],
+                'capacity': 1500,
+                'expiry': 10,
+            },
+        },
+    }
 
 # Celery Configuration
 # Migrated from backend/src/config/queues.ts

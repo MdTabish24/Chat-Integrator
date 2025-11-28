@@ -119,7 +119,9 @@ class ConversationMessagesView(APIView):
         ).exists()
 
 
-class SendMessageView(APIView):
+from adrf.views import APIView as AsyncAPIView
+
+class SendMessageView(AsyncAPIView):
     """
     Send a message in a conversation
     
@@ -128,7 +130,7 @@ class SendMessageView(APIView):
     """
     permission_classes = [AllowAny]
     
-    def post(self, request, conversation_id):
+    async def post(self, request, conversation_id):
         try:
             if not hasattr(request, 'user_jwt') or not request.user_jwt:
                 return Response({'error': 'Unauthorized'}, status=status.HTTP_401_UNAUTHORIZED)
@@ -157,20 +159,16 @@ class SendMessageView(APIView):
             # Send message through Telethon for Telegram
             from apps.core.utils.crypto import encrypt
             from django.utils import timezone
-            import asyncio
             
             if conversation.account.platform == 'telegram':
                 # Use Telethon client
                 from apps.telegram.services.client import telegram_user_client
                 
-                async def send_telegram():
-                    await telegram_user_client.send_message(
-                        account_id=str(conversation.account.id),
-                        chat_id=conversation.platform_conversation_id,
-                        text=content
-                    )
-                
-                asyncio.run(send_telegram())
+                await telegram_user_client.send_message(
+                    account_id=str(conversation.account.id),
+                    chat_id=conversation.platform_conversation_id,
+                    text=content
+                )
                 sent_msg = {'platformMessageId': str(timezone.now().timestamp()), 'senderId': 'me', 'senderName': 'You', 'messageType': 'text', 'mediaUrl': None}
             else:
                 # Use adapter for other platforms
