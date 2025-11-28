@@ -36,7 +36,7 @@ class MessagingConsumer(AsyncWebsocketConsumer):
             return
         
         # Join user-specific room
-        self.user_room = f'user:{self.user_id}'
+        self.user_room = f'user_{self.user_id}'
         await self.channel_layer.group_add(
             self.user_room,
             self.channel_name

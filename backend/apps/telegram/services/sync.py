@@ -48,15 +48,19 @@ class TelegramMessageSyncService:
                 from urllib.parse import quote
                 avatar_url = f'https://ui-avatars.com/api/?name={quote(dialog_name)}&background=random&size=128'
                 
+                # Remove emojis from name (MySQL utf8mb4 issue)
+                import re
+                clean_name = re.sub(r'[^\x00-\x7F\u0080-\uFFFF]+', '', dialog_name)
+                
                 # Create or update conversation (async-safe)
                 @sync_to_async
-                def save_conversation_and_messages(dialog_id, dialog_name, avatar_url, dialog_date, messages_list):
+                def save_conversation_and_messages(dialog_id, clean_name, avatar_url, dialog_date, messages_list):
                     with transaction.atomic():
                         conversation, created = Conversation.objects.update_or_create(
                             account_id=account_id,
                             platform_conversation_id=dialog_id,
                             defaults={
-                                'participant_name': dialog_name,
+                                'participant_name': clean_name,
                                 'participant_id': dialog_id,
                                 'participant_avatar_url': avatar_url,
                                 'last_message_at': dialog_date,
@@ -100,7 +104,7 @@ class TelegramMessageSyncService:
                 messages = await telegram_user_client.get_messages(account_id, dialog_id, 20)
                 
                 # Save to database
-                saved_conversation = await save_conversation_and_messages(dialog_id, dialog_name, avatar_url, dialog_date, messages)
+                saved_conversation = await save_conversation_and_messages(dialog_id, clean_name, avatar_url, dialog_date, messages)
                 
                 # Emit WebSocket notification for conversation update
                 from apps.websocket.services import websocket_service

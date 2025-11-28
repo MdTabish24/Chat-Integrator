@@ -21,7 +21,7 @@ class WebSocketService:
     
     def _get_user_room(self, user_id: str) -> str:
         """Get the room name for a user"""
-        return f'user:{user_id}'
+        return f'user_{user_id}'
     
     def emit_new_message(self, user_id: str, message: Dict, conversation: Optional[Dict] = None) -> None:
         """
