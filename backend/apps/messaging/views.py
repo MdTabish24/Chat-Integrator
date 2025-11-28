@@ -156,7 +156,7 @@ class SendMessageView(APIView):
             
             # Send message through platform adapter
             from apps.platforms.adapters.factory import get_adapter
-            from apps.core.utils.crypto import encrypt_data
+            from apps.core.utils.crypto import encrypt
             from django.utils import timezone
             
             adapter = get_adapter(conversation.account.platform)
@@ -174,9 +174,9 @@ class SendMessageView(APIView):
                 platform_message_id=sent_msg.get('platformMessageId', str(timezone.now().timestamp())),
                 sender_id=sent_msg.get('senderId', 'me'),
                 sender_name=sent_msg.get('senderName', 'You'),
-                content=encrypt_data(content),
+                content=encrypt(content),
                 message_type=sent_msg.get('messageType', 'text'),
-                media_url=encrypt_data(sent_msg.get('mediaUrl')) if sent_msg.get('mediaUrl') else None,
+                media_url=encrypt(sent_msg.get('mediaUrl')) if sent_msg.get('mediaUrl') else None,
                 is_outgoing=True,
                 is_read=True,
                 sent_at=timezone.now()
@@ -187,6 +187,17 @@ class SendMessageView(APIView):
             conversation.save()
             
             serializer = MessageSerializer(message)
+            
+            # Emit WebSocket event for real-time update
+            from apps.websocket.services import websocket_service
+            from apps.conversations.serializers import ConversationSerializer
+            
+            websocket_service.emit_new_message(
+                user_id=user_id,
+                message=serializer.data,
+                conversation=ConversationSerializer(conversation).data
+            )
+            
             return Response({
                 'message': serializer.data,
                 'success': True

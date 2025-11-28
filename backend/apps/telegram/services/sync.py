@@ -93,12 +93,31 @@ class TelegramMessageSyncService:
                         
                         conversation.unread_count = unread_count
                         conversation.save()
+                        
+                        return conversation
                 
                 # Get messages from this conversation
                 messages = await telegram_user_client.get_messages(account_id, dialog_id, 20)
                 
                 # Save to database
-                await save_conversation_and_messages(dialog_id, dialog_name, avatar_url, dialog_date, messages)
+                saved_conversation = await save_conversation_and_messages(dialog_id, dialog_name, avatar_url, dialog_date, messages)
+                
+                # Emit WebSocket notification for conversation update
+                from apps.websocket.services import websocket_service
+                from apps.conversations.serializers import ConversationSerializer
+                from asgiref.sync import sync_to_async
+                
+                @sync_to_async
+                def get_user_id():
+                    from apps.oauth.models import ConnectedAccount
+                    account = ConnectedAccount.objects.get(id=account_id)
+                    return account.user_id
+                
+                user_id = await get_user_id()
+                websocket_service.emit_conversation_update(
+                    user_id=user_id,
+                    conversation=ConversationSerializer(saved_conversation).data
+                )
             
             print(f'[telegram-sync] Synced {len(dialogs)} conversations for account {account_id}')
         

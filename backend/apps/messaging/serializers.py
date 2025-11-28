@@ -4,7 +4,7 @@ Message serializers for request/response validation.
 
 from rest_framework import serializers
 from .models import Message
-from apps.core.utils.crypto import decrypt_data
+from apps.core.utils.crypto import decrypt
 
 
 class MessageSerializer(serializers.ModelSerializer):
@@ -36,7 +36,7 @@ class MessageSerializer(serializers.ModelSerializer):
         # Decrypt content if it's encrypted
         if data.get('content'):
             try:
-                data['content'] = decrypt_data(data['content'])
+                data['content'] = decrypt(data['content'])
             except Exception:
                 # If decryption fails, content might not be encrypted
                 pass
@@ -44,7 +44,7 @@ class MessageSerializer(serializers.ModelSerializer):
         # Decrypt media_url if it's encrypted
         if data.get('media_url'):
             try:
-                data['media_url'] = decrypt_data(data['media_url'])
+                data['media_url'] = decrypt(data['media_url'])
             except Exception:
                 pass
         
