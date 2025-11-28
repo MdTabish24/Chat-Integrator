@@ -1,10 +1,11 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
-import { io, Socket } from 'socket.io-client';
 import { Message, Conversation, Platform } from '../types';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 
   (typeof window !== 'undefined' && window.location.origin) || 
   'http://localhost:8000';
+
+const WS_BASE_URL = API_BASE_URL.replace('http://', 'ws://').replace('https://', 'wss://');
 
 interface UnreadCountUpdate {
   unreadCounts: Record<Platform, number>;
@@ -39,9 +40,11 @@ interface WebSocketHookCallbacks {
 }
 
 export const useWebSocket = (callbacks: WebSocketHookCallbacks = {}) => {
-  const socketRef = useRef<Socket | null>(null);
+  const socketRef = useRef<WebSocket | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const reconnectTimeoutRef = useRef<NodeJS.Timeout>();
+  const reconnectAttemptsRef = useRef(0);
 
   const connect = useCallback(() => {
     const token = localStorage.getItem('access_token');
@@ -50,91 +53,96 @@ export const useWebSocket = (callbacks: WebSocketHookCallbacks = {}) => {
       return;
     }
 
-    if (socketRef.current?.connected) {
+    if (socketRef.current?.readyState === WebSocket.OPEN) {
       console.log('WebSocket already connected');
       return;
     }
 
     console.log('Connecting to WebSocket...');
 
-    const socket = io(API_BASE_URL, {
-      transports: ['websocket', 'polling'],
-      reconnection: true,
-      reconnectionDelay: 1000,
-      reconnectionDelayMax: 5000,
-      reconnectionAttempts: 5,
-    });
+    const ws = new WebSocket(`${WS_BASE_URL}/ws/messages/?token=${token}`);
+    socketRef.current = ws;
 
-    socketRef.current = socket;
-
-    socket.on('connect', () => {
+    ws.onopen = () => {
       console.log('WebSocket connected');
       setIsConnected(true);
-      
-      // Authenticate the socket
-      socket.emit('authenticate', { token });
-    });
+      reconnectAttemptsRef.current = 0;
+    };
 
-    socket.on('authenticated', (data: { userId: string; email: string }) => {
-      console.log('WebSocket authenticated:', data);
-      setIsAuthenticated(true);
-    });
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        const eventType = data.event;
 
-    socket.on('auth_error', (data: { message: string }) => {
-      console.error('WebSocket authentication error:', data.message);
-      setIsAuthenticated(false);
-      socket.disconnect();
-    });
+        switch (eventType) {
+          case 'authenticated':
+            console.log('WebSocket authenticated:', data.data);
+            setIsAuthenticated(true);
+            break;
 
-    socket.on('disconnect', (reason) => {
-      console.log('WebSocket disconnected:', reason);
+          case 'new_message':
+            console.log('New message received:', data.data);
+            callbacks.onNewMessage?.(data.data);
+            break;
+
+          case 'unread_count_update':
+            console.log('Unread count update:', data.data);
+            callbacks.onUnreadCountUpdate?.(data.data);
+            break;
+
+          case 'message_status_update':
+            console.log('Message status update:', data.data);
+            callbacks.onMessageStatusUpdate?.(data.data);
+            break;
+
+          case 'conversation_update':
+            console.log('Conversation update:', data.data);
+            callbacks.onConversationUpdate?.(data.data);
+            break;
+
+          case 'error':
+            console.error('WebSocket error:', data.data);
+            callbacks.onError?.(data.data);
+            break;
+
+          default:
+            console.log('Unknown event type:', eventType, data);
+        }
+      } catch (err) {
+        console.error('Error parsing WebSocket message:', err);
+      }
+    };
+
+    ws.onerror = (error) => {
+      console.error('WebSocket error:', error);
       setIsConnected(false);
       setIsAuthenticated(false);
-    });
+    };
 
-    socket.on('new_message', (data: NewMessageEvent) => {
-      console.log('New message received:', data);
-      callbacks.onNewMessage?.(data);
-    });
+    ws.onclose = () => {
+      console.log('WebSocket disconnected');
+      setIsConnected(false);
+      setIsAuthenticated(false);
 
-    socket.on('unread_count_update', (data: UnreadCountUpdate) => {
-      console.log('Unread count update:', data);
-      callbacks.onUnreadCountUpdate?.(data);
-    });
-
-    socket.on('message_status_update', (data: MessageStatusUpdate) => {
-      console.log('Message status update:', data);
-      callbacks.onMessageStatusUpdate?.(data);
-    });
-
-    socket.on('conversation_update', (data: ConversationUpdateEvent) => {
-      console.log('Conversation update:', data);
-      callbacks.onConversationUpdate?.(data);
-    });
-
-    socket.on('error', (data: { error: string; code?: string }) => {
-      console.error('WebSocket error:', data);
-      callbacks.onError?.(data);
-    });
-
-    socket.on('connect_error', (error) => {
-      console.error('WebSocket connection error:', error);
-    });
-
-    socket.on('reconnect', (attemptNumber) => {
-      console.log('WebSocket reconnected after', attemptNumber, 'attempts');
-    });
-
-    socket.on('reconnect_failed', () => {
-      console.error('WebSocket reconnection failed');
-    });
-
+      // Reconnect with exponential backoff
+      if (reconnectAttemptsRef.current < 5) {
+        const delay = Math.min(1000 * Math.pow(2, reconnectAttemptsRef.current), 5000);
+        console.log(`Reconnecting in ${delay}ms...`);
+        reconnectTimeoutRef.current = setTimeout(() => {
+          reconnectAttemptsRef.current++;
+          connect();
+        }, delay);
+      }
+    };
   }, [callbacks]);
 
   const disconnect = useCallback(() => {
+    if (reconnectTimeoutRef.current) {
+      clearTimeout(reconnectTimeoutRef.current);
+    }
     if (socketRef.current) {
       console.log('Disconnecting WebSocket...');
-      socketRef.current.disconnect();
+      socketRef.current.close();
       socketRef.current = null;
       setIsConnected(false);
       setIsAuthenticated(false);

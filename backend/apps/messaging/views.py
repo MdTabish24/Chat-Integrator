@@ -155,17 +155,28 @@ class SendMessageView(APIView):
                 )
             
             # Send message through platform adapter
-            # This will be implemented with adapters in Phase 5
+            from apps.platforms.adapters.factory import get_adapter
+            from apps.core.utils.crypto import encrypt_data
             from django.utils import timezone
             
-            # Create message object
+            adapter = get_adapter(conversation.account.platform)
+            
+            # Send via platform
+            sent_msg = adapter.send_message(
+                account_id=str(conversation.account.id),
+                conversation_id=conversation.platform_conversation_id,
+                content=content
+            )
+            
+            # Create message object with encrypted content
             message = Message.objects.create(
                 conversation=conversation,
-                platform_message_id=str(timezone.now().timestamp()),
-                sender_id='me',
-                sender_name='You',
-                content=content,
-                message_type='text',
+                platform_message_id=sent_msg.get('platformMessageId', str(timezone.now().timestamp())),
+                sender_id=sent_msg.get('senderId', 'me'),
+                sender_name=sent_msg.get('senderName', 'You'),
+                content=encrypt_data(content),
+                message_type=sent_msg.get('messageType', 'text'),
+                media_url=encrypt_data(sent_msg.get('mediaUrl')) if sent_msg.get('mediaUrl') else None,
                 is_outgoing=True,
                 is_read=True,
                 sent_at=timezone.now()
