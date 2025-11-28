@@ -38,6 +38,8 @@ class TelegramMessageSyncService:
             dialogs = await telegram_user_client.get_dialogs(account_id, 50)
             print(f'[telegram-sync] Found {len(dialogs)} dialogs')
             
+            from asgiref.sync import sync_to_async
+            
             for dialog in dialogs:
                 dialog_id = str(dialog.get('id', 'unknown'))
                 dialog_name = dialog.get('name', 'Unknown Chat')
@@ -51,11 +53,12 @@ class TelegramMessageSyncService:
                 import re
                 clean_name = re.sub(r'[^\x00-\x7F\u0080-\uFFFF]+', '', dialog_name)
                 
-                # Create or update conversation (async-safe)
-                from asgiref.sync import sync_to_async as s2a
+                # Get messages from this conversation BEFORE saving
+                messages = await telegram_user_client.get_messages(account_id, dialog_id, 20)
                 
-                @s2a
-                def save_conversation_and_messages(dialog_id, clean_name, avatar_url, dialog_date, messages_list):
+                # Create or update conversation (async-safe)
+                @sync_to_async
+                def save_conversation_and_messages():
                     with transaction.atomic():
                         conversation, created = Conversation.objects.update_or_create(
                             account_id=account_id,
@@ -68,7 +71,7 @@ class TelegramMessageSyncService:
                             }
                         )
                         
-                        for message in messages_list:
+                        for message in messages:
                             if not message.get('text'):
                                 continue
                             
@@ -101,33 +104,31 @@ class TelegramMessageSyncService:
                         
                         return conversation
                 
-                # Get messages from this conversation
-                messages = await telegram_user_client.get_messages(account_id, dialog_id, 20)
-                
                 # Save to database
-                saved_conversation = await save_conversation_and_messages(dialog_id, clean_name, avatar_url, dialog_date, messages)
+                saved_conversation = await save_conversation_and_messages()
                 
                 # Emit WebSocket notification for conversation update
                 from apps.websocket.services import websocket_service
                 from apps.conversations.serializers import ConversationSerializer
-                from asgiref.sync import sync_to_async
                 
                 @sync_to_async
-                def get_user_id():
+                def get_user_and_serialize():
                     from apps.oauth.models import ConnectedAccount
                     account = ConnectedAccount.objects.get(id=account_id)
-                    return account.user_id
+                    return account.user_id, ConversationSerializer(saved_conversation).data
                 
-                user_id = await get_user_id()
+                user_id, conv_data = await get_user_and_serialize()
                 websocket_service.emit_conversation_update(
                     user_id=user_id,
-                    conversation=ConversationSerializer(saved_conversation).data
+                    conversation=conv_data
                 )
             
             print(f'[telegram-sync] Synced {len(dialogs)} conversations for account {account_id}')
         
         except Exception as e:
             print(f'[telegram-sync] Sync failed: {e}')
+            import traceback
+            traceback.print_exc()
             raise
     
     async def start_periodic_sync(self, account_id: str) -> None:

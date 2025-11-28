@@ -200,14 +200,22 @@ class TelegramUserClientService:
             # Get session string
             session_string = decrypt(account.access_token)
             
-            # Create client from saved session
-            client = TelegramClient(
-                StringSession(session_string),
-                self.api_id,
-                self.api_hash
-            )
+            # Create client from saved session in a thread-safe way
+            import asyncio
+            loop = asyncio.get_event_loop()
             
-            await client.connect()
+            def create_client():
+                return TelegramClient(
+                    StringSession(session_string),
+                    self.api_id,
+                    self.api_hash,
+                    loop=loop
+                )
+            
+            client = await loop.run_in_executor(None, create_client)
+            
+            if not client.is_connected():
+                await client.connect()
             
             self.sessions[account_id] = client
             
@@ -233,25 +241,35 @@ class TelegramUserClientService:
         Returns:
             List of dialogs
         """
-        client = await self.load_session(account_id)
-        if not client:
-            raise Exception('Session not found')
-        
-        # Get dialogs
-        dialogs = await client.get_dialogs(limit=limit)
-        
-        result = []
-        for dialog in dialogs:
-            result.append({
-                'id': str(dialog.id),
-                'name': dialog.name or dialog.title or 'Unknown',
-                'isUser': dialog.is_user,
-                'isGroup': dialog.is_group,
-                'unreadCount': dialog.unread_count or 0,
-                'date': int(dialog.date.timestamp()) if dialog.date else 0,
-            })
-        
-        return result
+        try:
+            client = await self.load_session(account_id)
+            if not client:
+                raise Exception('Session not found')
+            
+            # Ensure client is connected
+            if not client.is_connected():
+                await client.connect()
+            
+            # Get dialogs
+            dialogs = await client.get_dialogs(limit=limit)
+            
+            result = []
+            for dialog in dialogs:
+                result.append({
+                    'id': str(dialog.id),
+                    'name': dialog.name or dialog.title or 'Unknown',
+                    'isUser': dialog.is_user,
+                    'isGroup': dialog.is_group,
+                    'unreadCount': dialog.unread_count or 0,
+                    'date': int(dialog.date.timestamp()) if dialog.date else 0,
+                })
+            
+            return result
+        except Exception as e:
+            print(f'[telegram-user] Error getting dialogs: {e}')
+            import traceback
+            traceback.print_exc()
+            raise
     
     async def get_messages(self, account_id: str, chat_id: str, limit: int = 50) -> List[Dict]:
         """
@@ -313,12 +331,22 @@ class TelegramUserClientService:
             chat_id: Chat ID
             text: Message text
         """
-        client = await self.load_session(account_id)
-        if not client:
-            raise Exception('Session not found')
-        
-        await client.send_message(int(chat_id), text)
-        print(f'[telegram-user] Message sent to chat {chat_id}')
+        try:
+            client = await self.load_session(account_id)
+            if not client:
+                raise Exception('Session not found')
+            
+            # Ensure client is connected
+            if not client.is_connected():
+                await client.connect()
+            
+            await client.send_message(int(chat_id), text)
+            print(f'[telegram-user] Message sent to chat {chat_id}')
+        except Exception as e:
+            print(f'[telegram-user] Error sending message: {e}')
+            import traceback
+            traceback.print_exc()
+            raise Exception(f'Failed to send message: {str(e)}')
     
     async def disconnect(self, account_id: str) -> None:
         """

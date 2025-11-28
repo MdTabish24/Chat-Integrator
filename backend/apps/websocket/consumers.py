@@ -66,10 +66,14 @@ class MessagingConsumer(AsyncWebsocketConsumer):
         Migrated from: handleDisconnect() in websocketService.ts
         """
         if hasattr(self, 'user_room'):
-            await self.channel_layer.group_discard(
-                self.user_room,
-                self.channel_name
-            )
+            try:
+                if self.channel_layer:
+                    await self.channel_layer.group_discard(
+                        self.user_room,
+                        self.channel_name
+                    )
+            except Exception as e:
+                print(f'[websocket] Redis error on disconnect (non-fatal): {e}')
         
         print(f'[websocket] User {self.user_id} disconnected: {self.channel_name}')
     
