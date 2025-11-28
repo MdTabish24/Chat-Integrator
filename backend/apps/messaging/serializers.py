@@ -33,20 +33,19 @@ class MessageSerializer(serializers.ModelSerializer):
         """Decrypt content before sending to frontend"""
         data = super().to_representation(instance)
         
-        # Decrypt content if it's encrypted
-        if data.get('content'):
+        # Decrypt content if it's encrypted (format: iv:encryptedData)
+        if data.get('content') and ':' in data['content']:
             try:
                 data['content'] = decrypt(data['content'])
-            except Exception:
-                # If decryption fails, content might not be encrypted
-                pass
+            except Exception as e:
+                print(f'[serializer] Failed to decrypt content: {e}')
         
         # Decrypt media_url if it's encrypted
-        if data.get('media_url'):
+        if data.get('media_url') and ':' in str(data['media_url']):
             try:
                 data['media_url'] = decrypt(data['media_url'])
-            except Exception:
-                pass
+            except Exception as e:
+                print(f'[serializer] Failed to decrypt media_url: {e}')
         
         return data
 

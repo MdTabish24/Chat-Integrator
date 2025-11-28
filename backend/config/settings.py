@@ -204,23 +204,28 @@ CACHES = {
     }
 }
 
-# Channels Configuration (WebSocket)
-# Migrated from backend/src/services/websocketService.ts
+# Channels Configuration (WebSocket) - Optimized for Upstash free tier (10 max connections)
 import ssl
 
-# Parse Redis URL for Upstash
 if 'rediss://' in REDIS_URL:
-    # Upstash uses SSL
     CHANNEL_LAYERS = {
         'default': {
             'BACKEND': 'channels_redis.core.RedisChannelLayer',
             'CONFIG': {
-                'hosts': [{
-                    'address': REDIS_URL,
-                    'ssl': ssl.SSLContext(ssl.PROTOCOL_TLS),
-                }],
-                'capacity': 1500,
-                'expiry': 10,
+                'hosts': [REDIS_URL],
+                'capacity': 50,
+                'expiry': 30,
+                'group_expiry': 30,
+                'connection_kwargs': {
+                    'max_connections': 5,
+                    'retry_on_timeout': True,
+                    'socket_keepalive': True,
+                    'socket_keepalive_options': {
+                        1: 1,  # TCP_KEEPIDLE
+                        2: 1,  # TCP_KEEPINTVL  
+                        3: 3,  # TCP_KEEPCNT
+                    },
+                },
             },
         },
     }
@@ -230,8 +235,13 @@ else:
             'BACKEND': 'channels_redis.core.RedisChannelLayer',
             'CONFIG': {
                 'hosts': [REDIS_URL],
-                'capacity': 1500,
-                'expiry': 10,
+                'capacity': 50,
+                'expiry': 30,
+                'group_expiry': 30,
+                'connection_kwargs': {
+                    'max_connections': 5,
+                    'retry_on_timeout': True,
+                },
             },
         },
     }

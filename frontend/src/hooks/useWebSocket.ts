@@ -45,6 +45,12 @@ export const useWebSocket = (callbacks: WebSocketHookCallbacks = {}) => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout>();
   const reconnectAttemptsRef = useRef(0);
+  const callbacksRef = useRef(callbacks);
+
+  // Update callbacks ref without triggering reconnect
+  useEffect(() => {
+    callbacksRef.current = callbacks;
+  }, [callbacks]);
 
   const connect = useCallback(() => {
     const token = localStorage.getItem('access_token');
@@ -82,27 +88,27 @@ export const useWebSocket = (callbacks: WebSocketHookCallbacks = {}) => {
 
           case 'new_message':
             console.log('New message received:', data.data);
-            callbacks.onNewMessage?.(data.data);
+            callbacksRef.current.onNewMessage?.(data.data);
             break;
 
           case 'unread_count_update':
             console.log('Unread count update:', data.data);
-            callbacks.onUnreadCountUpdate?.(data.data);
+            callbacksRef.current.onUnreadCountUpdate?.(data.data);
             break;
 
           case 'message_status_update':
             console.log('Message status update:', data.data);
-            callbacks.onMessageStatusUpdate?.(data.data);
+            callbacksRef.current.onMessageStatusUpdate?.(data.data);
             break;
 
           case 'conversation_update':
             console.log('Conversation update:', data.data);
-            callbacks.onConversationUpdate?.(data.data);
+            callbacksRef.current.onConversationUpdate?.(data.data);
             break;
 
           case 'error':
             console.error('WebSocket error:', data.data);
-            callbacks.onError?.(data.data);
+            callbacksRef.current.onError?.(data.data);
             break;
 
           default:
@@ -134,7 +140,7 @@ export const useWebSocket = (callbacks: WebSocketHookCallbacks = {}) => {
         }, delay);
       }
     };
-  }, [callbacks]);
+  }, []);
 
   const disconnect = useCallback(() => {
     if (reconnectTimeoutRef.current) {
