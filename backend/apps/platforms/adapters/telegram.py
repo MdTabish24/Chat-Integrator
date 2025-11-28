@@ -86,32 +86,10 @@ class TelegramAdapter(BasePlatformAdapter):
     
     def send_message(self, account_id: str, conversation_id: str, content: str) -> Dict:
         """
-        Send a message using Telegram Bot API
-        
-        Migrated from: sendMessage() in TelegramAdapter.ts
+        Send message using Telethon (user client)
+        This adapter is not used anymore - use telegram_user_client directly
         """
-        def _send():
-            token = self.get_access_token(account_id)
-            url = f'{self.BASE_URL}/bot{token}/sendMessage'
-            
-            response = requests.post(
-                url,
-                json={
-                    'chat_id': conversation_id,
-                    'text': content,
-                },
-                timeout=self.timeout
-            )
-            response.raise_for_status()
-            data = response.json()
-            
-            if not data.get('ok'):
-                raise Exception(f"Telegram API error: {data.get('description')}")
-            
-            sent_message = data['result']
-            return self._convert_telegram_message(sent_message, account_id, is_outgoing=True)
-        
-        return self.execute_with_retry(_send, account_id)
+        raise Exception('Use telegram_user_client.send_message() instead of adapter')
     
     def mark_as_read(self, account_id: str, message_id: str) -> None:
         """

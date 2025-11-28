@@ -154,19 +154,33 @@ class SendMessageView(APIView):
                     status=status.HTTP_404_NOT_FOUND
                 )
             
-            # Send message through platform adapter
-            from apps.platforms.adapters.factory import get_adapter
+            # Send message through Telethon for Telegram
             from apps.core.utils.crypto import encrypt
             from django.utils import timezone
+            import asyncio
             
-            adapter = get_adapter(conversation.account.platform)
-            
-            # Send via platform
-            sent_msg = adapter.send_message(
-                account_id=str(conversation.account.id),
-                conversation_id=conversation.platform_conversation_id,
-                content=content
-            )
+            if conversation.account.platform == 'telegram':
+                # Use Telethon client
+                from apps.telegram.services.client import telegram_user_client
+                
+                async def send_telegram():
+                    await telegram_user_client.send_message(
+                        account_id=str(conversation.account.id),
+                        chat_id=conversation.platform_conversation_id,
+                        text=content
+                    )
+                
+                asyncio.run(send_telegram())
+                sent_msg = {'platformMessageId': str(timezone.now().timestamp()), 'senderId': 'me', 'senderName': 'You', 'messageType': 'text', 'mediaUrl': None}
+            else:
+                # Use adapter for other platforms
+                from apps.platforms.adapters.factory import get_adapter
+                adapter = get_adapter(conversation.account.platform)
+                sent_msg = adapter.send_message(
+                    account_id=str(conversation.account.id),
+                    conversation_id=conversation.platform_conversation_id,
+                    content=content
+                )
             
             # Create message object with encrypted content
             message = Message.objects.create(

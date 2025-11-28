@@ -8,7 +8,6 @@ from typing import Optional
 from datetime import datetime
 from django.utils import timezone
 from django.db import transaction
-from asgiref.sync import sync_to_async
 
 from .client import telegram_user_client
 from apps.conversations.models import Conversation
@@ -53,7 +52,9 @@ class TelegramMessageSyncService:
                 clean_name = re.sub(r'[^\x00-\x7F\u0080-\uFFFF]+', '', dialog_name)
                 
                 # Create or update conversation (async-safe)
-                @sync_to_async
+                from asgiref.sync import sync_to_async as s2a
+                
+                @s2a
                 def save_conversation_and_messages(dialog_id, clean_name, avatar_url, dialog_date, messages_list):
                     with transaction.atomic():
                         conversation, created = Conversation.objects.update_or_create(
