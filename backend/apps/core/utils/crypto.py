@@ -106,13 +106,61 @@ def encrypt(text: str) -> str:
         raise EncryptionError(f'Failed to encrypt data: {str(e)}')
 
 
+def _decrypt_legacy_hex_format(text: str) -> str:
+    """
+    Decrypt data in legacy hex format: iv_hex:ciphertext_hex
+    This format was used in older versions of the encryption.
+    
+    Args:
+        text: The hex-encoded encrypted text in format iv:ciphertext
+        
+    Returns:
+        Decrypted plain text string
+    """
+    from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+    from cryptography.hazmat.backends import default_backend
+    
+    parts = text.split(':')
+    if len(parts) != 2:
+        raise EncryptionError('Invalid legacy format: expected iv:ciphertext')
+    
+    iv_hex, ciphertext_hex = parts
+    
+    try:
+        iv = bytes.fromhex(iv_hex)
+        ciphertext = bytes.fromhex(ciphertext_hex)
+    except ValueError:
+        raise EncryptionError('Invalid legacy format: not valid hex')
+    
+    # Legacy format used AES-256-CBC with 16-byte IV
+    if len(iv) != 16:
+        raise EncryptionError('Invalid legacy IV length')
+    
+    # Create AES-CBC cipher for legacy decryption
+    cipher = Cipher(algorithms.AES(get_key()), modes.CBC(iv), backend=default_backend())
+    decryptor = cipher.decryptor()
+    
+    # Decrypt
+    padded_plaintext = decryptor.update(ciphertext) + decryptor.finalize()
+    
+    # Remove PKCS7 padding
+    padding_length = padded_plaintext[-1]
+    if padding_length > 16 or padding_length == 0:
+        raise EncryptionError('Invalid padding')
+    
+    plaintext = padded_plaintext[:-padding_length]
+    return plaintext.decode('utf-8')
+
+
 def decrypt(text: str) -> str:
     """
     Decrypt a string that was encrypted with the encrypt function.
-    Expects base64 encoded data in format: IV + ciphertext + tag
+    Supports both:
+    - New format: base64 encoded (IV + ciphertext + tag) for AES-256-GCM
+    - Legacy format: hex encoded iv:ciphertext for AES-256-CBC
     
     Args:
-        text: The base64 encoded encrypted text to decrypt
+        text: The encrypted text to decrypt
         
     Returns:
         Decrypted plain text string
@@ -129,6 +177,20 @@ def decrypt(text: str) -> str:
     if not text:
         raise EncryptionError('Cannot decrypt empty text')
     
+    # Check for legacy hex format (iv:ciphertext)
+    if ':' in text and len(text.split(':')) == 2:
+        parts = text.split(':')
+        # Verify both parts look like hex strings
+        try:
+            bytes.fromhex(parts[0])
+            bytes.fromhex(parts[1])
+            # This is legacy format, try to decrypt it
+            return _decrypt_legacy_hex_format(text)
+        except (ValueError, EncryptionError):
+            # Not valid hex, might be base64 with colon in it (unlikely but possible)
+            pass
+    
+    # Try new base64 format (AES-256-GCM)
     try:
         # Decode base64
         try:
@@ -202,7 +264,10 @@ def verify_encryption_key() -> bool:
 
 def is_encrypted(text: str) -> bool:
     """
-    Check if a string appears to be encrypted (valid base64 with correct format).
+    Check if a string appears to be encrypted.
+    Supports both:
+    - New format: valid base64 with correct AES-256-GCM structure
+    - Legacy format: hex encoded iv:ciphertext
     
     Args:
         text: The text to check
@@ -213,6 +278,19 @@ def is_encrypted(text: str) -> bool:
     if not text or not isinstance(text, str):
         return False
     
+    # Check for legacy hex format (iv:ciphertext)
+    if ':' in text and len(text.split(':')) == 2:
+        parts = text.split(':')
+        try:
+            iv_bytes = bytes.fromhex(parts[0])
+            ct_bytes = bytes.fromhex(parts[1])
+            # Legacy format used 16-byte IV
+            if len(iv_bytes) == 16 and len(ct_bytes) >= 16:
+                return True
+        except ValueError:
+            pass
+    
+    # Check for new base64 format
     try:
         # Try to decode as base64
         decoded = base64.b64decode(text)

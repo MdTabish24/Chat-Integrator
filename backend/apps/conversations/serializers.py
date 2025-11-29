@@ -4,7 +4,7 @@ Conversation serializers for request/response validation.
 
 from rest_framework import serializers
 from .models import Conversation
-from apps.core.utils.crypto import decrypt
+from apps.core.utils.crypto import decrypt, is_encrypted
 
 
 class ConversationSerializer(serializers.ModelSerializer):
@@ -33,7 +33,7 @@ class ConversationSerializer(serializers.ModelSerializer):
         data = super().to_representation(instance)
         
         # Decrypt participant_name if encrypted
-        if data.get('participant_name'):
+        if data.get('participant_name') and is_encrypted(data['participant_name']):
             try:
                 data['participant_name'] = decrypt(data['participant_name'])
             except Exception:
@@ -64,7 +64,7 @@ class ConversationListSerializer(serializers.ModelSerializer):
         data = super().to_representation(instance)
         
         # Decrypt participant_name if encrypted
-        if data.get('participant_name'):
+        if data.get('participant_name') and is_encrypted(data['participant_name']):
             try:
                 data['participant_name'] = decrypt(data['participant_name'])
             except Exception:
