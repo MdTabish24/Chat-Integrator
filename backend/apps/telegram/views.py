@@ -28,16 +28,23 @@ class StartPhoneAuthView(AsyncAPIView):
     
     async def post(self, request):
         try:
+            print(f'[telegram-auth] Phone auth request received')
+            
             if not hasattr(request, 'user_jwt') or not request.user_jwt:
+                print(f'[telegram-auth] Unauthorized - no JWT')
                 return Response({'error': 'Unauthorized'}, status=status.HTTP_401_UNAUTHORIZED)
             
             user_id = request.user_jwt['user_id']
             phone_number = request.data.get('phoneNumber')
             
+            print(f'[telegram-auth] User {user_id} requesting code for {phone_number}')
+            
             if not phone_number:
                 return Response({'error': 'Phone number required'}, status=status.HTTP_400_BAD_REQUEST)
             
             result = await telegram_user_client.start_phone_verification(user_id, phone_number)
+            
+            print(f'[telegram-auth] Code sent successfully for {phone_number}')
             
             return Response({
                 'success': True,
@@ -45,7 +52,9 @@ class StartPhoneAuthView(AsyncAPIView):
             })
         
         except Exception as e:
-            print(f'[telegram-user] Phone auth failed: {e}')
+            import traceback
+            print(f'[telegram-auth] Phone auth failed: {e}')
+            traceback.print_exc()
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 

@@ -38,23 +38,42 @@ class TelegramUserClientService:
                 StringSession(),
                 self.api_id,
                 self.api_hash,
-                connection_retries=5,
-                timeout=30
+                connection_retries=10,
+                timeout=60,  # Increased timeout for DC migration
+                request_retries=3,
             )
             
+            print('[telegram-user] Connecting to Telegram...')
             await client.connect()
-            print('[telegram-user] Client connected')
+            print('[telegram-user] Client connected, sending code request...')
             
-            result = await client.send_code_request(phone_number)
-            print('[telegram-user] Code sent successfully')
+            # Send code with explicit timeout handling
+            try:
+                result = await asyncio.wait_for(
+                    client.send_code_request(phone_number),
+                    timeout=45.0  # 45 second timeout for code request
+                )
+            except asyncio.TimeoutError:
+                print('[telegram-user] Code request timed out, retrying...')
+                # Retry once
+                result = await asyncio.wait_for(
+                    client.send_code_request(phone_number),
+                    timeout=45.0
+                )
+            
+            print(f'[telegram-user] Code sent successfully, hash: {result.phone_code_hash[:10]}...')
             
             temp_key = f'temp_{user_id}_{phone_number}'
             self.temp_sessions[temp_key] = client
             
             return {'phoneCodeHash': result.phone_code_hash}
         
+        except asyncio.TimeoutError:
+            print(f'[telegram-user] Phone verification timed out')
+            raise Exception('Request timed out. Please try again.')
         except Exception as e:
             print(f'[telegram-user] Phone verification failed: {e}')
+            traceback.print_exc()
             raise Exception(f'Failed to send verification code: {str(e)}')
     
     async def verify_phone_code(
