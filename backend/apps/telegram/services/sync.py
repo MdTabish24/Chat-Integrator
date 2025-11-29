@@ -7,7 +7,7 @@ Migrated from backend/src/services/telegram/TelegramMessageSync.ts
 import re
 import traceback
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timezone as dt_timezone
 from urllib.parse import quote
 
 from django.utils import timezone
@@ -74,7 +74,7 @@ class TelegramMessageSyncService:
         
         # Convert timestamp to datetime
         if dialog_date:
-            dialog_datetime = datetime.fromtimestamp(dialog_date, tz=timezone.utc)
+            dialog_datetime = datetime.fromtimestamp(dialog_date, tz=dt_timezone.utc)
         else:
             dialog_datetime = timezone.now()
         
@@ -149,7 +149,7 @@ class TelegramMessageSyncService:
                     # Get message datetime
                     msg_date = msg.get('date', 0)
                     if msg_date:
-                        msg_datetime = datetime.fromtimestamp(msg_date, tz=timezone.utc)
+                        msg_datetime = datetime.fromtimestamp(msg_date, tz=dt_timezone.utc)
                     else:
                         msg_datetime = timezone.now()
                     

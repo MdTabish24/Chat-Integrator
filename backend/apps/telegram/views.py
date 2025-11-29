@@ -175,11 +175,11 @@ class SendMessageView(AsyncAPIView):
                     )
                     
                     from django.utils import timezone
-                    from datetime import datetime
+                    from datetime import datetime, timezone as dt_timezone
                     
                     msg_date = result.get('date', 0)
                     if msg_date:
-                        msg_datetime = datetime.fromtimestamp(msg_date, tz=timezone.utc)
+                        msg_datetime = datetime.fromtimestamp(msg_date, tz=dt_timezone.utc)
                     else:
                         msg_datetime = timezone.now()
                     
@@ -253,21 +253,32 @@ class ResetAndSyncView(AsyncAPIView):
             if not hasattr(request, 'user_jwt') or not request.user_jwt:
                 return Response({'error': 'Unauthorized'}, status=status.HTTP_401_UNAUTHORIZED)
             
+            print(f'[telegram-reset] Starting reset for account {account_id}')
+            
             @sync_to_async
             def delete_conversations():
                 # Delete messages first (cascade should handle this, but being explicit)
                 conversations = Conversation.objects.filter(account_id=account_id)
+                conv_count = conversations.count()
+                msg_count = 0
                 for conv in conversations:
+                    msg_count += Message.objects.filter(conversation=conv).count()
                     Message.objects.filter(conversation=conv).delete()
                 conversations.delete()
+                return conv_count, msg_count
             
-            await delete_conversations()
+            conv_count, msg_count = await delete_conversations()
+            print(f'[telegram-reset] Deleted {conv_count} conversations and {msg_count} messages')
             
             # Resync
+            print(f'[telegram-reset] Starting fresh sync...')
             await telegram_message_sync.sync_messages(account_id)
             
+            print(f'[telegram-reset] Reset and sync completed successfully')
             return Response({'success': True, 'message': 'Reset and synced successfully'})
         
         except Exception as e:
-            print(f'[telegram-user] Reset failed: {e}')
+            import traceback
+            print(f'[telegram-reset] Reset failed: {e}')
+            traceback.print_exc()
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

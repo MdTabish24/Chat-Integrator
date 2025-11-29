@@ -185,9 +185,22 @@ const Dashboard: React.FC = () => {
         const telegramAccount = connectedAccounts.find(acc => acc.platform === 'telegram');
         if (telegramAccount) {
           try {
-            await apiClient.post(`/api/telegram/${telegramAccount.id}/sync`);
-          } catch (syncErr) {
+            // Use reset endpoint to clear old data and fetch fresh from Telegram
+            await apiClient.post(`/api/telegram/${telegramAccount.id}/reset`, {}, {
+              timeout: 120000, // 2 minutes for full reset and sync
+            });
+          } catch (syncErr: any) {
             console.error('Telegram sync error:', syncErr);
+            // If reset fails, try regular sync
+            if (syncErr.response?.status !== 401) {
+              try {
+                await apiClient.post(`/api/telegram/${telegramAccount.id}/sync`, {}, {
+                  timeout: 60000,
+                });
+              } catch (fallbackErr) {
+                console.error('Telegram fallback sync error:', fallbackErr);
+              }
+            }
           }
         }
       }
