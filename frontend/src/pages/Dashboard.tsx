@@ -185,22 +185,13 @@ const Dashboard: React.FC = () => {
         const telegramAccount = connectedAccounts.find(acc => acc.platform === 'telegram');
         if (telegramAccount) {
           try {
-            // Use reset endpoint to clear old data and fetch fresh from Telegram
-            await apiClient.post(`/api/telegram/${telegramAccount.id}/reset`, {}, {
-              timeout: 120000, // 2 minutes for full reset and sync
+            // Use sync endpoint (faster than reset)
+            await apiClient.post(`/api/telegram/${telegramAccount.id}/sync`, {}, {
+              timeout: 90000, // 90 seconds for sync
             });
           } catch (syncErr: any) {
             console.error('Telegram sync error:', syncErr);
-            // If reset fails, try regular sync
-            if (syncErr.response?.status !== 401) {
-              try {
-                await apiClient.post(`/api/telegram/${telegramAccount.id}/sync`, {}, {
-                  timeout: 60000,
-                });
-              } catch (fallbackErr) {
-                console.error('Telegram fallback sync error:', fallbackErr);
-              }
-            }
+            // Don't block loading conversations if sync fails/times out
           }
         }
       }
@@ -250,7 +241,8 @@ const Dashboard: React.FC = () => {
       if (platformData) {
         const newIsExpanded = !platformData.isExpanded;
         updated.set(platform, { ...platformData, isExpanded: newIsExpanded });
-        if (newIsExpanded && platformData.conversations.length === 0) {
+        // Always load conversations when expanding (to get fresh data)
+        if (newIsExpanded) {
           loadConversationsForPlatform(platform);
         }
       }
