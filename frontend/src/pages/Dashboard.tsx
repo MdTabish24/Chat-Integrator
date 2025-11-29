@@ -3,8 +3,9 @@ import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { useWebSocket } from '../hooks/useWebSocket';
 import { useToast } from '../contexts/ToastContext';
-import DashboardPlatformCard from '../components/DashboardPlatformCard';
-import MessageThread from '../components/MessageThread';
+import Sidebar from '../components/Sidebar';
+import Header from '../components/Header';
+import ChatView from '../components/ChatView';
 import LoadingSpinner from '../components/LoadingSpinner';
 import EmptyState from '../components/EmptyState';
 import ErrorDisplay from '../components/ErrorDisplay';
@@ -33,6 +34,8 @@ const PLATFORM_CONFIGS: Record<Platform, { name: string; icon: string; color: st
   whatsapp: { name: 'WhatsApp', icon: '💬', color: 'bg-green-500' },
   facebook: { name: 'Facebook', icon: '👥', color: 'bg-blue-600' },
   teams: { name: 'Microsoft Teams', icon: '👔', color: 'bg-purple-600' },
+  discord: { name: 'Discord', icon: '🎮', color: 'bg-indigo-600' },
+  gmail: { name: 'Gmail', icon: '📧', color: 'bg-red-500' },
 };
 
 const Dashboard: React.FC = () => {
@@ -43,24 +46,24 @@ const Dashboard: React.FC = () => {
   const [connectedAccounts, setConnectedAccounts] = useState<ConnectedAccount[]>([]);
   const [isLoadingAccounts, setIsLoadingAccounts] = useState(true);
   const [totalUnread, setTotalUnread] = useState(0);
+  const [gmailUnread, setGmailUnread] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
   const [selectedPlatform, setSelectedPlatform] = useState<Platform | null>(null);
 
+
   // WebSocket callbacks
   const handleUnreadCountUpdate = useCallback((data: any) => {
-    console.log('Unread count update received:', data);
     setTotalUnread(data.totalUnread);
-    
+    if (data.unreadCounts?.gmail) {
+      setGmailUnread(data.unreadCounts.gmail);
+    }
     setPlatformsData((prev) => {
       const updated = new Map(prev);
       Object.entries(data.unreadCounts).forEach(([platform, count]) => {
         const platformData = updated.get(platform as Platform);
         if (platformData) {
-          updated.set(platform as Platform, {
-            ...platformData,
-            unreadCount: count as number,
-          });
+          updated.set(platform as Platform, { ...platformData, unreadCount: count as number });
         }
       });
       return updated;
@@ -68,8 +71,6 @@ const Dashboard: React.FC = () => {
   }, []);
 
   const handleNewMessage = useCallback((data: any) => {
-    console.log('New message received:', data);
-    // Refresh conversations for the affected platform if expanded
     if (data.conversation) {
       const accountId = data.conversation.accountId;
       const account = connectedAccounts.find(acc => acc.id === accountId);
@@ -83,8 +84,6 @@ const Dashboard: React.FC = () => {
   }, [connectedAccounts, platformsData]);
 
   const handleConversationUpdate = useCallback((data: any) => {
-    console.log('Conversation update received:', data);
-    // Update the specific conversation in the platform data
     const conversation = data.conversation;
     setPlatformsData((prev) => {
       const updated = new Map(prev);
@@ -93,17 +92,13 @@ const Dashboard: React.FC = () => {
         if (convIndex !== -1) {
           const updatedConversations = [...platformData.conversations];
           updatedConversations[convIndex] = conversation;
-          updated.set(platform, {
-            ...platformData,
-            conversations: updatedConversations,
-          });
+          updated.set(platform, { ...platformData, conversations: updatedConversations });
         }
       });
       return updated;
     });
   }, []);
 
-  // Initialize WebSocket
   const { isConnected, isAuthenticated } = useWebSocket({
     onUnreadCountUpdate: handleUnreadCountUpdate,
     onNewMessage: handleNewMessage,
@@ -117,73 +112,33 @@ const Dashboard: React.FC = () => {
   // Load connected accounts
   const loadConnectedAccounts = useCallback(async () => {
     try {
-      console.log('🔍 [DEBUG] Loading connected accounts...');
       setIsLoadingAccounts(true);
       setError(null);
       const response = await apiClient.get('/api/oauth/accounts');
-      console.log('✅ [DEBUG] API Response:', response.data);
       const accounts = response.data.accounts || [];
-      console.log('📊 [DEBUG] Connected accounts:', accounts);
       setConnectedAccounts(accounts);
 
-      // Initialize platform data for connected accounts
       const newPlatformsData = new Map<Platform, PlatformData>();
       accounts.forEach((account: ConnectedAccount) => {
         if (!newPlatformsData.has(account.platform)) {
           const config = PLATFORM_CONFIGS[account.platform];
-          newPlatformsData.set(account.platform, {
-            platform: account.platform,
-            name: config.name,
-            icon: config.icon,
-            color: config.color,
-            unreadCount: 0,
-            conversations: [],
-            isExpanded: false,
-            isLoading: false,
-          });
+          if (config) {
+            newPlatformsData.set(account.platform, {
+              platform: account.platform,
+              name: config.name,
+              icon: config.icon,
+              color: config.color,
+              unreadCount: 0,
+              conversations: [],
+              isExpanded: false,
+              isLoading: false,
+            });
+          }
         }
       });
-
-      // Add webview platforms (Twitter DMs, LinkedIn DMs) if base platforms are connected
-      const hasTwitter = accounts.some((acc: ConnectedAccount) => acc.platform === 'twitter');
-      const hasLinkedIn = accounts.some((acc: ConnectedAccount) => acc.platform === 'linkedin');
-
-      if (hasTwitter) {
-        const config = PLATFORM_CONFIGS['twitter-dm'];
-        newPlatformsData.set('twitter-dm', {
-          platform: 'twitter-dm',
-          name: config.name,
-          icon: config.icon,
-          color: config.color,
-          unreadCount: 0,
-          conversations: [],
-          isExpanded: false,
-          isLoading: false,
-        });
-      }
-
-      if (hasLinkedIn) {
-        const config = PLATFORM_CONFIGS['linkedin-dm'];
-        newPlatformsData.set('linkedin-dm', {
-          platform: 'linkedin-dm',
-          name: config.name,
-          icon: config.icon,
-          color: config.color,
-          unreadCount: 0,
-          conversations: [],
-          isExpanded: false,
-          isLoading: false,
-        });
-      }
-
       setPlatformsData(newPlatformsData);
-
-      // Load unread counts
       await loadUnreadCounts();
     } catch (err: any) {
-      console.error('❌ [DEBUG] Error loading connected accounts:', err);
-      console.error('❌ [DEBUG] Error response:', err.response?.data);
-      console.error('❌ [DEBUG] Error status:', err.response?.status);
       const errorMessage = err.response?.data?.error || 'Failed to load connected accounts';
       setError(errorMessage);
       showError(errorMessage);
@@ -192,21 +147,19 @@ const Dashboard: React.FC = () => {
     }
   }, [showError]);
 
-  // Load unread counts
   const loadUnreadCounts = async () => {
     try {
       const response = await apiClient.get('/api/messages/unread/count');
       setTotalUnread(response.data.total);
-      
+      if (response.data.byPlatform?.gmail) {
+        setGmailUnread(response.data.byPlatform.gmail);
+      }
       setPlatformsData((prev) => {
         const updated = new Map(prev);
         Object.entries(response.data.byPlatform).forEach(([platform, count]) => {
           const platformData = updated.get(platform as Platform);
           if (platformData) {
-            updated.set(platform as Platform, {
-              ...platformData,
-              unreadCount: count as number,
-            });
+            updated.set(platform as Platform, { ...platformData, unreadCount: count as number });
           }
         });
         return updated;
@@ -216,9 +169,8 @@ const Dashboard: React.FC = () => {
     }
   };
 
-  // Load conversations for a specific platform
+
   const loadConversationsForPlatform = async (platform: Platform) => {
-    console.log(`🔍 [DEBUG] Loading conversations for platform: ${platform}`);
     setPlatformsData((prev) => {
       const updated = new Map(prev);
       const platformData = updated.get(platform);
@@ -228,8 +180,7 @@ const Dashboard: React.FC = () => {
       return updated;
     });
 
-    try{
-      // For Telegram, trigger sync first
+    try {
       if (platform === 'telegram') {
         const telegramAccount = connectedAccounts.find(acc => acc.platform === 'telegram');
         if (telegramAccount) {
@@ -241,11 +192,7 @@ const Dashboard: React.FC = () => {
         }
       }
 
-      const response = await apiClient.get('/api/conversations', {
-        params: { platform },
-      });
-      console.log(`✅ [DEBUG] Conversations response for ${platform}:`, response.data);
-      
+      const response = await apiClient.get('/api/conversations', { params: { platform } });
       const conversations = (response.data.conversations || []).map((c: any) => ({
         ...c,
         participantName: c.participant_name || c.participantName,
@@ -258,23 +205,16 @@ const Dashboard: React.FC = () => {
         createdAt: c.created_at || c.createdAt,
         updatedAt: c.updated_at || c.updatedAt,
       }));
-      
+
       setPlatformsData((prev) => {
         const updated = new Map(prev);
         const platformData = updated.get(platform);
         if (platformData) {
-          updated.set(platform, {
-            ...platformData,
-            conversations,
-            isLoading: false,
-            error: undefined,
-          });
+          updated.set(platform, { ...platformData, conversations, isLoading: false, error: undefined });
         }
         return updated;
       });
     } catch (err: any) {
-      console.error(`❌ [DEBUG] Error loading conversations for ${platform}:`, err);
-      console.error(`❌ [DEBUG] Error response:`, err.response?.data);
       setPlatformsData((prev) => {
         const updated = new Map(prev);
         const platformData = updated.get(platform);
@@ -290,21 +230,14 @@ const Dashboard: React.FC = () => {
     }
   };
 
-  // Handle platform card expand/collapse
   const handlePlatformExpand = (platform: Platform) => {
     setPlatformsData((prev) => {
       const updated = new Map(prev);
       const platformData = updated.get(platform);
       if (platformData) {
         const newIsExpanded = !platformData.isExpanded;
-        updated.set(platform, {
-          ...platformData,
-          isExpanded: newIsExpanded,
-        });
-
-        // Load conversations when expanding (skip for webview platforms)
-        const isWebViewPlatform = platform === 'twitter-dm' || platform === 'linkedin-dm';
-        if (newIsExpanded && platformData.conversations.length === 0 && !isWebViewPlatform) {
+        updated.set(platform, { ...platformData, isExpanded: newIsExpanded });
+        if (newIsExpanded && platformData.conversations.length === 0) {
           loadConversationsForPlatform(platform);
         }
       }
@@ -312,21 +245,12 @@ const Dashboard: React.FC = () => {
     });
   };
 
-  // Handle conversation click
   const handleConversationClick = (conversationId: string, platform: Platform) => {
     setSelectedConversationId(conversationId);
     setSelectedPlatform(platform);
   };
 
-  // Handle message thread close
-  const handleCloseMessageThread = () => {
-    setSelectedConversationId(null);
-    setSelectedPlatform(null);
-  };
-
-  // Handle message sent
   const handleMessageSent = () => {
-    // Refresh unread counts after sending a message
     loadUnreadCounts();
   };
 
@@ -339,132 +263,84 @@ const Dashboard: React.FC = () => {
     loadConnectedAccounts();
   }, [loadConnectedAccounts]);
 
-  return (
-    <div className="min-h-screen bg-gray-100">
-      {/* Navigation Bar */}
-      <nav className="bg-white shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between h-16">
-            <div className="flex items-center">
-              <h1 className="text-xl font-bold text-gray-900">
-                Multi-Platform Messaging Hub
-              </h1>
-              {totalUnread > 0 && (
-                <span className="ml-3 bg-red-500 text-white text-xs font-bold rounded-full px-2 py-1">
-                  {totalUnread > 99 ? '99+' : totalUnread}
-                </span>
-              )}
-            </div>
-            <div className="flex items-center space-x-4">
-              {/* WebSocket Status Indicator */}
-              <div className="flex items-center space-x-2">
-                <div className={`w-2 h-2 rounded-full ${
-                  isAuthenticated ? 'bg-green-500' : isConnected ? 'bg-yellow-500' : 'bg-red-500'
-                }`} />
-                <span className="text-xs text-gray-500">
-                  {isAuthenticated ? 'Live' : isConnected ? 'Connecting...' : 'Offline'}
-                </span>
-              </div>
-              
-              <button
-                onClick={() => navigate('/accounts')}
-                className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-              >
-                Manage Accounts
-              </button>
-              <span className="text-sm text-gray-700">{user?.email}</span>
-              <button
-                onClick={handleLogout}
-                className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-              >
-                Logout
-              </button>
-            </div>
-          </div>
+
+  // Loading state
+  if (isLoadingAccounts) {
+    return (
+      <div className="min-h-screen bg-gray-100 flex items-center justify-center">
+        <LoadingSpinner size="xl" text="Loading your accounts..." />
+      </div>
+    );
+  }
+
+  // Error state
+  if (error) {
+    return (
+      <div className="min-h-screen bg-gray-100 flex items-center justify-center p-4">
+        <ErrorDisplay message={error} title="Failed to load accounts" onRetry={loadConnectedAccounts} />
+      </div>
+    );
+  }
+
+  // No connected accounts
+  if (connectedAccounts.length === 0) {
+    return (
+      <div className="min-h-screen bg-gray-100 flex flex-col">
+        <Header
+          user={user}
+          totalUnread={0}
+          gmailUnread={0}
+          isConnected={isConnected}
+          isAuthenticated={isAuthenticated}
+          onLogout={handleLogout}
+        />
+        <div className="flex-1 flex items-center justify-center p-4">
+          <EmptyState
+            icon={
+              <svg className="w-16 h-16 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+              </svg>
+            }
+            title="No Connected Accounts"
+            description="Connect your social media accounts to start managing messages"
+            action={{ label: 'Connect Accounts', onClick: () => navigate('/accounts') }}
+          />
         </div>
-      </nav>
+      </div>
+    );
+  }
+
+  // Main dashboard layout with sidebar
+  return (
+    <div className="h-screen flex flex-col bg-gray-100">
+      {/* Header */}
+      <Header
+        user={user}
+        totalUnread={totalUnread}
+        gmailUnread={gmailUnread}
+        isConnected={isConnected}
+        isAuthenticated={isAuthenticated}
+        onLogout={handleLogout}
+      />
 
       {/* Main Content */}
-      <main className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
-        <div className="px-4 sm:px-0">
-          {/* Loading State */}
-          {isLoadingAccounts ? (
-            <div className="py-12">
-              <LoadingSpinner size="xl" text="Loading your accounts..." />
-            </div>
-          ) : error ? (
-            <ErrorDisplay
-              message={error}
-              title="Failed to load accounts"
-              onRetry={loadConnectedAccounts}
-            />
-          ) : connectedAccounts.length === 0 ? (
-            <EmptyState
-              icon={
-                <svg
-                  className="w-16 h-16 text-gray-400"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M13 10V3L4 14h7v7l9-11h-7z"
-                  />
-                </svg>
-              }
-              title="No Connected Accounts"
-              description="Connect your social media accounts to start managing messages"
-              action={{
-                label: 'Connect Accounts',
-                onClick: () => navigate('/accounts'),
-              }}
-            />
-          ) : (
-            <>
-              {/* Dashboard Header */}
-              <div className="mb-6">
-                <h2 className="text-2xl font-bold text-gray-900">Your Messages</h2>
-                <p className="text-gray-600 mt-1">
-                  {connectedAccounts.length} platform{connectedAccounts.length !== 1 ? 's' : ''} connected
-                </p>
-              </div>
+      <div className="flex-1 flex overflow-hidden">
+        {/* Sidebar */}
+        <Sidebar
+          platformsData={platformsData}
+          connectedAccounts={connectedAccounts}
+          selectedConversationId={selectedConversationId}
+          onPlatformExpand={handlePlatformExpand}
+          onConversationClick={handleConversationClick}
+        />
 
-              {/* Platform Cards Grid */}
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {Array.from(platformsData.values()).map((platformData) => (
-                  <DashboardPlatformCard
-                    key={platformData.platform}
-                    platform={platformData.platform}
-                    platformName={platformData.name}
-                    platformIcon={platformData.icon}
-                    platformColor={platformData.color}
-                    unreadCount={platformData.unreadCount}
-                    conversations={platformData.conversations}
-                    isExpanded={platformData.isExpanded}
-                    isLoading={platformData.isLoading}
-                    error={platformData.error}
-                    onExpand={() => handlePlatformExpand(platformData.platform)}
-                    onConversationClick={handleConversationClick}
-                  />
-                ))}
-              </div>
-            </>
-          )}
-        </div>
-      </main>
-
-      {/* Message Thread Modal */}
-      {selectedConversationId && (
-        <MessageThread
+        {/* Chat View */}
+        <ChatView
           conversationId={selectedConversationId}
-          platform={selectedPlatform || undefined}
-          onClose={handleCloseMessageThread}
+          platform={selectedPlatform}
           onMessageSent={handleMessageSent}
         />
-      )}
+      </div>
     </div>
   );
 };

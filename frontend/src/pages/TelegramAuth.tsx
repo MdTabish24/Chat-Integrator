@@ -11,6 +11,7 @@ export const TelegramAuth = () => {
 
   const state = searchParams.get('state');
   const botUsername = searchParams.get('bot');
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const redirectUri = searchParams.get('redirect');
 
   useEffect(() => {

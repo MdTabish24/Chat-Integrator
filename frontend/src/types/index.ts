@@ -1,4 +1,4 @@
-export type Platform = 'telegram' | 'twitter' | 'twitter-dm' | 'linkedin' | 'linkedin-dm' | 'instagram' | 'whatsapp' | 'facebook' | 'teams';
+export type Platform = 'telegram' | 'twitter' | 'twitter-dm' | 'linkedin' | 'linkedin-dm' | 'instagram' | 'whatsapp' | 'facebook' | 'teams' | 'discord' | 'gmail';
 
 export interface User {
   id: string;

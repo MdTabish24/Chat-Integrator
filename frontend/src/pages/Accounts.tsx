@@ -6,8 +6,68 @@ import { ConnectedAccount, PlatformConfig, Platform } from '../types';
 import PlatformCard from '../components/PlatformCard';
 import ConnectedAccountsList from '../components/ConnectedAccountsList';
 import ConfirmDialog from '../components/ConfirmDialog';
+import CookieInputModal, { CookieField } from '../components/CookieInputModal';
+import WhatsAppQRModal from '../components/WhatsAppQRModal';
 import LoadingSpinner from '../components/LoadingSpinner';
 import ErrorDisplay from '../components/ErrorDisplay';
+
+// Cookie-based platform configurations
+const cookiePlatformConfigs: Record<string, {
+  fields: CookieField[];
+  endpoint: string;
+}> = {
+  twitter: {
+    fields: [
+      {
+        name: 'auth_token',
+        label: 'auth_token',
+        placeholder: 'Enter your auth_token cookie value',
+        helpText: 'Found in cookies after logging into Twitter/X',
+      },
+      {
+        name: 'ct0',
+        label: 'ct0',
+        placeholder: 'Enter your ct0 cookie value',
+        helpText: 'CSRF token cookie from Twitter/X',
+      },
+    ],
+    endpoint: '/api/platforms/twitter/cookies',
+  },
+  linkedin: {
+    fields: [
+      {
+        name: 'li_at',
+        label: 'li_at',
+        placeholder: 'Enter your li_at cookie value',
+        helpText: 'Main authentication cookie from LinkedIn',
+      },
+      {
+        name: 'JSESSIONID',
+        label: 'JSESSIONID',
+        placeholder: 'Enter your JSESSIONID cookie value',
+        helpText: 'Session ID cookie from LinkedIn (include quotes if present)',
+      },
+    ],
+    endpoint: '/api/platforms/linkedin/cookies',
+  },
+  facebook: {
+    fields: [
+      {
+        name: 'c_user',
+        label: 'c_user',
+        placeholder: 'Enter your c_user cookie value',
+        helpText: 'Your Facebook user ID cookie',
+      },
+      {
+        name: 'xs',
+        label: 'xs',
+        placeholder: 'Enter your xs cookie value',
+        helpText: 'Session cookie from Facebook',
+      },
+    ],
+    endpoint: '/api/platforms/facebook/cookies',
+  },
+};
 
 const platformConfigs: PlatformConfig[] = [
   { id: 'telegram', name: 'Telegram', icon: '📱', color: 'bg-blue-500' },
@@ -17,6 +77,8 @@ const platformConfigs: PlatformConfig[] = [
   { id: 'whatsapp', name: 'WhatsApp', icon: '💬', color: 'bg-green-500' },
   { id: 'facebook', name: 'Facebook', icon: '👥', color: 'bg-blue-600' },
   { id: 'teams', name: 'Microsoft Teams', icon: '👔', color: 'bg-purple-600' },
+  { id: 'discord', name: 'Discord', icon: '🎮', color: 'bg-indigo-600' },
+  { id: 'gmail', name: 'Gmail', icon: '📧', color: 'bg-red-500' },
 ];
 
 const Accounts: React.FC = () => {
@@ -29,6 +91,9 @@ const Accounts: React.FC = () => {
   const [connectingPlatform, setConnectingPlatform] = useState<Platform | null>(null);
   const [disconnectingAccount, setDisconnectingAccount] = useState<ConnectedAccount | null>(null);
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
+  const [showCookieModal, setShowCookieModal] = useState<Platform | null>(null);
+  const [isSubmittingCookies, setIsSubmittingCookies] = useState(false);
+  const [showWhatsAppQRModal, setShowWhatsAppQRModal] = useState(false);
 
   useEffect(() => {
     fetchConnectedAccounts();
@@ -89,6 +154,20 @@ const Accounts: React.FC = () => {
         return;
       }
       
+      // For cookie-based platforms, show the cookie input modal
+      if (platform in cookiePlatformConfigs) {
+        setShowCookieModal(platform);
+        setConnectingPlatform(null);
+        return;
+      }
+      
+      // For WhatsApp, show the QR code modal
+      if (platform === 'whatsapp') {
+        setShowWhatsAppQRModal(true);
+        setConnectingPlatform(null);
+        return;
+      }
+      
       // Initiate OAuth flow for other platforms
       console.log(`🔍 [ACCOUNTS DEBUG] Initiating OAuth for ${platform}`);
       const response = await apiClient.get(`/api/oauth/connect/${platform}`);
@@ -107,6 +186,50 @@ const Accounts: React.FC = () => {
       showToastError(errorMessage);
       setConnectingPlatform(null);
     }
+  };
+
+  const handleCookieSubmit = async (cookies: Record<string, string>) => {
+    if (!showCookieModal) return;
+    
+    const config = cookiePlatformConfigs[showCookieModal];
+    if (!config) return;
+
+    try {
+      setIsSubmittingCookies(true);
+      console.log(`🍪 [ACCOUNTS DEBUG] Submitting cookies for ${showCookieModal}`);
+      
+      await apiClient.post(config.endpoint, { cookies });
+      
+      console.log(`✅ [ACCOUNTS DEBUG] Cookies submitted successfully for ${showCookieModal}`);
+      showSuccess(`${platformConfigs.find(p => p.id === showCookieModal)?.name} connected successfully`);
+      setShowCookieModal(null);
+      
+      // Refresh the accounts list
+      await fetchConnectedAccounts();
+    } catch (err: any) {
+      console.error(`❌ [ACCOUNTS DEBUG] Cookie submit error:`, err);
+      const errorMessage = err.response?.data?.error?.message || err.response?.data?.error || 'Failed to connect account';
+      throw new Error(errorMessage);
+    } finally {
+      setIsSubmittingCookies(false);
+    }
+  };
+
+  const handleCookieModalCancel = () => {
+    setShowCookieModal(null);
+    setIsSubmittingCookies(false);
+  };
+
+  const handleWhatsAppQRSuccess = async () => {
+    console.log('✅ [ACCOUNTS DEBUG] WhatsApp connected successfully');
+    showSuccess('WhatsApp connected successfully');
+    setShowWhatsAppQRModal(false);
+    // Refresh the accounts list
+    await fetchConnectedAccounts();
+  };
+
+  const handleWhatsAppQRCancel = () => {
+    setShowWhatsAppQRModal(false);
   };
 
   const handleDisconnectClick = (account: ConnectedAccount) => {
@@ -216,6 +339,28 @@ const Accounts: React.FC = () => {
             onConfirm={handleDisconnectConfirm}
             onCancel={handleDisconnectCancel}
             variant="danger"
+          />
+        )}
+
+        {/* Cookie Input Modal for Twitter, LinkedIn, Facebook */}
+        {showCookieModal && cookiePlatformConfigs[showCookieModal] && (
+          <CookieInputModal
+            platform={showCookieModal}
+            platformName={platformConfigs.find(p => p.id === showCookieModal)?.name || showCookieModal}
+            platformIcon={platformConfigs.find(p => p.id === showCookieModal)?.icon || '🔗'}
+            platformColor={platformConfigs.find(p => p.id === showCookieModal)?.color || 'bg-gray-500'}
+            fields={cookiePlatformConfigs[showCookieModal].fields}
+            onSubmit={handleCookieSubmit}
+            onCancel={handleCookieModalCancel}
+            isSubmitting={isSubmittingCookies}
+          />
+        )}
+
+        {/* WhatsApp QR Code Modal */}
+        {showWhatsAppQRModal && (
+          <WhatsAppQRModal
+            onSuccess={handleWhatsAppQRSuccess}
+            onCancel={handleWhatsAppQRCancel}
           />
         )}
       </div>
