@@ -153,6 +153,9 @@ class TelegramMessageSyncService:
                     else:
                         msg_datetime = timezone.now()
                     
+                    # Clean sender name (remove emojis for MySQL compatibility)
+                    sender_name = self._clean_name(msg.get('senderName', 'Telegram User'))
+                    
                     # Insert message (ignore duplicates)
                     Message.objects.get_or_create(
                         conversation=conversation,
@@ -160,7 +163,7 @@ class TelegramMessageSyncService:
                         defaults={
                             'content': encrypted_content,
                             'sender_id': str(msg.get('senderId', 'unknown')),
-                            'sender_name': msg.get('senderName', 'Telegram User'),
+                            'sender_name': sender_name,
                             'sent_at': msg_datetime,
                             'is_outgoing': msg.get('out', False),
                             'is_read': True,

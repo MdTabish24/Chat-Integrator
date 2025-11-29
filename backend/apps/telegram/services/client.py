@@ -245,6 +245,17 @@ class TelegramUserClientService:
             traceback.print_exc()
             raise
     
+    def _clean_string(self, text: str) -> str:
+        """Remove emojis and problematic characters for MySQL utf8mb4"""
+        import re
+        if not text:
+            return 'Unknown'
+        # Remove emojis and other 4-byte unicode chars
+        clean = re.sub(r'[\U00010000-\U0010ffff]', '', text)
+        # Remove other problematic chars
+        clean = re.sub(r'[^\x00-\x7F\u0080-\uFFFF]+', '', clean)
+        return clean.strip() or 'Unknown'
+    
     async def get_messages_from_telegram(self, account_id: str, chat_id: str, limit: int = 50) -> List[Dict]:
         """Get messages directly from Telegram API"""
         try:
@@ -273,9 +284,9 @@ class TelegramUserClientService:
                     if msg.sender:
                         sender_id = str(msg.sender.id)
                         if hasattr(msg.sender, 'first_name'):
-                            sender_name = msg.sender.first_name or 'Unknown'
+                            sender_name = self._clean_string(msg.sender.first_name)
                         elif hasattr(msg.sender, 'title'):
-                            sender_name = msg.sender.title or 'Unknown'
+                            sender_name = self._clean_string(msg.sender.title)
                     
                     result.append({
                         'id': str(msg.id),
