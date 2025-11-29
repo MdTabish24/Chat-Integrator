@@ -18,11 +18,24 @@ export const TelegramPhoneAuth = () => {
     setError('');
 
     try {
-      const response = await api.post('/api/telegram/auth/phone', { phoneNumber });
-      setPhoneCodeHash(response.data.phoneCodeHash);
-      setStep('code');
+      // Telegram auth can take longer due to DC migration, use extended timeout
+      const response = await api.post('/api/telegram/auth/phone', { phoneNumber }, {
+        timeout: 90000, // 90 seconds for Telegram DC migration
+      });
+      
+      if (response.data.success && response.data.phoneCodeHash) {
+        setPhoneCodeHash(response.data.phoneCodeHash);
+        setStep('code');
+      } else {
+        setError('Unexpected response from server');
+      }
     } catch (err: any) {
-      setError(err.response?.data?.error || 'Failed to send code');
+      console.error('Telegram phone auth error:', err);
+      if (err.code === 'ECONNABORTED' || err.message?.includes('timeout')) {
+        setError('Request timed out. Please try again.');
+      } else {
+        setError(err.response?.data?.error || 'Failed to send code');
+      }
     } finally {
       setLoading(false);
     }
@@ -38,6 +51,8 @@ export const TelegramPhoneAuth = () => {
         phoneNumber,
         phoneCode,
         phoneCodeHash,
+      }, {
+        timeout: 60000, // 60 seconds for verification
       });
 
       if (response.data.needPassword) {
@@ -47,12 +62,15 @@ export const TelegramPhoneAuth = () => {
         navigate('/accounts?success=telegram');
       }
     } catch (err: any) {
+      console.error('Telegram code verify error:', err);
       const errorMsg = err.response?.data?.error || 'Invalid code';
       
       // Check if 2FA required from error message
       if (errorMsg.includes('password is required') || errorMsg.includes('2FA')) {
         setStep('password');
         setError('Two-factor authentication is enabled. Please enter your password.');
+      } else if (err.code === 'ECONNABORTED') {
+        setError('Request timed out. Please try again.');
       } else {
         setError(errorMsg);
       }
@@ -72,13 +90,20 @@ export const TelegramPhoneAuth = () => {
         phoneCode,
         phoneCodeHash,
         password,
+      }, {
+        timeout: 60000, // 60 seconds for 2FA verification
       });
 
       if (response.data.success) {
         navigate('/accounts?success=telegram');
       }
     } catch (err: any) {
-      setError(err.response?.data?.error || 'Invalid password');
+      console.error('Telegram 2FA error:', err);
+      if (err.code === 'ECONNABORTED') {
+        setError('Request timed out. Please try again.');
+      } else {
+        setError(err.response?.data?.error || 'Invalid password');
+      }
     } finally {
       setLoading(false);
     }

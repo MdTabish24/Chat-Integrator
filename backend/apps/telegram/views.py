@@ -228,7 +228,16 @@ class SyncMessagesView(AsyncAPIView):
         
         except Exception as e:
             print(f'[telegram-user] Sync messages failed: {e}')
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            error_msg = str(e)
+            
+            # Check if it's a session/account not found error
+            if 'not found' in error_msg.lower() or 'expired' in error_msg.lower():
+                return Response({
+                    'error': 'Session expired or account not found. Please reconnect your Telegram account.',
+                    'needsReconnect': True
+                }, status=status.HTTP_401_UNAUTHORIZED)
+            
+            return Response({'error': error_msg}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 class ResetAndSyncView(AsyncAPIView):
