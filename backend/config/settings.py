@@ -204,19 +204,43 @@ CACHES = {
     }
 }
 
-# Channels Configuration (WebSocket) - Optimized for Upstash free tier (10 max connections)
-# Note: channels-redis 4.1.0 doesn't support connection_kwargs, use hosts with dict format instead
-CHANNEL_LAYERS = {
-    'default': {
-        'BACKEND': 'channels_redis.core.RedisChannelLayer',
-        'CONFIG': {
-            'hosts': [REDIS_URL],
-            'capacity': 50,
-            'expiry': 30,
-            'group_expiry': 30,
+# Channels Configuration (WebSocket)
+# Configure Redis channel layer with proper SSL support for Upstash
+def get_channel_layer_config():
+    """Get channel layer config with Redis SSL support for Upstash"""
+    
+    # Check if we should use in-memory (for development or when Redis is unreliable)
+    use_in_memory = config('USE_IN_MEMORY_CHANNEL_LAYER', default=False, cast=bool)
+    
+    if use_in_memory or not REDIS_URL:
+        return {
+            'default': {
+                'BACKEND': 'channels.layers.InMemoryChannelLayer',
+            }
+        }
+    
+    # Parse Redis URL and configure SSL for Upstash
+    redis_url = REDIS_URL
+    
+    # Upstash requires SSL - convert redis:// to rediss:// if needed
+    if 'upstash.io' in redis_url and redis_url.startswith('redis://'):
+        redis_url = redis_url.replace('redis://', 'rediss://', 1)
+    
+    # For channels-redis 4.1.0, we need to pass the URL directly
+    # The library handles SSL automatically when using rediss://
+    return {
+        'default': {
+            'BACKEND': 'channels_redis.core.RedisChannelLayer',
+            'CONFIG': {
+                'hosts': [redis_url],
+                'capacity': 100,
+                'expiry': 60,
+                'group_expiry': 60,
+            },
         },
-    },
-}
+    }
+
+CHANNEL_LAYERS = get_channel_layer_config()
 
 # Celery Configuration
 # Migrated from backend/src/config/queues.ts
