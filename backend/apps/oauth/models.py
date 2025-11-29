@@ -24,6 +24,8 @@ class ConnectedAccount(models.Model):
         ('whatsapp', 'WhatsApp'),
         ('facebook', 'Facebook'),
         ('teams', 'Microsoft Teams'),
+        ('discord', 'Discord'),
+        ('gmail', 'Gmail'),
     ]
     
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)

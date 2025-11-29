@@ -4,10 +4,15 @@ Telegram Message Sync Service.
 Migrated from backend/src/services/telegram/TelegramMessageSync.ts
 """
 
+import re
+import traceback
 from typing import Optional
 from datetime import datetime
+from urllib.parse import quote
+
 from django.utils import timezone
 from django.db import transaction
+from asgiref.sync import sync_to_async
 
 from .client import telegram_user_client
 from apps.conversations.models import Conversation
@@ -24,132 +29,178 @@ class TelegramMessageSyncService:
     
     async def sync_messages(self, account_id: str) -> None:
         """
-        Sync messages for an account
-        
-        Migrated from: syncMessages() in TelegramMessageSync.ts
+        Sync messages for an account - fetches ALL dialogs properly
         
         Args:
             account_id: Connected account ID
         """
         try:
-            print(f'[telegram-sync] Syncing messages for account {account_id}')
+            print(f'[telegram-sync] Starting sync for account {account_id}')
             
-            # Get dialogs (conversations)
-            dialogs = await telegram_user_client.get_dialogs(account_id, 50)
+            # Get dialogs (conversations) - increased limit to get all
+            dialogs = await telegram_user_client.get_dialogs(account_id, limit=100)
             print(f'[telegram-sync] Found {len(dialogs)} dialogs')
             
-            from asgiref.sync import sync_to_async
+            synced_count = 0
+            error_count = 0
             
             for dialog in dialogs:
-                dialog_id = str(dialog.get('id', 'unknown'))
-                dialog_name = dialog.get('name', 'Unknown Chat')
-                dialog_date = datetime.fromtimestamp(dialog.get('date', 0)) if dialog.get('date') else timezone.now()
-                
-                # Generate avatar URL using UI Avatars API
-                from urllib.parse import quote
-                avatar_url = f'https://ui-avatars.com/api/?name={quote(dialog_name)}&background=random&size=128'
-                
-                # Remove emojis from name (MySQL utf8mb4 issue)
-                import re
-                clean_name = re.sub(r'[^\x00-\x7F\u0080-\uFFFF]+', '', dialog_name)
-                
-                # Get messages from this conversation BEFORE saving
-                messages = await telegram_user_client.get_messages(account_id, dialog_id, 20)
-                
-                # Create or update conversation (async-safe)
-                @sync_to_async
-                def save_conversation_and_messages():
-                    with transaction.atomic():
-                        conversation, created = Conversation.objects.update_or_create(
-                            account_id=account_id,
-                            platform_conversation_id=dialog_id,
-                            defaults={
-                                'participant_name': clean_name,
-                                'participant_id': dialog_id,
-                                'participant_avatar_url': avatar_url,
-                                'last_message_at': dialog_date,
-                            }
-                        )
-                        
-                        for message in messages:
-                            if not message.get('text'):
-                                continue
-                            
-                            # Encrypt content
-                            encrypted_content = encrypt(message['text'])
-                            
-                            # Insert message (ignore duplicates)
-                            Message.objects.get_or_create(
-                                conversation=conversation,
-                                platform_message_id=str(message['id']),
-                                defaults={
-                                    'content': encrypted_content,
-                                    'sender_id': message.get('senderId', 'unknown'),
-                                    'sender_name': 'Telegram User',
-                                    'sent_at': datetime.fromtimestamp(message['date']),
-                                    'is_outgoing': message.get('out', False),
-                                    'is_read': True,
-                                }
-                            )
-                        
-                        # Update unread count
-                        unread_count = Message.objects.filter(
-                            conversation=conversation,
-                            is_read=False,
-                            is_outgoing=False
-                        ).count()
-                        
-                        conversation.unread_count = unread_count
-                        conversation.save()
-                        
-                        return conversation
-                
-                # Save to database
-                saved_conversation = await save_conversation_and_messages()
-                
-                # Emit WebSocket notification for conversation update
-                from apps.websocket.services import websocket_service
-                from apps.conversations.serializers import ConversationSerializer
-                
-                @sync_to_async
-                def get_user_and_serialize():
-                    from apps.oauth.models import ConnectedAccount
-                    account = ConnectedAccount.objects.get(id=account_id)
-                    return account.user_id, ConversationSerializer(saved_conversation).data
-                
-                user_id, conv_data = await get_user_and_serialize()
-                websocket_service.emit_conversation_update(
-                    user_id=user_id,
-                    conversation=conv_data
-                )
+                try:
+                    await self._sync_single_dialog(account_id, dialog)
+                    synced_count += 1
+                except Exception as e:
+                    error_count += 1
+                    print(f'[telegram-sync] Error syncing dialog {dialog.get("id")}: {e}')
+                    continue  # Continue with next dialog even if one fails
             
-            print(f'[telegram-sync] Synced {len(dialogs)} conversations for account {account_id}')
+            print(f'[telegram-sync] Sync complete: {synced_count} synced, {error_count} errors')
         
         except Exception as e:
             print(f'[telegram-sync] Sync failed: {e}')
-            import traceback
             traceback.print_exc()
             raise
     
-    async def start_periodic_sync(self, account_id: str) -> None:
+    async def _sync_single_dialog(self, account_id: str, dialog: dict) -> None:
         """
-        Start periodic sync
-        
-        Migrated from: startPeriodicSync() in TelegramMessageSync.ts
+        Sync a single dialog (conversation)
         
         Args:
             account_id: Connected account ID
+            dialog: Dialog data from Telegram
         """
-        print(f'[telegram-sync] Starting periodic sync for account {account_id}')
+        dialog_id = str(dialog.get('id', 'unknown'))
+        dialog_name = dialog.get('name', 'Unknown Chat')
+        dialog_date = dialog.get('date', 0)
         
-        # Initial sync
+        # Convert timestamp to datetime
+        if dialog_date:
+            dialog_datetime = datetime.fromtimestamp(dialog_date, tz=timezone.utc)
+        else:
+            dialog_datetime = timezone.now()
+        
+        # Generate avatar URL
+        avatar_url = f'https://ui-avatars.com/api/?name={quote(dialog_name)}&background=random&size=128'
+        
+        # Clean name - remove emojis and special chars for MySQL
+        clean_name = self._clean_name(dialog_name)
+        
+        # Get messages from this conversation
         try:
-            await self.sync_messages(account_id)
+            messages = await telegram_user_client.get_messages_from_telegram(
+                account_id, dialog_id, limit=50
+            )
         except Exception as e:
-            print(f'[telegram-sync] Initial sync failed: {e}')
+            print(f'[telegram-sync] Error fetching messages for {dialog_id}: {e}')
+            messages = []
         
-        # Note: In Django, periodic tasks should be handled by Celery Beat
-        # We'll create a Celery task for this in tasks.py
+        # Save to database
+        await self._save_conversation_and_messages(
+            account_id=account_id,
+            dialog_id=dialog_id,
+            clean_name=clean_name,
+            avatar_url=avatar_url,
+            dialog_datetime=dialog_datetime,
+            messages=messages
+        )
+    
+    def _clean_name(self, name: str) -> str:
+        """Remove emojis and problematic characters for MySQL utf8mb4"""
+        if not name:
+            return 'Unknown'
+        # Remove emojis and other 4-byte unicode chars
+        clean = re.sub(r'[\U00010000-\U0010ffff]', '', name)
+        # Remove other problematic chars
+        clean = re.sub(r'[^\x00-\x7F\u0080-\uFFFF]+', '', clean)
+        return clean.strip() or 'Unknown'
+    
+    @sync_to_async
+    def _save_conversation_and_messages(
+        self,
+        account_id: str,
+        dialog_id: str,
+        clean_name: str,
+        avatar_url: str,
+        dialog_datetime: datetime,
+        messages: list
+    ) -> Conversation:
+        """Save conversation and messages to database"""
+        with transaction.atomic():
+            # Create or update conversation
+            conversation, created = Conversation.objects.update_or_create(
+                account_id=account_id,
+                platform_conversation_id=dialog_id,
+                defaults={
+                    'participant_name': clean_name,
+                    'participant_id': dialog_id,
+                    'participant_avatar_url': avatar_url,
+                    'last_message_at': dialog_datetime,
+                }
+            )
+            
+            # Save messages
+            for msg in messages:
+                if not msg.get('text'):
+                    continue
+                
+                try:
+                    # Encrypt content
+                    encrypted_content = encrypt(msg['text'])
+                    
+                    # Get message datetime
+                    msg_date = msg.get('date', 0)
+                    if msg_date:
+                        msg_datetime = datetime.fromtimestamp(msg_date, tz=timezone.utc)
+                    else:
+                        msg_datetime = timezone.now()
+                    
+                    # Insert message (ignore duplicates)
+                    Message.objects.get_or_create(
+                        conversation=conversation,
+                        platform_message_id=str(msg['id']),
+                        defaults={
+                            'content': encrypted_content,
+                            'sender_id': str(msg.get('senderId', 'unknown')),
+                            'sender_name': msg.get('senderName', 'Telegram User'),
+                            'sent_at': msg_datetime,
+                            'is_outgoing': msg.get('out', False),
+                            'is_read': True,
+                        }
+                    )
+                except Exception as e:
+                    print(f'[telegram-sync] Error saving message {msg.get("id")}: {e}')
+                    continue
+            
+            # Update unread count
+            unread_count = Message.objects.filter(
+                conversation=conversation,
+                is_read=False,
+                is_outgoing=False
+            ).count()
+            
+            conversation.unread_count = unread_count
+            conversation.save()
+            
+            return conversation
+    
+    async def emit_conversation_update(self, account_id: str, conversation: Conversation) -> None:
+        """Emit WebSocket notification for conversation update"""
+        try:
+            from apps.websocket.services import websocket_service
+            from apps.conversations.serializers import ConversationSerializer
+            from apps.oauth.models import ConnectedAccount
+            
+            @sync_to_async
+            def get_user_and_serialize():
+                account = ConnectedAccount.objects.get(id=account_id)
+                return account.user_id, ConversationSerializer(conversation).data
+            
+            user_id, conv_data = await get_user_and_serialize()
+            websocket_service.emit_conversation_update(
+                user_id=user_id,
+                conversation=conv_data
+            )
+        except Exception as e:
+            print(f'[telegram-sync] WebSocket notification failed: {e}')
 
 
 # Create singleton instance

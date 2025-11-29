@@ -3,6 +3,7 @@ Microsoft Teams OAuth Service.
 Uses Microsoft Graph API with Azure AD OAuth 2.0.
 
 Migrated from backend/src/services/oauth/MicrosoftTeamsOAuthService.ts
+Updated to properly support work/education accounts (Requirements 8.1)
 """
 
 from typing import Dict, List, Optional, Any
@@ -19,25 +20,46 @@ class MicrosoftTeamsOAuthService(OAuthBaseService):
     Microsoft Teams OAuth Service
     
     Migrated from: MicrosoftTeamsOAuthService in MicrosoftTeamsOAuthService.ts
+    
+    Tenant ID options:
+    - 'common': Both personal and work/school accounts
+    - 'organizations': Only work/school accounts (Azure AD)
+    - 'consumers': Only personal Microsoft accounts
+    - Specific tenant ID: Only accounts from that organization
+    
+    For Teams chat access, work/education accounts require 'organizations' or 'common'
+    since personal accounts don't have access to Teams chat APIs.
     """
     
+    # Microsoft Graph API scopes required for Teams chat functionality
+    # Reference: https://learn.microsoft.com/en-us/graph/permissions-reference
+    TEAMS_SCOPES = [
+        'offline_access',           # Required for refresh tokens
+        'User.Read',                # Read user profile
+        'Chat.Read',                # Read user's chats
+        'Chat.ReadWrite',           # Read and write user's chats
+        'ChatMessage.Read',         # Read chat messages
+        'ChatMessage.Send',         # Send chat messages
+        'Chat.ReadBasic',           # Read basic chat info
+        'ChannelMessage.Read.All',  # Read channel messages (for Teams channels)
+    ]
+    
     def __init__(self):
-        # Use 'consumers' for personal Microsoft accounts, 'common' for both, or specific tenant ID for org accounts
-        tenant_id = settings.MICROSOFT_TENANT_ID if hasattr(settings, 'MICROSOFT_TENANT_ID') else 'consumers'
+        # Use 'organizations' for work/education accounts (Teams requires this)
+        # 'common' allows both but Teams chat API only works with work/school accounts
+        # Fall back to configured tenant ID or 'organizations' for Teams
+        tenant_id = getattr(settings, 'MICROSOFT_TENANT_ID', None)
+        if not tenant_id or tenant_id == 'consumers':
+            # Teams chat API requires work/school accounts
+            tenant_id = 'organizations'
         
         config = OAuthConfig(
-            client_id=settings.MICROSOFT_CLIENT_ID,
-            client_secret=settings.MICROSOFT_CLIENT_SECRET,
+            client_id=getattr(settings, 'MICROSOFT_CLIENT_ID', ''),
+            client_secret=getattr(settings, 'MICROSOFT_CLIENT_SECRET', ''),
             redirect_uri=f"{settings.WEBHOOK_BASE_URL}/api/oauth/callback/teams",
             authorization_url=f'https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/authorize',
             token_url=f'https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token',
-            scopes=[
-                'offline_access',
-                'User.Read',
-                'Chat.Read',
-                'Chat.ReadWrite',
-                'ChatMessage.Send',
-            ]
+            scopes=self.TEAMS_SCOPES
         )
         
         super().__init__('teams', config)
@@ -59,6 +81,8 @@ class MicrosoftTeamsOAuthService(OAuthBaseService):
             
         Returns:
             OAuth tokens
+            
+        Requirements: 8.1 - Authenticate via Microsoft OAuth for work/education accounts
         """
         try:
             response = requests.post(
@@ -72,22 +96,34 @@ class MicrosoftTeamsOAuthService(OAuthBaseService):
                     'scope': ' '.join(self.config.scopes),
                 },
                 headers={'Content-Type': 'application/x-www-form-urlencoded'},
-                timeout=10
+                timeout=30  # Increased timeout for token exchange
             )
             response.raise_for_status()
             
-            return self.parse_token_response(response.json())
+            tokens = self.parse_token_response(response.json())
+            print(f'[teams] Token exchange successful')
+            return tokens
         
         except requests.RequestException as e:
             error_msg = str(e)
+            error_code = None
             if hasattr(e, 'response') and e.response is not None:
                 try:
                     error_data = e.response.json()
                     error_msg = error_data.get('error_description', str(e))
+                    error_code = error_data.get('error')
                 except:
                     pass
             
-            print(f'[teams] Token exchange failed: {error_msg}')
+            # Provide helpful error messages for common issues
+            if error_code == 'invalid_grant':
+                error_msg = 'Authorization code expired or already used. Please try connecting again.'
+            elif error_code == 'unauthorized_client':
+                error_msg = 'Application not authorized for Teams. Ensure app is registered for work/school accounts.'
+            elif error_code == 'invalid_client':
+                error_msg = 'Invalid client credentials. Check MICROSOFT_CLIENT_ID and MICROSOFT_CLIENT_SECRET.'
+            
+            print(f'[teams] Token exchange failed: {error_code} - {error_msg}')
             raise Exception(f'Failed to exchange authorization code: {error_msg}')
     
     def refresh_access_token(
@@ -96,7 +132,7 @@ class MicrosoftTeamsOAuthService(OAuthBaseService):
         additional_params: Optional[Dict[str, str]] = None
     ) -> OAuthTokens:
         """
-        Refresh Microsoft Teams access token
+        Refresh Microsoft Teams access token with exponential backoff
         
         Migrated from: refreshAccessToken() in MicrosoftTeamsOAuthService.ts
         
@@ -106,8 +142,14 @@ class MicrosoftTeamsOAuthService(OAuthBaseService):
             
         Returns:
             New OAuth tokens
+            
+        Requirements: 8.4 - Refresh token automatically when expired
         """
+        if not refresh_token:
+            raise Exception('Refresh token is required')
+        
         max_retries = 3
+        last_error = None
         
         for retry in range(max_retries):
             try:
@@ -121,29 +163,46 @@ class MicrosoftTeamsOAuthService(OAuthBaseService):
                         'scope': ' '.join(self.config.scopes),
                     },
                     headers={'Content-Type': 'application/x-www-form-urlencoded'},
-                    timeout=10
+                    timeout=30  # Increased timeout
                 )
                 response.raise_for_status()
                 
-                return self.parse_token_response(response.json())
+                tokens = self.parse_token_response(response.json())
+                print(f'[teams] Token refresh successful')
+                return tokens
             
             except requests.RequestException as e:
-                print(f'[teams] Token refresh attempt {retry + 1}/{max_retries} failed: {e}')
+                last_error = e
+                error_msg = str(e)
+                error_code = None
+                is_retryable = True
                 
-                if retry >= max_retries - 1:
-                    error_msg = str(e)
-                    if hasattr(e, 'response') and e.response is not None:
-                        try:
-                            error_data = e.response.json()
-                            error_msg = error_data.get('error_description', str(e))
-                        except:
-                            pass
-                    raise Exception(f'Failed to refresh token after {max_retries} attempts: {error_msg}')
+                if hasattr(e, 'response') and e.response is not None:
+                    try:
+                        error_data = e.response.json()
+                        error_msg = error_data.get('error_description', str(e))
+                        error_code = error_data.get('error')
+                    except:
+                        pass
+                    
+                    # Check for non-retryable errors
+                    status_code = e.response.status_code
+                    if status_code in [400, 401, 403]:
+                        is_retryable = False
+                        if error_code == 'invalid_grant':
+                            error_msg = 'Refresh token expired or revoked. User needs to re-authenticate.'
+                
+                print(f'[teams] Token refresh attempt {retry + 1}/{max_retries} failed: {error_code} - {error_msg}')
+                
+                if not is_retryable or retry >= max_retries - 1:
+                    raise Exception(f'Failed to refresh token: {error_msg}')
                 
                 # Exponential backoff: 1s, 2s, 4s
-                time.sleep(2 ** retry)
+                backoff_time = 2 ** retry
+                print(f'[teams] Retrying in {backoff_time}s...')
+                time.sleep(backoff_time)
         
-        raise Exception('Token refresh failed')
+        raise Exception(f'Token refresh failed after {max_retries} attempts')
     
     def get_user_info(self, access_token: str) -> Dict[str, str]:
         """

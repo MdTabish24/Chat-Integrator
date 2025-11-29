@@ -63,6 +63,7 @@ urlpatterns = [
     path('api/conversations/', include('apps.conversations.urls')),
     path('api/webhooks/', include('apps.webhooks.urls')),
     path('api/telegram/', include('apps.telegram.urls')),
+    path('api/platforms/', include('apps.platforms.urls')),  # Cookie-based platform integrations
     path('api/debug/', include('apps.debug.urls')),
 ]
 

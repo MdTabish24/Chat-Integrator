@@ -2,6 +2,7 @@
 Base platform adapter with common functionality.
 
 Migrated from backend/src/adapters/PlatformAdapter.ts and BasePlatformAdapter.ts
+Updated to use the new RateLimiter service for platform-specific rate limiting.
 """
 
 import time
@@ -11,6 +12,12 @@ from dataclasses import dataclass
 
 from apps.messaging.models import Message
 from apps.conversations.models import Conversation
+from apps.core.services.rate_limiter import (
+    RateLimiter,
+    RateLimitConfig,
+    PLATFORM_RATE_LIMITS,
+    get_platform_rate_limiter,
+)
 
 
 class PlatformAPIError(Exception):
@@ -53,6 +60,7 @@ class BasePlatformAdapter(ABC):
     Abstract base class for platform adapters with common functionality
     
     Migrated from: BasePlatformAdapter in BasePlatformAdapter.ts
+    Updated to use RateLimiter service for platform-specific rate limiting.
     """
     
     # Retry configuration
@@ -67,6 +75,21 @@ class BasePlatformAdapter(ABC):
             platform: Platform name
         """
         self.platform = platform
+        
+        # Initialize rate limiter for this platform
+        try:
+            self.rate_limiter = get_platform_rate_limiter(platform)
+            self.rate_limit_config = PLATFORM_RATE_LIMITS.get(platform)
+        except ValueError:
+            # Platform not in predefined list, use default config
+            self.rate_limit_config = RateLimitConfig(
+                requests_per_window=30,
+                window_seconds=60,
+                min_delay_ms=1000,
+                max_delay_ms=3000,
+                daily_limit=None
+            )
+            self.rate_limiter = RateLimiter(config=self.rate_limit_config)
     
     @abstractmethod
     def fetch_messages(self, account_id: str, since: Optional[Any] = None) -> List[Dict]:
@@ -126,6 +149,7 @@ class BasePlatformAdapter(ABC):
         Check and enforce rate limits using the platform rate limit service
         
         Migrated from: checkRateLimit() in BasePlatformAdapter.ts
+        Updated to use RateLimiter service.
         
         Args:
             account_id: The connected account ID
@@ -133,9 +157,38 @@ class BasePlatformAdapter(ABC):
             
         Raises:
             RateLimitError if rate limit is exceeded
+            
+        Requirements: 12.1
         """
-        # This will be implemented when platformRateLimitService is migrated
-        pass
+        if not self.rate_limiter.acquire(account_id, action_type=endpoint):
+            # Calculate retry time
+            wait_time = self.rate_limiter.wait_if_needed(account_id, action_type=endpoint)
+            raise RateLimitError(
+                f'Rate limit exceeded for {self.platform}',
+                self.platform,
+                int(wait_time)
+            )
+    
+    def apply_human_delay(self, account_id: str) -> float:
+        """
+        Apply a random delay to simulate human-like behavior.
+        
+        Args:
+            account_id: The connected account ID
+            
+        Returns:
+            The delay that was applied (in seconds)
+            
+        Requirements: 12.2
+        """
+        if self.rate_limit_config:
+            delay = self.rate_limiter.get_random_delay(
+                self.rate_limit_config.min_delay_ms,
+                self.rate_limit_config.max_delay_ms
+            )
+            time.sleep(delay)
+            return delay
+        return 0.0
     
     def log_platform_api_usage(self, account_id: str, endpoint: str) -> None:
         """
@@ -168,6 +221,7 @@ class BasePlatformAdapter(ABC):
         Execute an API call with retry logic and exponential backoff
         
         Migrated from: executeWithRetry() in BasePlatformAdapter.ts
+        Updated to use RateLimiter service for exponential backoff.
         
         Args:
             fn: The function to execute
@@ -179,6 +233,8 @@ class BasePlatformAdapter(ABC):
             
         Raises:
             PlatformAPIError or RateLimitError
+            
+        Requirements: 12.4
         """
         last_error = None
         
@@ -192,6 +248,9 @@ class BasePlatformAdapter(ABC):
                 
                 # Log successful API usage
                 self.log_platform_api_usage(account_id, endpoint)
+                
+                # Reset error count on success
+                self.rate_limiter.reset_error_count(account_id)
                 
                 return result
             
@@ -209,9 +268,11 @@ class BasePlatformAdapter(ABC):
                     # Not retryable or last attempt, throw the error
                     raise self.wrap_error(error)
                 
-                # Calculate delay with exponential backoff
-                delay = (self.BASE_DELAY_MS / 1000) * (2 ** attempt)
-                print(f'Retry attempt {attempt + 1}/{self.MAX_RETRIES} for {self.platform} after {delay}s')
+                # Increment error count and calculate exponential backoff
+                error_count = self.rate_limiter.increment_error_count(account_id)
+                delay = self.rate_limiter.calculate_exponential_backoff(attempt)
+                
+                print(f'Retry attempt {attempt + 1}/{self.MAX_RETRIES} for {self.platform} after {delay}s (error count: {error_count})')
                 
                 # Wait before retrying
                 time.sleep(delay)

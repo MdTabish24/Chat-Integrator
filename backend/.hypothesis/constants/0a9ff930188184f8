@@ -1,0 +1,4 @@
+# file: C:\Users\Mohammad Tabish\OneDrive\ドキュメント\MERGER CHAT INTEGRATION\backend\apps\messaging\admin.py
+# hypothesis_version: 6.148.3
+
+['-sent_at', '...', 'Content', 'Content Preview', 'Message Information', 'Sender', 'Status', 'Timestamps', 'content', 'content_preview', 'conversation', 'created_at', 'delivered_at', 'fields', 'id', 'is_outgoing', 'is_read', 'media_url', 'message_type', 'platform_message_id', 'sender_id', 'sender_name', 'sent_at']

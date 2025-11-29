@@ -1,0 +1,4 @@
+# file: C:\Users\Mohammad Tabish\OneDrive\ドキュメント\MERGER CHAT INTEGRATION\backend\apps\messaging\models.py
+# hypothesis_version: 6.148.3
+
+[255, 1000, '-sent_at', 'File', 'Image', 'Text', 'Video', 'conversation', 'file', 'idx_messages_is_read', 'image', 'is_read', 'messages', 'platform_message_id', 'text', 'video']

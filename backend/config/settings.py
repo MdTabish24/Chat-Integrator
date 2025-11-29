@@ -205,46 +205,18 @@ CACHES = {
 }
 
 # Channels Configuration (WebSocket) - Optimized for Upstash free tier (10 max connections)
-import ssl
-
-if 'rediss://' in REDIS_URL:
-    CHANNEL_LAYERS = {
-        'default': {
-            'BACKEND': 'channels_redis.core.RedisChannelLayer',
-            'CONFIG': {
-                'hosts': [REDIS_URL],
-                'capacity': 50,
-                'expiry': 30,
-                'group_expiry': 30,
-                'connection_kwargs': {
-                    'max_connections': 5,
-                    'retry_on_timeout': True,
-                    'socket_keepalive': True,
-                    'socket_keepalive_options': {
-                        1: 1,  # TCP_KEEPIDLE
-                        2: 1,  # TCP_KEEPINTVL  
-                        3: 3,  # TCP_KEEPCNT
-                    },
-                },
-            },
+# Note: channels-redis 4.1.0 doesn't support connection_kwargs, use hosts with dict format instead
+CHANNEL_LAYERS = {
+    'default': {
+        'BACKEND': 'channels_redis.core.RedisChannelLayer',
+        'CONFIG': {
+            'hosts': [REDIS_URL],
+            'capacity': 50,
+            'expiry': 30,
+            'group_expiry': 30,
         },
-    }
-else:
-    CHANNEL_LAYERS = {
-        'default': {
-            'BACKEND': 'channels_redis.core.RedisChannelLayer',
-            'CONFIG': {
-                'hosts': [REDIS_URL],
-                'capacity': 50,
-                'expiry': 30,
-                'group_expiry': 30,
-                'connection_kwargs': {
-                    'max_connections': 5,
-                    'retry_on_timeout': True,
-                },
-            },
-        },
-    }
+    },
+}
 
 # Celery Configuration
 # Migrated from backend/src/config/queues.ts

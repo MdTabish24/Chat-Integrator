@@ -9,10 +9,13 @@ from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import AllowAny
 from adrf.views import APIView as AsyncAPIView
+from asgiref.sync import sync_to_async
 
 from .services.client import telegram_user_client
 from .services.sync import telegram_message_sync
 from apps.conversations.models import Conversation
+from apps.messaging.models import Message
+from apps.core.utils.crypto import encrypt
 
 
 class StartPhoneAuthView(AsyncAPIView):
@@ -20,7 +23,6 @@ class StartPhoneAuthView(AsyncAPIView):
     Start phone authentication
     
     POST /api/telegram/auth/phone
-    Migrated from: startPhoneAuth() in telegramUserController.ts
     """
     permission_classes = [AllowAny]
     
@@ -52,7 +54,6 @@ class VerifyPhoneCodeView(AsyncAPIView):
     Verify phone code
     
     POST /api/telegram/auth/verify
-    Migrated from: verifyPhoneCode() in telegramUserController.ts
     """
     permission_classes = [AllowAny]
     
@@ -74,6 +75,12 @@ class VerifyPhoneCodeView(AsyncAPIView):
             if result.get('needPassword'):
                 return Response({'success': False, 'needPassword': True})
             
+            # Trigger initial sync after successful verification
+            try:
+                await telegram_message_sync.sync_messages(result['accountId'])
+            except Exception as sync_error:
+                print(f'[telegram-user] Initial sync failed: {sync_error}')
+            
             return Response({
                 'success': True,
                 'accountId': result['accountId'],
@@ -92,7 +99,6 @@ class GetDialogsView(AsyncAPIView):
     Get dialogs (conversations)
     
     GET /api/telegram/:accountId/dialogs
-    Migrated from: getDialogs() in telegramUserController.ts
     """
     permission_classes = [AllowAny]
     
@@ -114,7 +120,6 @@ class GetMessagesView(AsyncAPIView):
     Get messages from a chat
     
     GET /api/telegram/:accountId/messages/:chatId
-    Migrated from: getMessages() in telegramUserController.ts
     """
     permission_classes = [AllowAny]
     
@@ -136,7 +141,6 @@ class SendMessageView(AsyncAPIView):
     Send a message
     
     POST /api/telegram/:accountId/send/:chatId
-    Migrated from: sendMessage() in telegramUserController.ts
     """
     permission_classes = [AllowAny]
     
@@ -149,8 +153,48 @@ class SendMessageView(AsyncAPIView):
             if not text:
                 return Response({'error': 'Text required'}, status=status.HTTP_400_BAD_REQUEST)
             
-            await telegram_user_client.send_message(account_id, chat_id, text)
-            return Response({'success': True})
+            # Send message via Telegram
+            result = await telegram_user_client.send_message(account_id, chat_id, text)
+            
+            # Save message to database
+            @sync_to_async
+            def save_message():
+                try:
+                    conversation = Conversation.objects.get(
+                        account_id=account_id,
+                        platform_conversation_id=chat_id
+                    )
+                    
+                    from django.utils import timezone
+                    from datetime import datetime
+                    
+                    msg_date = result.get('date', 0)
+                    if msg_date:
+                        msg_datetime = datetime.fromtimestamp(msg_date, tz=timezone.utc)
+                    else:
+                        msg_datetime = timezone.now()
+                    
+                    Message.objects.create(
+                        conversation=conversation,
+                        platform_message_id=result['id'],
+                        content=encrypt(text),
+                        sender_id='me',
+                        sender_name='Me',
+                        sent_at=msg_datetime,
+                        is_outgoing=True,
+                        is_read=True,
+                    )
+                    
+                    # Update conversation last_message_at
+                    conversation.last_message_at = msg_datetime
+                    conversation.save()
+                    
+                except Exception as e:
+                    print(f'[telegram-user] Error saving sent message: {e}')
+            
+            await save_message()
+            
+            return Response({'success': True, 'message': result})
         
         except Exception as e:
             print(f'[telegram-user] Send message failed: {e}')
@@ -162,7 +206,6 @@ class SyncMessagesView(AsyncAPIView):
     Sync messages
     
     POST /api/telegram/:accountId/sync
-    Migrated from: syncMessages() in telegramUserController.ts
     """
     permission_classes = [AllowAny]
     
@@ -181,10 +224,9 @@ class SyncMessagesView(AsyncAPIView):
 
 class ResetAndSyncView(AsyncAPIView):
     """
-    Reset and sync
+    Reset and sync - deletes all conversations and re-syncs
     
     POST /api/telegram/:accountId/reset
-    Migrated from: resetAndSync() in telegramUserController.ts
     """
     permission_classes = [AllowAny]
     
@@ -193,12 +235,13 @@ class ResetAndSyncView(AsyncAPIView):
             if not hasattr(request, 'user_jwt') or not request.user_jwt:
                 return Response({'error': 'Unauthorized'}, status=status.HTTP_401_UNAUTHORIZED)
             
-            # Delete all conversations for this account (async-safe)
-            from asgiref.sync import sync_to_async
-            
             @sync_to_async
             def delete_conversations():
-                Conversation.objects.filter(account_id=account_id).delete()
+                # Delete messages first (cascade should handle this, but being explicit)
+                conversations = Conversation.objects.filter(account_id=account_id)
+                for conv in conversations:
+                    Message.objects.filter(conversation=conv).delete()
+                conversations.delete()
             
             await delete_conversations()
             

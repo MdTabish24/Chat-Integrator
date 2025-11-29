@@ -5,13 +5,14 @@ Uses Telethon library (MTProto client).
 Migrated from backend/src/services/telegram/TelegramUserClient.ts
 """
 
+import asyncio
+import traceback
 from typing import Optional, Dict, List
+
 from django.conf import settings
 from telethon import TelegramClient
 from telethon.sessions import StringSession
-from telethon.tl.functions.messages import GetDialogsRequest
-from telethon.tl.types import InputPeerEmpty
-import asyncio
+from asgiref.sync import sync_to_async
 
 from apps.oauth.models import ConnectedAccount
 from apps.core.utils.crypto import decrypt, encrypt
@@ -19,36 +20,20 @@ from apps.core.utils.crypto import decrypt, encrypt
 
 class TelegramUserClientService:
     """
-    Telegram User Client Service
-    
-    Migrated from: TelegramUserClientService in TelegramUserClient.ts
-    Note: Python doesn't have direct MTProto user client like Node.js 'telegram' library
-    We'll use Bot API which is more stable for production
+    Telegram User Client Service using Telethon MTProto
     """
     
     def __init__(self):
         self.api_id = int(settings.TELEGRAM_API_ID) if settings.TELEGRAM_API_ID else 0
         self.api_hash = settings.TELEGRAM_API_HASH
         self.sessions: Dict[str, TelegramClient] = {}
-        self.temp_sessions: Dict[str, TelegramClient] = {}  # For verification flow
+        self.temp_sessions: Dict[str, TelegramClient] = {}
     
     async def start_phone_verification(self, user_id: str, phone_number: str) -> Dict[str, str]:
-        """
-        Start phone verification using Telethon
-        
-        Migrated from: startPhoneVerification() in TelegramUserClient.ts
-        
-        Args:
-            user_id: User ID
-            phone_number: Phone number
-            
-        Returns:
-            Dict with phoneCodeHash
-        """
+        """Start phone verification using Telethon"""
         print(f'[telegram-user] Starting phone verification for: {phone_number}')
         
         try:
-            # Create Telethon client with empty session
             client = TelegramClient(
                 StringSession(),
                 self.api_id,
@@ -60,11 +45,9 @@ class TelegramUserClientService:
             await client.connect()
             print('[telegram-user] Client connected')
             
-            # Send code
             result = await client.send_code_request(phone_number)
             print('[telegram-user] Code sent successfully')
             
-            # Store temp session
             temp_key = f'temp_{user_id}_{phone_number}'
             self.temp_sessions[temp_key] = client
             
@@ -82,21 +65,7 @@ class TelegramUserClientService:
         phone_code_hash: str,
         password: Optional[str] = None
     ) -> Dict[str, any]:
-        """
-        Verify phone code using Telethon
-        
-        Migrated from: verifyPhoneCode() in TelegramUserClient.ts
-        
-        Args:
-            user_id: User ID
-            phone_number: Phone number
-            phone_code: Verification code
-            phone_code_hash: Code hash
-            password: 2FA password
-            
-        Returns:
-            Dict with accountId, username, needPassword
-        """
+        """Verify phone code using Telethon"""
         print('[telegram-user] Verifying phone code')
         
         temp_key = f'temp_{user_id}_{phone_number}'
@@ -106,12 +75,10 @@ class TelegramUserClientService:
             raise Exception('Session not found. Please restart verification.')
         
         try:
-            # If password provided, directly sign in with password (2FA flow)
             if password:
                 print('[telegram-user] Signing in with 2FA password')
                 await client.sign_in(password=password)
             else:
-                # Sign in with code first
                 try:
                     await client.sign_in(phone_number, phone_code, phone_code_hash=phone_code_hash)
                 except Exception as e:
@@ -121,17 +88,11 @@ class TelegramUserClientService:
                     else:
                         raise
             
-            # Get user info
             me = await client.get_me()
             username = me.username or me.first_name or phone_number
             telegram_user_id = str(me.id)
             
-            # Save session string
             session_string = client.session.save()
-            
-            # Store in database (async-safe)
-            from apps.oauth.models import ConnectedAccount
-            from asgiref.sync import sync_to_async
             
             @sync_to_async
             def save_account():
@@ -148,11 +109,7 @@ class TelegramUserClientService:
                 return str(account.id)
             
             account_id = await save_account()
-            
-            # Store active session
             self.sessions[account_id] = client
-            
-            # Remove temp session
             del self.temp_sessions[temp_key]
             
             print('[telegram-user] Verification successful')
@@ -170,21 +127,17 @@ class TelegramUserClientService:
             raise Exception(f'Invalid verification code: {str(e)}')
     
     async def load_session(self, account_id: str) -> Optional[TelegramClient]:
-        """
-        Load Telegram session using Telethon
+        """Load Telegram session from database"""
+        print(f'[telegram-user] Loading session for account {account_id}')
         
-        Migrated from: loadSession() in TelegramUserClient.ts
-        
-        Args:
-            account_id: Connected account ID
-            
-        Returns:
-            TelegramClient instance or None
-        """
         if account_id in self.sessions:
-            return self.sessions[account_id]
-        
-        from asgiref.sync import sync_to_async
+            client = self.sessions[account_id]
+            if client.is_connected():
+                print(f'[telegram-user] Using cached session for {account_id}')
+                return client
+            else:
+                print(f'[telegram-user] Cached session disconnected, reloading...')
+                del self.sessions[account_id]
         
         @sync_to_async
         def get_account():
@@ -196,104 +149,139 @@ class TelegramUserClientService:
         
         try:
             account = await get_account()
+            print(f'[telegram-user] Found account in DB: {account.platform_username}')
             
-            # Get session string
             session_string = decrypt(account.access_token)
+            if not session_string:
+                print(f'[telegram-user] Empty session string for account {account_id}')
+                return None
             
-            # Create client from saved session in a thread-safe way
-            import asyncio
-            loop = asyncio.get_event_loop()
+            print(f'[telegram-user] Creating Telethon client...')
+            client = TelegramClient(
+                StringSession(session_string),
+                self.api_id,
+                self.api_hash,
+                connection_retries=5,
+                timeout=30
+            )
             
-            def create_client():
-                return TelegramClient(
-                    StringSession(session_string),
-                    self.api_id,
-                    self.api_hash,
-                    loop=loop
-                )
+            await client.connect()
+            print(f'[telegram-user] Client connected, checking authorization...')
             
-            client = await loop.run_in_executor(None, create_client)
-            
-            if not client.is_connected():
-                await client.connect()
+            if not await client.is_user_authorized():
+                print(f'[telegram-user] Session expired for account {account_id}')
+                # Mark account as inactive
+                @sync_to_async
+                def mark_inactive():
+                    account.is_active = False
+                    account.save()
+                await mark_inactive()
+                return None
             
             self.sessions[account_id] = client
-            
-            print(f'[telegram-user] Session loaded for account {account_id}')
+            print(f'[telegram-user] Session loaded successfully for account {account_id}')
             return client
         
         except ConnectedAccount.DoesNotExist:
+            print(f'[telegram-user] Account not found in database: {account_id}')
             return None
         except Exception as e:
             print(f'[telegram-user] Failed to load session: {e}')
+            traceback.print_exc()
             return None
     
-    async def get_dialogs(self, account_id: str, limit: int = 50) -> List[Dict]:
-        """
-        Get dialogs using Telethon
-        
-        Migrated from: getDialogs() in TelegramUserClient.ts
-        
-        Args:
-            account_id: Connected account ID
-            limit: Max dialogs to fetch
-            
-        Returns:
-            List of dialogs
-        """
+    async def get_dialogs(self, account_id: str, limit: int = 100) -> List[Dict]:
+        """Get all dialogs (conversations) from Telegram"""
         try:
             client = await self.load_session(account_id)
             if not client:
-                raise Exception('Session not found')
+                raise Exception('Session not found or expired. Please reconnect your Telegram account.')
             
-            # Ensure client is connected
-            if not client.is_connected():
-                await client.connect()
-            
-            # Get dialogs
             dialogs = await client.get_dialogs(limit=limit)
             
             result = []
             for dialog in dialogs:
-                result.append({
-                    'id': str(dialog.id),
-                    'name': dialog.name or dialog.title or 'Unknown',
-                    'isUser': dialog.is_user,
-                    'isGroup': dialog.is_group,
-                    'unreadCount': dialog.unread_count or 0,
-                    'date': int(dialog.date.timestamp()) if dialog.date else 0,
-                })
+                try:
+                    # Get sender name properly
+                    name = dialog.name or dialog.title or 'Unknown'
+                    
+                    result.append({
+                        'id': str(dialog.id),
+                        'name': name,
+                        'isUser': dialog.is_user,
+                        'isGroup': dialog.is_group,
+                        'isChannel': dialog.is_channel,
+                        'unreadCount': dialog.unread_count or 0,
+                        'date': int(dialog.date.timestamp()) if dialog.date else 0,
+                    })
+                except Exception as e:
+                    print(f'[telegram-user] Error processing dialog: {e}')
+                    continue
             
+            print(f'[telegram-user] Retrieved {len(result)} dialogs')
             return result
+        
         except Exception as e:
             print(f'[telegram-user] Error getting dialogs: {e}')
-            import traceback
             traceback.print_exc()
             raise
     
-    async def get_messages(self, account_id: str, chat_id: str, limit: int = 50) -> List[Dict]:
-        """
-        Get messages from a chat
-        
-        Migrated from: getMessages() in TelegramUserClient.ts
-        
-        Args:
-            account_id: Connected account ID
-            chat_id: Chat ID
-            limit: Max messages to fetch
+    async def get_messages_from_telegram(self, account_id: str, chat_id: str, limit: int = 50) -> List[Dict]:
+        """Get messages directly from Telegram API"""
+        try:
+            client = await self.load_session(account_id)
+            if not client:
+                raise Exception('Session not found or expired')
             
-        Returns:
-            List of messages
-        """
-        bot = await self.load_session(account_id)
-        if not bot:
-            raise Exception('Session not found')
+            # Get entity for the chat
+            try:
+                entity = await client.get_entity(int(chat_id))
+            except ValueError:
+                entity = int(chat_id)
+            
+            # Fetch messages
+            messages = await client.get_messages(entity, limit=limit)
+            
+            result = []
+            for msg in messages:
+                if not msg.text:
+                    continue
+                
+                try:
+                    sender_name = 'Unknown'
+                    sender_id = 'unknown'
+                    
+                    if msg.sender:
+                        sender_id = str(msg.sender.id)
+                        if hasattr(msg.sender, 'first_name'):
+                            sender_name = msg.sender.first_name or 'Unknown'
+                        elif hasattr(msg.sender, 'title'):
+                            sender_name = msg.sender.title or 'Unknown'
+                    
+                    result.append({
+                        'id': str(msg.id),
+                        'text': msg.text,
+                        'senderId': sender_id,
+                        'senderName': sender_name,
+                        'date': int(msg.date.timestamp()) if msg.date else 0,
+                        'out': msg.out,
+                    })
+                except Exception as e:
+                    print(f'[telegram-user] Error processing message: {e}')
+                    continue
+            
+            return result
         
-        # Bot API doesn't have direct history fetch
-        # We'll use stored messages from database
+        except Exception as e:
+            print(f'[telegram-user] Error getting messages: {e}')
+            traceback.print_exc()
+            return []
+    
+    async def get_messages(self, account_id: str, chat_id: str, limit: int = 50) -> List[Dict]:
+        """Get messages from database (for API response)"""
         from apps.messaging.models import Message
         from apps.conversations.models import Conversation
-        from asgiref.sync import sync_to_async
+        from apps.core.utils.crypto import decrypt
         
         @sync_to_async
         def get_messages_from_db():
@@ -307,59 +295,67 @@ class TelegramUserClientService:
                     conversation=conversation
                 ).order_by('-sent_at')[:limit]
                 
-                return [{
-                    'id': str(msg.id),
-                    'text': msg.content,
-                    'senderId': msg.sender_id,
-                    'date': msg.sent_at.timestamp(),
-                    'out': msg.is_outgoing,
-                } for msg in messages]
+                result = []
+                for msg in messages:
+                    try:
+                        decrypted_content = decrypt(msg.content)
+                    except:
+                        decrypted_content = msg.content
+                    
+                    result.append({
+                        'id': str(msg.id),
+                        'text': decrypted_content,
+                        'senderId': msg.sender_id,
+                        'senderName': msg.sender_name,
+                        'date': int(msg.sent_at.timestamp()),
+                        'out': msg.is_outgoing,
+                    })
+                
+                return result
             
             except Conversation.DoesNotExist:
                 return []
         
         return await get_messages_from_db()
     
-    async def send_message(self, account_id: str, chat_id: str, text: str) -> None:
-        """
-        Send a message using Telethon
-        
-        Migrated from: sendMessage() in TelegramUserClient.ts
-        
-        Args:
-            account_id: Connected account ID
-            chat_id: Chat ID
-            text: Message text
-        """
+    async def send_message(self, account_id: str, chat_id: str, text: str) -> Dict:
+        """Send a message via Telegram"""
         try:
             client = await self.load_session(account_id)
             if not client:
-                raise Exception('Session not found')
+                raise Exception('Session not found or expired')
             
-            # Ensure client is connected
-            if not client.is_connected():
-                await client.connect()
+            # Get entity
+            try:
+                entity = await client.get_entity(int(chat_id))
+            except ValueError:
+                entity = int(chat_id)
             
-            await client.send_message(int(chat_id), text)
+            # Send message
+            msg = await client.send_message(entity, text)
+            
             print(f'[telegram-user] Message sent to chat {chat_id}')
+            
+            return {
+                'id': str(msg.id),
+                'text': text,
+                'date': int(msg.date.timestamp()) if msg.date else 0,
+                'out': True,
+            }
+        
         except Exception as e:
             print(f'[telegram-user] Error sending message: {e}')
-            import traceback
             traceback.print_exc()
             raise Exception(f'Failed to send message: {str(e)}')
     
     async def disconnect(self, account_id: str) -> None:
-        """
-        Disconnect Telethon session
-        
-        Migrated from: disconnect() in TelegramUserClient.ts
-        
-        Args:
-            account_id: Connected account ID
-        """
+        """Disconnect Telegram session"""
         if account_id in self.sessions:
-            client = self.sessions[account_id]
-            await client.disconnect()
+            try:
+                client = self.sessions[account_id]
+                await client.disconnect()
+            except:
+                pass
             del self.sessions[account_id]
             print(f'[telegram-user] Session disconnected for {account_id}')
 

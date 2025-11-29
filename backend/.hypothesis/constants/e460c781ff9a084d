@@ -1,0 +1,4 @@
+# file: C:\Users\Mohammad Tabish\OneDrive\ドキュメント\MERGER CHAT INTEGRATION\backend\config\celery.py
+# hypothesis_version: 6.148.3
+
+[30.0, 'CELERY', 'UTC', 'config.settings', 'django.conf:settings', 'json', 'messaging_hub', 'schedule', 'task']

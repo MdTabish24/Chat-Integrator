@@ -26,6 +26,7 @@ from .services.whatsapp import whatsapp_oauth_service
 from .services.linkedin import linkedin_oauth_service
 from .services.teams import teams_oauth_service
 from .services.telegram import telegram_oauth_service
+from .services.gmail import gmail_oauth_service
 
 
 def get_oauth_service(platform: str) -> OAuthBaseService:
@@ -42,6 +43,7 @@ def get_oauth_service(platform: str) -> OAuthBaseService:
         'linkedin': linkedin_oauth_service,
         'teams': teams_oauth_service,
         'telegram': telegram_oauth_service,
+        'gmail': gmail_oauth_service,
     }
     
     service = services.get(platform)
@@ -77,7 +79,7 @@ class InitiateConnectionView(APIView):
             # Validate platform
             valid_platforms = [
                 'telegram', 'twitter', 'linkedin', 'instagram',
-                'whatsapp', 'facebook', 'teams'
+                'whatsapp', 'facebook', 'teams', 'gmail'
             ]
             
             if platform not in valid_platforms:
@@ -284,6 +286,9 @@ class DisconnectAccountView(APIView):
     
     DELETE /api/oauth/disconnect/:accountId
     Migrated from: disconnectAccount() in oauthController.ts
+    
+    Requirements: 11.3 - WHEN user disconnects an account THEN the Chat_Orbitor 
+    SHALL permanently delete all stored credentials
     """
     permission_classes = [AllowAny]  # Check JWT in middleware
     
@@ -325,7 +330,15 @@ class DisconnectAccountView(APIView):
                 print(f'[oauth] Failed to revoke token for {platform}: {e}')
                 # Continue with disconnection even if revocation fails
             
-            # Mark account as inactive
+            # Clear all cached session data for this account
+            # Requirements: 11.3 - permanently delete all stored credentials
+            self._clear_cached_sessions(str(account_id), platform)
+            
+            # Permanently delete all stored credentials
+            # Requirements: 11.3 - clear access_token, refresh_token, cookies fields
+            account.access_token = ''
+            account.refresh_token = None
+            account.token_expires_at = None
             account.is_active = False
             account.save()
             
@@ -337,7 +350,7 @@ class DisconnectAccountView(APIView):
                 print(f'[oauth] Failed to remove account from polling service: {e}')
                 # Don't fail the disconnection if polling cleanup fails
             
-            print(f'[oauth] Account {account_id} disconnected successfully')
+            print(f'[oauth] Account {account_id} disconnected and credentials cleared successfully')
             
             return Response({
                 'success': True,
@@ -353,6 +366,54 @@ class DisconnectAccountView(APIView):
                     'retryable': True,
                 }
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    def _clear_cached_sessions(self, account_id: str, platform: str) -> None:
+        """
+        Clear any cached session data for the account.
+        
+        This removes cached data from Django cache that may contain
+        sensitive session information.
+        
+        Args:
+            account_id: The account ID to clear cache for
+            platform: The platform name
+            
+        Requirements: 11.3
+        """
+        try:
+            # Platform-specific cache keys that may store session data
+            cache_keys_to_clear = [
+                # Twitter cache keys
+                f'twitter:client:{account_id}',
+                # LinkedIn cache keys
+                f'linkedin:client:{account_id}',
+                # Instagram cache keys
+                f'instagram:client:{account_id}',
+                # Facebook cache keys
+                f'facebook:client:{account_id}',
+                # WhatsApp cache keys (session-based)
+                f'whatsapp:qr:{account_id}',
+                f'whatsapp:status:{account_id}',
+                # Discord cache keys
+                f'discord:client:{account_id}',
+                # Generic rate limiter cache keys
+                f'rate_limit:{platform}:{account_id}:fetch',
+                f'rate_limit:{platform}:{account_id}:send',
+                f'rate_limit:{platform}:{account_id}:daily',
+            ]
+            
+            for key in cache_keys_to_clear:
+                try:
+                    cache.delete(key)
+                except Exception as cache_error:
+                    # Log but don't fail - cache may not have this key
+                    print(f'[oauth] Failed to delete cache key {key}: {cache_error}')
+            
+            print(f'[oauth] Cleared cached sessions for account {account_id}')
+            
+        except Exception as e:
+            print(f'[oauth] Error clearing cached sessions: {e}')
+            # Don't fail the disconnection if cache cleanup fails
 
 
 class RefreshTokenView(APIView):

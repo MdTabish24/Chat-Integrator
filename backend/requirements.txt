@@ -33,6 +33,12 @@ httpx==0.25.2
 # Platform SDKs
 Telethon==1.36.0
 tweepy==4.14.0
+twikit==2.3.1
+linkedin-api==2.2.0
+instagrapi==2.1.2
+fbchat==1.9.7
+playwright==1.40.0
+discord.py==2.3.2
 
 # Validation & Sanitization
 bleach==6.1.0
@@ -43,3 +49,8 @@ uvicorn[standard]==0.27.0
 
 # Development
 python-decouple==3.8
+
+# Testing
+pytest==7.4.3
+pytest-django==4.7.0
+hypothesis==6.92.1
