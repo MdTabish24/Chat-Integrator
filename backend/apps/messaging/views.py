@@ -236,7 +236,7 @@ class SendMessageView(AsyncAPIView):
             
             conv_data = await get_conversation_data()
             
-            websocket_service.emit_new_message(
+            await websocket_service.emit_new_message_async(
                 user_id=user_id,
                 message=serializer.data,
                 conversation=conv_data

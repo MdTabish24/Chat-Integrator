@@ -4,6 +4,7 @@ WebSocket service for emitting events to clients.
 Migrated from backend/src/services/websocketService.ts
 """
 
+import asyncio
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
 from typing import Dict, Optional
@@ -23,9 +24,22 @@ class WebSocketService:
         """Get the room name for a user"""
         return f'user_{user_id}'
     
+    def _is_async_context(self) -> bool:
+        """Check if we're in an async context"""
+        try:
+            asyncio.get_running_loop()
+            return True
+        except RuntimeError:
+            return False
+    
+    async def _async_group_send(self, room: str, message: Dict) -> None:
+        """Async version of group_send"""
+        if self.channel_layer:
+            await self.channel_layer.group_send(room, message)
+    
     def emit_new_message(self, user_id: str, message: Dict, conversation: Optional[Dict] = None) -> None:
         """
-        Emit a new message event to a user
+        Emit a new message event to a user (sync version)
         
         Migrated from: emitNewMessage() in websocketService.ts
         """
@@ -33,7 +47,34 @@ class WebSocketService:
             print('[websocket] Channel layer not configured')
             return
         
+        # Check if we're in async context - if so, schedule the coroutine
+        if self._is_async_context():
+            asyncio.create_task(self.emit_new_message_async(user_id, message, conversation))
+            return
+        
         async_to_sync(self.channel_layer.group_send)(
+            self._get_user_room(user_id),
+            {
+                'type': 'new_message',
+                'data': {
+                    'message': message,
+                    'conversation': conversation,
+                    'timestamp': message.get('createdAt')
+                }
+            }
+        )
+        
+        print(f'[websocket] Emitted new message event to user {user_id}')
+    
+    async def emit_new_message_async(self, user_id: str, message: Dict, conversation: Optional[Dict] = None) -> None:
+        """
+        Emit a new message event to a user (async version)
+        """
+        if not self.channel_layer:
+            print('[websocket] Channel layer not configured')
+            return
+        
+        await self.channel_layer.group_send(
             self._get_user_room(user_id),
             {
                 'type': 'new_message',
