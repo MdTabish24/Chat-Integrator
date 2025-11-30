@@ -206,8 +206,16 @@ class LinkedInConversationsView(APIView):
                     }
                 }, status=status.HTTP_404_NOT_FOUND)
             
-            # Fetch conversations
-            conversations = linkedin_cookie_adapter.get_conversations(str(account_id))
+            # Try to fetch conversations from linkedin-api, fallback to cached
+            try:
+                conversations = linkedin_cookie_adapter.get_conversations(str(account_id))
+            except Exception as fetch_err:
+                print(f'[linkedin] linkedin-api fetch failed: {fetch_err}, returning cached conversations')
+                # Return cached conversations from database
+                from apps.conversations.models import Conversation
+                from apps.conversations.serializers import ConversationSerializer
+                cached_convs = Conversation.objects.filter(account=account).order_by('-last_message_at')
+                conversations = ConversationSerializer(cached_convs, many=True).data
             
             return Response({
                 'conversations': conversations,
