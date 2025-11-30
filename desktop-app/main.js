@@ -243,6 +243,8 @@ async function fetchTwitterDMs(cookies) {
 
 function parseTwitterResponse(data) {
   const conversations = [];
+  const users = data.inbox_initial_state?.users || {};
+  
   if (data.inbox_initial_state && data.inbox_initial_state.conversations) {
     for (const [convId, conv] of Object.entries(data.inbox_initial_state.conversations)) {
       const messages = [];
@@ -250,18 +252,34 @@ function parseTwitterResponse(data) {
         for (const entry of data.inbox_initial_state.entries) {
           if (entry.message && entry.message.conversation_id === convId) {
             const msg = entry.message.message_data;
+            const senderUser = users[msg.sender_id] || {};
             messages.push({
               id: entry.message.id,
               text: msg.text,
               senderId: msg.sender_id,
+              senderName: senderUser.name || senderUser.screen_name || 'Unknown',
+              senderUsername: senderUser.screen_name || '',
               createdAt: new Date(parseInt(entry.message.time)).toISOString()
             });
           }
         }
       }
+      
+      // Get participant details from users object
+      const participantIds = conv.participants?.map(p => p.user_id) || [];
+      const participantsWithNames = participantIds.map(userId => {
+        const user = users[userId] || {};
+        return {
+          user_id: userId,
+          name: user.name || user.screen_name || 'Twitter User',
+          screen_name: user.screen_name || '',
+          profile_image_url: user.profile_image_url_https || ''
+        };
+      });
+      
       conversations.push({
         id: convId,
-        participants: conv.participants || [],
+        participants: participantsWithNames,
         messages
       });
     }

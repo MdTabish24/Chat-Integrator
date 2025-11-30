@@ -738,12 +738,17 @@ class TwitterDesktopSyncView(APIView):
                 participant_id = ''
                 
                 # Find the other participant (not the current user)
+                participant_avatar = ''
                 for p in participants:
                     p_id = str(p.get('user_id', p.get('id', '')))
                     if p_id and p_id != str(account.platform_user_id):
                         participant_name = p.get('name', p.get('screen_name', 'Twitter User'))
                         participant_id = p_id
+                        participant_avatar = p.get('profile_image_url', '')
                         break
+                
+                # Use Twitter profile image or fallback to generated avatar
+                avatar_url = participant_avatar if participant_avatar else f'https://ui-avatars.com/api/?name={participant_name}&background=1DA1F2&color=fff'
                 
                 # Create or update conversation
                 conversation, created = Conversation.objects.update_or_create(
@@ -752,7 +757,7 @@ class TwitterDesktopSyncView(APIView):
                     defaults={
                         'participant_name': participant_name,
                         'participant_id': participant_id,
-                        'participant_avatar_url': f'https://ui-avatars.com/api/?name={participant_name}&background=1DA1F2&color=fff',
+                        'participant_avatar_url': avatar_url,
                         'last_message_at': timezone.now(),
                     }
                 )
@@ -767,6 +772,7 @@ class TwitterDesktopSyncView(APIView):
                     
                     text = msg_data.get('text', '')
                     sender_id = str(msg_data.get('senderId', ''))
+                    sender_name = msg_data.get('senderName', participant_name)
                     created_at = msg_data.get('createdAt')
                     
                     # Determine if outgoing
@@ -785,7 +791,7 @@ class TwitterDesktopSyncView(APIView):
                         defaults={
                             'content': encrypt(text),
                             'sender_id': sender_id,
-                            'sender_name': participant_name if not is_outgoing else 'You',
+                            'sender_name': sender_name if not is_outgoing else 'You',
                             'sent_at': sent_at,
                             'is_outgoing': is_outgoing,
                             'is_read': True,
