@@ -33,6 +33,12 @@ class MessageSerializer(serializers.ModelSerializer):
         """Decrypt content before sending to frontend"""
         data = super().to_representation(instance)
         
+        # Convert UUID fields to strings for JSON serialization
+        if data.get('id'):
+            data['id'] = str(data['id'])
+        if data.get('conversation_id'):
+            data['conversation_id'] = str(data['conversation_id'])
+        
         # Decrypt content if it's encrypted (base64 encoded AES-256-GCM)
         if data.get('content') and is_encrypted(data['content']):
             try:

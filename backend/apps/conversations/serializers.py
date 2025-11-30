@@ -32,6 +32,12 @@ class ConversationSerializer(serializers.ModelSerializer):
         """Decrypt sensitive fields before sending to frontend"""
         data = super().to_representation(instance)
         
+        # Convert UUID fields to strings for JSON serialization
+        if data.get('id'):
+            data['id'] = str(data['id'])
+        if data.get('account_id'):
+            data['account_id'] = str(data['account_id'])
+        
         # Decrypt participant_name if encrypted
         if data.get('participant_name') and is_encrypted(data['participant_name']):
             try:
@@ -62,6 +68,10 @@ class ConversationListSerializer(serializers.ModelSerializer):
     def to_representation(self, instance):
         """Decrypt sensitive fields before sending to frontend"""
         data = super().to_representation(instance)
+        
+        # Convert UUID fields to strings for JSON serialization
+        if data.get('id'):
+            data['id'] = str(data['id'])
         
         # Decrypt participant_name if encrypted
         if data.get('participant_name') and is_encrypted(data['participant_name']):
