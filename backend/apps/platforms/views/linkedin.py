@@ -583,12 +583,44 @@ class LinkedInDesktopSyncView(APIView):
             from apps.core.utils.crypto import encrypt
             from django.utils import timezone
             
+            # Get or create LinkedIn account
+            cookies = request.data.get('cookies', {})
+            li_at = cookies.get('li_at', '')
+            jsessionid = cookies.get('JSESSIONID', '')
+            
             try:
                 account = ConnectedAccount.objects.get(user_id=user_id, platform='linkedin', is_active=True)
             except ConnectedAccount.DoesNotExist:
-                return Response({
-                    'error': {'code': 'ACCOUNT_NOT_FOUND', 'message': 'No active LinkedIn account found', 'retryable': False}
-                }, status=status.HTTP_404_NOT_FOUND)
+                # If cookies provided, create account automatically
+                if li_at and jsessionid:
+                    platform_user_id = 'desktop_user'
+                    platform_username = 'LinkedIn User'
+                    
+                    # Try to extract user info from conversations
+                    for conv in conversations_data:
+                        participants = conv.get('participants', [])
+                        for p in participants:
+                            p_id = str(p.get('id', ''))
+                            if p_id:
+                                platform_user_id = p_id
+                                platform_username = p.get('name', 'LinkedIn User')
+                                break
+                        if platform_user_id != 'desktop_user':
+                            break
+                    
+                    account_id = linkedin_cookie_adapter.store_cookies(
+                        user_id=user_id,
+                        platform_user_id=platform_user_id,
+                        platform_username=platform_username,
+                        li_at=li_at,
+                        jsessionid=jsessionid
+                    )
+                    account = ConnectedAccount.objects.get(id=account_id)
+                    print(f'[linkedin-desktop] Auto-created account {account_id} for user {user_id}')
+                else:
+                    return Response({
+                        'error': {'code': 'ACCOUNT_NOT_FOUND', 'message': 'No active LinkedIn account found. Please submit cookies with sync request.', 'retryable': False}
+                    }, status=status.HTTP_404_NOT_FOUND)
             
             saved_conversations = 0
             saved_messages = 0

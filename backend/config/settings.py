@@ -154,15 +154,17 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # CORS Configuration
 # Migrated from backend/src/index.ts CORS settings
+CORS_ALLOW_ALL_ORIGINS = True  # Allow all origins for now (Render free tier issues)
 CORS_ALLOWED_ORIGINS = [
     'http://localhost:5173',
+    'http://localhost:3000',
     'https://chatintegrator.onrender.com',
     'https://chatorbitor.onrender.com',
     'https://chat-integrator.onrender.com',
 ]
 CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOW_METHODS = ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS']
-CORS_ALLOW_HEADERS = ['Content-Type', 'Authorization', 'X-CSRF-Token']
+CORS_ALLOW_HEADERS = ['Content-Type', 'Authorization', 'X-CSRF-Token', 'Accept', 'Origin', 'X-Requested-With']
 
 # Security Settings
 # Migrated from backend/src/middleware/security.ts

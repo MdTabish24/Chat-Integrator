@@ -707,7 +707,12 @@ class TwitterDesktopSyncView(APIView):
                     }
                 }, status=status.HTTP_400_BAD_REQUEST)
             
-            # Get user's Twitter account
+            # Get or create user's Twitter account
+            # If cookies are provided, create account automatically
+            cookies = request.data.get('cookies', {})
+            auth_token = cookies.get('auth_token', '')
+            ct0 = cookies.get('ct0', '')
+            
             try:
                 account = ConnectedAccount.objects.get(
                     user_id=user_id,
@@ -715,13 +720,43 @@ class TwitterDesktopSyncView(APIView):
                     is_active=True
                 )
             except ConnectedAccount.DoesNotExist:
-                return Response({
-                    'error': {
-                        'code': 'ACCOUNT_NOT_FOUND',
-                        'message': 'No active Twitter account found. Please connect Twitter first.',
-                        'retryable': False,
-                    }
-                }, status=status.HTTP_404_NOT_FOUND)
+                # If cookies provided, create account automatically
+                if auth_token and ct0:
+                    # Get user info from first conversation participant
+                    platform_user_id = 'desktop_user'
+                    platform_username = 'Twitter User'
+                    
+                    # Try to extract user ID from conversations
+                    for conv in conversations_data:
+                        participants = conv.get('participants', [])
+                        for p in participants:
+                            # The user's own ID might be in participants
+                            p_id = str(p.get('user_id', p.get('id', '')))
+                            if p_id:
+                                platform_user_id = p_id
+                                platform_username = p.get('screen_name', p.get('name', 'Twitter User'))
+                                break
+                        if platform_user_id != 'desktop_user':
+                            break
+                    
+                    # Create account with cookies
+                    account_id = twitter_cookie_adapter.store_cookies(
+                        user_id=user_id,
+                        platform_user_id=platform_user_id,
+                        platform_username=platform_username,
+                        auth_token=auth_token,
+                        ct0=ct0
+                    )
+                    account = ConnectedAccount.objects.get(id=account_id)
+                    print(f'[twitter-desktop] Auto-created account {account_id} for user {user_id}')
+                else:
+                    return Response({
+                        'error': {
+                            'code': 'ACCOUNT_NOT_FOUND',
+                            'message': 'No active Twitter account found. Please submit cookies with the sync request.',
+                            'retryable': False,
+                        }
+                    }, status=status.HTTP_404_NOT_FOUND)
             
             # Process and save conversations
             saved_conversations = 0

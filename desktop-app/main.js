@@ -182,17 +182,20 @@ async function syncPlatform(platform, cookies, token) {
         throw new Error(`Unknown platform: ${platform}`);
     }
 
-    // Send to backend
+    // Send to backend (include cookies for auto-account creation)
     const apiUrl = store.get('apiUrl') || API_BASE_URL;
     await axios.post(
       `${apiUrl}${config.apiEndpoint}`,
-      { conversations: data },
+      { 
+        conversations: data,
+        cookies: cookies  // Send cookies so backend can auto-create account if needed
+      },
       {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
         },
-        timeout: 30000
+        timeout: 120000 // 2 minutes for slow server
       }
     );
 
@@ -235,7 +238,7 @@ async function fetchTwitterDMs(cookies) {
   
   const response = await axios.get(
     'https://api.twitter.com/1.1/dm/inbox_initial_state.json?include_profile_interstitial_type=1&include_blocking=1&include_blocked_by=1&include_followed_by=1&include_want_retweets=1&include_mute_edge=1&include_can_dm=1&include_can_media_tag=1&skip_status=1&dm_secret_conversations_enabled=false&cards_platform=Web-12&include_cards=1&include_ext_alt_text=true&include_quote_count=true&include_reply_count=1&tweet_mode=extended&count=50',
-    { headers, timeout: 30000 }
+    { headers, timeout: 60000 }
   );
   
   return parseTwitterResponse(response.data);
@@ -299,7 +302,7 @@ async function fetchLinkedInMessages(cookies) {
   // Get conversations
   const response = await axios.get(
     'https://www.linkedin.com/voyager/api/messaging/conversations?keyVersion=LEGACY_INBOX',
-    { headers, timeout: 30000 }
+    { headers, timeout: 60000 }
   );
 
   return parseLinkedInResponse(response.data);
@@ -344,7 +347,7 @@ async function fetchInstagramDMs(cookies) {
 
   const response = await axios.get(
     'https://www.instagram.com/api/v1/direct_v2/inbox/',
-    { headers, timeout: 30000 }
+    { headers, timeout: 60000 }
   );
 
   return parseInstagramResponse(response.data);
@@ -389,7 +392,7 @@ async function fetchFacebookMessages(cookies) {
     'https://www.facebook.com/api/graphql/',
     { 
       headers, 
-      timeout: 30000,
+      timeout: 60000,
       params: {
         doc_id: '6195354443842040', // Inbox query
         variables: JSON.stringify({ limit: 20 })
@@ -502,7 +505,7 @@ ipcMain.handle('login-twitter', async (event, { username, password, email }) => 
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
         },
-        timeout: 60000 // 60 seconds for login
+        timeout: 120000 // 2 minutes for login (server can be slow)
       }
     );
     
