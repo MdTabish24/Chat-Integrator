@@ -147,26 +147,20 @@ class TwitterCookieSubmitView(APIView):
             
             user_id = request.user_jwt['user_id']
             
-            # Validate required fields
-            auth_token = request.data.get('auth_token')
-            ct0 = request.data.get('ct0')
-            platform_user_id = request.data.get('platform_user_id')
-            platform_username = request.data.get('platform_username')
+            # Validate required fields - support both direct and nested cookie format
+            cookies = request.data.get('cookies', {})
+            auth_token = request.data.get('auth_token') or cookies.get('auth_token')
+            ct0 = request.data.get('ct0') or cookies.get('ct0')
+            
+            # Platform user info is optional - will use defaults
+            platform_user_id = request.data.get('platform_user_id') or f'twitter_user_{user_id[:8]}'
+            platform_username = request.data.get('platform_username') or 'Twitter User'
             
             if not auth_token or not ct0:
                 return Response({
                     'error': {
                         'code': 'MISSING_COOKIES',
                         'message': 'Both auth_token and ct0 cookies are required',
-                        'retryable': False,
-                    }
-                }, status=status.HTTP_400_BAD_REQUEST)
-            
-            if not platform_user_id or not platform_username:
-                return Response({
-                    'error': {
-                        'code': 'MISSING_USER_INFO',
-                        'message': 'platform_user_id and platform_username are required',
                         'retryable': False,
                     }
                 }, status=status.HTTP_400_BAD_REQUEST)

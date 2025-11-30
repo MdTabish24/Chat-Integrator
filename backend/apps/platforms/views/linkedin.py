@@ -52,26 +52,20 @@ class LinkedInCookieSubmitView(APIView):
 
             user_id = request.user_jwt['user_id']
             
-            # Validate required fields
-            li_at = request.data.get('li_at')
-            jsessionid = request.data.get('JSESSIONID')
-            platform_user_id = request.data.get('platform_user_id')
-            platform_username = request.data.get('platform_username')
+            # Validate required fields - support both direct and nested cookie format
+            cookies = request.data.get('cookies', {})
+            li_at = request.data.get('li_at') or cookies.get('li_at')
+            jsessionid = request.data.get('JSESSIONID') or cookies.get('JSESSIONID')
+            
+            # Platform user info is optional - will use defaults
+            platform_user_id = request.data.get('platform_user_id') or f'linkedin_user_{user_id[:8]}'
+            platform_username = request.data.get('platform_username') or 'LinkedIn User'
             
             if not li_at or not jsessionid:
                 return Response({
                     'error': {
                         'code': 'MISSING_COOKIES',
                         'message': 'Both li_at and JSESSIONID cookies are required',
-                        'retryable': False,
-                    }
-                }, status=status.HTTP_400_BAD_REQUEST)
-            
-            if not platform_user_id or not platform_username:
-                return Response({
-                    'error': {
-                        'code': 'MISSING_USER_INFO',
-                        'message': 'platform_user_id and platform_username are required',
                         'retryable': False,
                     }
                 }, status=status.HTTP_400_BAD_REQUEST)
