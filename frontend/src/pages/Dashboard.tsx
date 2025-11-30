@@ -239,7 +239,7 @@ const Dashboard: React.FC = () => {
     }
   };
 
-  const handlePlatformExpand = (platform: Platform) => {
+  const handlePlatformExpand = async (platform: Platform) => {
     const platformData = platformsData.get(platform);
     if (!platformData) return;
     
@@ -257,6 +257,19 @@ const Dashboard: React.FC = () => {
     
     // Load conversations after state update (outside of setState callback)
     if (newIsExpanded) {
+      // For LinkedIn, trigger backend sync first (backend fetches messages via linkedin-api)
+      if (platform === 'linkedin') {
+        try {
+          const account = connectedAccounts.find(acc => acc.platform === 'linkedin');
+          if (account) {
+            console.log('[linkedin] Triggering backend sync...');
+            await apiClient.get(`/api/platforms/linkedin/conversations/${account.id}`);
+          }
+        } catch (err) {
+          console.log('[linkedin] Sync error (will still load cached):', err);
+        }
+      }
+      
       loadConversationsForPlatform(platform);
     }
   };
