@@ -109,7 +109,10 @@ class TwitterCookieAdapter(BasePlatformAdapter):
                 )
             
             # Create twikit client
-            client = Client(language='en-US')
+            try:
+                client = Client('en-US')  # Try positional first (older API)
+            except TypeError:
+                client = Client(language='en-US')  # Try keyword (newer API)
             
             # Set cookies for authentication
             client.set_cookies({
@@ -175,8 +178,12 @@ class TwitterCookieAdapter(BasePlatformAdapter):
             
             print(f'[twitter] Attempting login for @{username}')
             
-            # Create twikit client (language parameter only)
-            client = Client(language='en-US')
+            # Create twikit client
+            # Note: twikit 2.4+ uses different constructor
+            try:
+                client = Client('en-US')  # Try positional first (older API)
+            except TypeError:
+                client = Client(language='en-US')  # Try keyword (newer API)
             
             # Login with credentials
             await client.login(
