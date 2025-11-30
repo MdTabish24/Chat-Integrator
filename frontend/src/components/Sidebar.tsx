@@ -95,8 +95,11 @@ const Sidebar: React.FC<SidebarProps> = ({
             {platformData.isExpanded && (
               <div className="bg-gray-50">
                 {platformData.isLoading ? (
-                  <div className="py-4 flex justify-center">
+                  <div className="py-4 flex flex-col items-center justify-center">
                     <LoadingSpinner size="sm" />
+                    <span className="text-xs text-gray-500 mt-2">
+                      {platformData.platform === 'telegram' ? 'Syncing with Telegram...' : 'Loading...'}
+                    </span>
                   </div>
                 ) : platformData.error ? (
                   <div className="px-4 py-3 text-sm text-red-600">

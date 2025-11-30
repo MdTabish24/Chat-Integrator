@@ -357,22 +357,53 @@ class TelegramUserClientService:
             if not client:
                 raise Exception('Session not found or expired. Please reconnect your Telegram account.')
             
-            # Get entity - handle both positive and negative chat IDs
-            print(f'[telegram-user] Getting entity for chat_id: {chat_id}')
+            chat_id_int = int(chat_id)
+            entity = None
+            
+            # Method 1: Try to get entity directly
+            print(f'[telegram-user] Trying to get entity for chat_id: {chat_id_int}')
             try:
-                chat_id_int = int(chat_id)
                 entity = await client.get_entity(chat_id_int)
-                print(f'[telegram-user] Got entity: {entity}')
-            except ValueError as ve:
-                print(f'[telegram-user] ValueError getting entity: {ve}, using raw chat_id')
-                entity = int(chat_id)
-            except Exception as entity_err:
-                print(f'[telegram-user] Error getting entity: {entity_err}')
-                # Try using the chat_id directly
-                entity = int(chat_id)
+                print(f'[telegram-user] Got entity directly: {type(entity).__name__}')
+            except ValueError:
+                print(f'[telegram-user] Entity not in cache, fetching dialogs...')
+                # Method 2: Fetch dialogs to populate entity cache
+                try:
+                    dialogs = await client.get_dialogs(limit=100)
+                    # Find the dialog with matching ID
+                    for dialog in dialogs:
+                        if dialog.id == chat_id_int:
+                            entity = dialog.entity
+                            print(f'[telegram-user] Found entity in dialogs: {type(entity).__name__}')
+                            break
+                except Exception as dialog_err:
+                    print(f'[telegram-user] Error fetching dialogs: {dialog_err}')
+            
+            # Method 3: If still no entity, try get_input_entity with PeerUser/PeerChat
+            if entity is None:
+                print(f'[telegram-user] Trying InputPeerUser...')
+                try:
+                    from telethon.tl.types import InputPeerUser, InputPeerChat, InputPeerChannel
+                    # For users (positive IDs)
+                    if chat_id_int > 0:
+                        # We need access_hash, try to get it from dialogs
+                        dialogs = await client.get_dialogs(limit=100)
+                        for dialog in dialogs:
+                            if hasattr(dialog.entity, 'id') and dialog.entity.id == chat_id_int:
+                                entity = dialog.entity
+                                break
+                    else:
+                        # For groups/channels (negative IDs)
+                        entity = chat_id_int
+                except Exception as peer_err:
+                    print(f'[telegram-user] InputPeer error: {peer_err}')
+                    entity = chat_id_int
+            
+            if entity is None:
+                raise Exception(f'Could not find chat with ID {chat_id}. Please sync your conversations first.')
             
             # Send message
-            print(f'[telegram-user] Sending message...')
+            print(f'[telegram-user] Sending message to entity: {type(entity).__name__ if hasattr(entity, "__name__") else type(entity)}')
             msg = await client.send_message(entity, text)
             
             print(f'[telegram-user] Message sent successfully to chat {chat_id}, msg_id: {msg.id}')
