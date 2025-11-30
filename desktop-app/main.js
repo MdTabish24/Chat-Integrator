@@ -165,50 +165,14 @@ async function syncPlatform(platform, cookies, token) {
     }
 
     const apiUrl = store.get('apiUrl') || API_BASE_URL;
-    
-    // LinkedIn: Just submit cookies, backend will fetch messages
-    if (platform === 'linkedin') {
-      // First, ensure account exists by submitting cookies
-      try {
-        await axios.post(
-          `${apiUrl}/api/platforms/linkedin/cookies`,
-          { 
-            li_at: cookies.li_at,
-            JSESSIONID: cookies.JSESSIONID,
-          },
-          {
-            headers: {
-              'Authorization': `Bearer ${token}`,
-              'Content-Type': 'application/json'
-            },
-            timeout: 60000
-          }
-        );
-        console.log(`[linkedin] Cookies submitted to backend`);
-      } catch (cookieErr) {
-        // Account might already exist, continue
-        console.log(`[linkedin] Cookie submit: ${cookieErr.message}`);
-      }
-      
-      // Backend will handle fetching - just mark as synced
-      console.log(`[${platform}] Sync completed (backend will fetch messages)`);
-      store.set(`${platform}_lastSync`, new Date().toISOString());
-      
-      if (mainWindow) {
-        mainWindow.webContents.send('sync-status', { 
-          platform, 
-          success: true, 
-          message: 'Connected - backend will sync messages',
-          lastSync: new Date().toISOString()
-        });
-      }
-      return;
-    }
 
     let data;
     switch (platform) {
       case 'twitter':
         data = await fetchTwitterDMs(cookies);
+        break;
+      case 'linkedin':
+        data = await fetchLinkedInMessages(cookies);
         break;
       case 'instagram':
         data = await fetchInstagramDMs(cookies);
@@ -329,11 +293,61 @@ function parseTwitterResponse(data) {
 
 // ============ LINKEDIN ============
 async function fetchLinkedInMessages(cookies) {
-  // LinkedIn blocks direct API calls from desktop apps
-  // Return empty array - backend will fetch messages using linkedin-api library
-  // Desktop app just needs to submit cookies to backend
-  console.log('[linkedin] Skipping direct fetch - backend will handle via linkedin-api');
-  return [];
+  const headers = {
+    'cookie': `li_at=${cookies.li_at}; JSESSIONID=${cookies.JSESSIONID}`,
+    'csrf-token': cookies.JSESSIONID.replace(/"/g, ''),
+    'x-restli-protocol-version': '2.0.0',
+    'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+  };
+
+  const response = await axios.get(
+    'https://www.linkedin.com/voyager/api/messaging/conversations?keyVersion=LEGACY_INBOX',
+    { headers, timeout: 60000 }
+  );
+
+  return parseLinkedInResponse(response.data);
+}
+
+function parseLinkedInResponse(data) {
+  const conversations = [];
+  const elements = data.elements || [];
+  
+  for (const conv of elements) {
+    const convId = conv.entityUrn?.split(':').pop() || '';
+    
+    // Get participants
+    const participants = [];
+    for (const p of (conv.participants || [])) {
+      const member = p['com.linkedin.voyager.messaging.MessagingMember'] || {};
+      const profile = member.miniProfile || {};
+      participants.push({
+        id: profile.entityUrn?.split(':').pop() || '',
+        name: `${profile.firstName || ''} ${profile.lastName || ''}`.trim() || 'LinkedIn User'
+      });
+    }
+
+    // Get messages from events
+    const messages = [];
+    for (const event of (conv.events || [])) {
+      const msgBody = event.eventContent?.['com.linkedin.voyager.messaging.event.MessageEvent']?.body || '';
+      messages.push({
+        id: event.entityUrn?.split(':').pop() || '',
+        text: msgBody,
+        senderId: event.from?.['com.linkedin.voyager.messaging.MessagingMember']?.miniProfile?.entityUrn?.split(':').pop() || '',
+        createdAt: new Date(event.createdAt).toISOString()
+      });
+    }
+
+    if (convId) {
+      conversations.push({
+        id: convId,
+        participants,
+        messages
+      });
+    }
+  }
+  
+  return conversations;
 }
 
 // ============ INSTAGRAM ============
