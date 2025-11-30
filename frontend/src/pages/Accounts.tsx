@@ -225,21 +225,28 @@ const Accounts: React.FC = () => {
     setShowWhatsAppQRModal(false);
   };
 
-  const handleTwitterLogin = async (credentials: { username: string; password: string; email?: string }) => {
+  const handleTwitterCookieSubmit = async (cookies: Record<string, string>) => {
     try {
       setIsSubmittingTwitter(true);
-      console.log(`🐦 [ACCOUNTS DEBUG] Logging in to Twitter as @${credentials.username}`);
+      console.log('🐦 [ACCOUNTS DEBUG] Submitting Twitter cookies');
       
-      await apiClient.post('/api/platforms/twitter/login', credentials);
+      // For Twitter, we need to get user info from cookies
+      // The backend will validate and store them
+      await apiClient.post('/api/platforms/twitter/cookies', {
+        auth_token: cookies.auth_token,
+        ct0: cookies.ct0,
+        platform_user_id: cookies.platform_user_id || 'unknown',
+        platform_username: cookies.platform_username || 'Twitter User',
+      });
       
-      console.log('✅ [ACCOUNTS DEBUG] Twitter login successful');
+      console.log('✅ [ACCOUNTS DEBUG] Twitter cookies submitted successfully');
       showSuccess('Twitter/X connected successfully');
       setShowTwitterLoginModal(false);
       
       // Refresh the accounts list
       await fetchConnectedAccounts();
     } catch (err: any) {
-      console.error('❌ [ACCOUNTS DEBUG] Twitter login error:', err);
+      console.error('❌ [ACCOUNTS DEBUG] Twitter cookie error:', err);
       const errorMessage = err.response?.data?.error?.message || err.response?.data?.error || 'Failed to connect Twitter';
       throw new Error(errorMessage);
     } finally {
@@ -387,7 +394,7 @@ const Accounts: React.FC = () => {
         {/* Twitter Login Modal */}
         {showTwitterLoginModal && (
           <TwitterLoginModal
-            onSubmit={handleTwitterLogin}
+            onSubmit={handleTwitterCookieSubmit}
             onCancel={handleTwitterLoginCancel}
             isSubmitting={isSubmittingTwitter}
           />
