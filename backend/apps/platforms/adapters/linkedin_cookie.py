@@ -61,25 +61,19 @@ class LinkedInCookieAdapter(BasePlatformAdapter):
         """Get cache key for linkedin-api client."""
         return f'linkedin:client:{account_id}'
     
-    def _get_or_create_client(self, account_id: str) -> Any:
+    def _get_cookies(self, account_id: str) -> Dict[str, str]:
         """
-        Get or create a linkedin-api client for the account.
+        Get decrypted cookies for the account.
         
         Args:
             account_id: The connected account ID
             
         Returns:
-            Authenticated linkedin-api Linkedin instance
+            Dict with li_at and JSESSIONID cookies
             
         Requirements: 4.1
         """
-        # Check if we have a cached client
-        if account_id in self._clients:
-            return self._clients[account_id]
-        
         try:
-            from linkedin_api import Linkedin
-            
             # Get account and decrypt cookies
             account = ConnectedAccount.objects.get(id=account_id, is_active=True)
             
@@ -107,19 +101,10 @@ class LinkedInCookieAdapter(BasePlatformAdapter):
                     retryable=False
                 )
             
-            # Create linkedin-api client with cookies
-            # The linkedin-api library accepts cookies for authentication
-            client = Linkedin(
-                cookies={
-                    'li_at': li_at,
-                    'JSESSIONID': jsessionid,
-                }
-            )
-            
-            # Cache the client
-            self._clients[account_id] = client
-            
-            return client
+            return {
+                'li_at': li_at,
+                'JSESSIONID': jsessionid.replace('"', ''),  # Remove quotes if present
+            }
             
         except ConnectedAccount.DoesNotExist:
             raise PlatformAPIError(
@@ -247,19 +232,42 @@ class LinkedInCookieAdapter(BasePlatformAdapter):
     
     def _fetch_conversations(self, account_id: str) -> List[Dict]:
         """
-        Fetch message conversations using linkedin-api.
+        Fetch message conversations using direct HTTP requests.
         
         Requirements: 4.2
         """
-        client = self._get_or_create_client(account_id)
+        import requests
+        
+        cookies = self._get_cookies(account_id)
         account = ConnectedAccount.objects.get(id=account_id)
         
         try:
             # Apply human-like delay before request
             self.apply_human_delay(account_id)
             
-            # Get conversations from LinkedIn
-            conversations_data = client.get_conversations()
+            # Direct HTTP request to LinkedIn API
+            headers = {
+                'cookie': f'li_at={cookies["li_at"]}; JSESSIONID="{cookies["JSESSIONID"]}"',
+                'csrf-token': cookies['JSESSIONID'],
+                'x-restli-protocol-version': '2.0.0',
+                'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            }
+            
+            response = requests.get(
+                'https://www.linkedin.com/voyager/api/messaging/conversations?keyVersion=LEGACY_INBOX',
+                headers=headers,
+                timeout=30
+            )
+            
+            if response.status_code != 200:
+                raise PlatformAPIError(
+                    f'LinkedIn API returned {response.status_code}',
+                    'linkedin',
+                    status_code=response.status_code,
+                    retryable=response.status_code >= 500
+                )
+            
+            conversations_data = response.json()
             
             conversations = []
             for conv in conversations_data.get('elements', []):
