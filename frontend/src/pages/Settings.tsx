@@ -20,7 +20,7 @@ const Settings: React.FC = () => {
   };
 
   // Desktop app download URL
-  const DESKTOP_APP_URL = 'https://github.com/MdTabish24/Chat-Integrator/releases/download/v1.0.0/ChatOrbitor.Twitter.Sync.Setup.1.0.0.exe';
+  const DESKTOP_APP_URL = 'https://github.com/MdTabish24/Chat-Integrator/releases/download/v1.0.1/ChatOrbitor.Twitter.Sync.Setup.1.0.0.exe';
 
   return (
     <div className="min-h-screen bg-gray-50">
