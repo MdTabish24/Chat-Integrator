@@ -350,21 +350,32 @@ class TelegramUserClientService:
     
     async def send_message(self, account_id: str, chat_id: str, text: str) -> Dict:
         """Send a message via Telegram"""
+        print(f'[telegram-user] Sending message to chat {chat_id} for account {account_id}')
+        
         try:
             client = await self.load_session(account_id)
             if not client:
-                raise Exception('Session not found or expired')
+                raise Exception('Session not found or expired. Please reconnect your Telegram account.')
             
-            # Get entity
+            # Get entity - handle both positive and negative chat IDs
+            print(f'[telegram-user] Getting entity for chat_id: {chat_id}')
             try:
-                entity = await client.get_entity(int(chat_id))
-            except ValueError:
+                chat_id_int = int(chat_id)
+                entity = await client.get_entity(chat_id_int)
+                print(f'[telegram-user] Got entity: {entity}')
+            except ValueError as ve:
+                print(f'[telegram-user] ValueError getting entity: {ve}, using raw chat_id')
+                entity = int(chat_id)
+            except Exception as entity_err:
+                print(f'[telegram-user] Error getting entity: {entity_err}')
+                # Try using the chat_id directly
                 entity = int(chat_id)
             
             # Send message
+            print(f'[telegram-user] Sending message...')
             msg = await client.send_message(entity, text)
             
-            print(f'[telegram-user] Message sent to chat {chat_id}')
+            print(f'[telegram-user] Message sent successfully to chat {chat_id}, msg_id: {msg.id}')
             
             return {
                 'id': str(msg.id),
@@ -374,7 +385,7 @@ class TelegramUserClientService:
             }
         
         except Exception as e:
-            print(f'[telegram-user] Error sending message: {e}')
+            print(f'[telegram-user] Error sending message to {chat_id}: {e}')
             traceback.print_exc()
             raise Exception(f'Failed to send message: {str(e)}')
     

@@ -164,12 +164,26 @@ class SendMessageView(AsyncAPIView):
                 # Use Telethon client
                 from apps.telegram.services.client import telegram_user_client
                 
-                await telegram_user_client.send_message(
-                    account_id=str(conversation.account.id),
-                    chat_id=conversation.platform_conversation_id,
-                    text=content
-                )
-                sent_msg = {'platformMessageId': str(timezone.now().timestamp()), 'senderId': 'me', 'senderName': 'You', 'messageType': 'text', 'mediaUrl': None}
+                try:
+                    result = await telegram_user_client.send_message(
+                        account_id=str(conversation.account.id),
+                        chat_id=conversation.platform_conversation_id,
+                        text=content
+                    )
+                    sent_msg = {
+                        'platformMessageId': result.get('id', str(timezone.now().timestamp())),
+                        'senderId': 'me',
+                        'senderName': 'You',
+                        'messageType': 'text',
+                        'mediaUrl': None
+                    }
+                except Exception as telegram_err:
+                    print(f'[send-message] Telegram send failed: {telegram_err}')
+                    import traceback
+                    traceback.print_exc()
+                    return Response({
+                        'error': f'Failed to send message via Telegram: {str(telegram_err)}',
+                    }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
             else:
                 # Use adapter for other platforms
                 from apps.platforms.adapters.factory import get_adapter

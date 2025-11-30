@@ -181,21 +181,23 @@ const Dashboard: React.FC = () => {
     });
 
     try {
+      // For Telegram, sync first then load conversations
       if (platform === 'telegram') {
         const telegramAccount = connectedAccounts.find(acc => acc.platform === 'telegram');
         if (telegramAccount) {
           try {
-            // Use sync endpoint (faster than reset)
+            // Sync and wait for it to complete
             await apiClient.post(`/api/telegram/${telegramAccount.id}/sync`, {}, {
-              timeout: 90000, // 90 seconds for sync
+              timeout: 120000, // 2 minutes for sync
             });
           } catch (syncErr: any) {
             console.error('Telegram sync error:', syncErr);
-            // Don't block loading conversations if sync fails/times out
+            // Continue to load whatever conversations exist
           }
         }
       }
 
+      // Now load conversations (after sync completes or fails)
       const response = await apiClient.get('/api/conversations', { params: { platform } });
       const conversations = (response.data.conversations || []).map((c: any) => ({
         ...c,
