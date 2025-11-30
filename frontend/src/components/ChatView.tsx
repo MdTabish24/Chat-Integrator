@@ -134,7 +134,22 @@ const ChatView: React.FC<ChatViewProps> = ({
     setSendError(null);
     try {
       const response = await apiClient.post(`/api/messages/${conversationId}/send`, { content });
-      const newMessage = response.data.message;
+      const m = response.data.message;
+      // Map snake_case to camelCase
+      const newMessage: Message = {
+        ...m,
+        conversationId: m.conversation_id || m.conversationId,
+        platformMessageId: m.platform_message_id || m.platformMessageId,
+        senderId: m.sender_id || m.senderId,
+        senderName: m.sender_name || m.senderName,
+        messageType: m.message_type || m.messageType,
+        mediaUrl: m.media_url || m.mediaUrl,
+        isOutgoing: m.is_outgoing ?? m.isOutgoing ?? true,
+        isRead: m.is_read ?? m.isRead ?? true,
+        sentAt: m.sent_at || m.sentAt,
+        deliveredAt: m.delivered_at || m.deliveredAt,
+        createdAt: m.created_at || m.createdAt,
+      };
       setMessages((prev) => [...prev, newMessage]);
       setTimeout(() => scrollToBottom(true), 100);
       showSuccess('Message sent');

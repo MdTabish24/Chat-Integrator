@@ -225,7 +225,22 @@ const MessageThread: React.FC<MessageThreadProps> = ({
         content,
       });
 
-      const newMessage = response.data.message;
+      const m = response.data.message;
+      // Map snake_case to camelCase (same as loadMessages)
+      const newMessage: Message = {
+        ...m,
+        conversationId: m.conversation_id || m.conversationId,
+        platformMessageId: m.platform_message_id || m.platformMessageId,
+        senderId: m.sender_id || m.senderId,
+        senderName: m.sender_name || m.senderName,
+        messageType: m.message_type || m.messageType,
+        mediaUrl: m.media_url || m.mediaUrl,
+        isOutgoing: m.is_outgoing ?? m.isOutgoing ?? true, // Default to true for sent messages
+        isRead: m.is_read ?? m.isRead ?? true,
+        sentAt: m.sent_at || m.sentAt,
+        deliveredAt: m.delivered_at || m.deliveredAt,
+        createdAt: m.created_at || m.createdAt,
+      };
       
       // Add the new message to the list
       setMessages((prev) => [...prev, newMessage]);
