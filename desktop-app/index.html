@@ -465,10 +465,10 @@
       } else if (data.success) {
         status.className = 'platform-status connected';
         status.textContent = '✓ ' + data.message;
-        // Refresh to show last sync time
+        // Just update credentials without re-rendering (to preserve input focus)
         setTimeout(async () => {
           credentials = await window.electronAPI.getCredentials();
-          renderPlatforms();
+          // Don't call renderPlatforms() here - it breaks input focus
         }, 1000);
       } else {
         status.className = 'platform-status error';
@@ -478,13 +478,22 @@
     
     // Initialize
     async function init() {
-      platforms = await window.electronAPI.getPlatforms();
-      credentials = await window.electronAPI.getCredentials();
-      document.getElementById('chatorbitor-token').value = credentials.chatOrbitorToken || '';
-      renderPlatforms();
+      try {
+        platforms = await window.electronAPI.getPlatforms();
+        credentials = await window.electronAPI.getCredentials();
+        document.getElementById('chatorbitor-token').value = credentials.chatOrbitorToken || '';
+        renderPlatforms();
+      } catch (err) {
+        console.error('Init error:', err);
+      }
     }
     
-    init();
+    // Wait for DOM to be fully ready
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', init);
+    } else {
+      init();
+    }
   </script>
 </body>
 </html>
