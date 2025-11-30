@@ -24,13 +24,13 @@ from apps.core.services.rate_limiter import (
 )
 
 
-# LinkedIn cookie-based rate limit config (conservative to avoid bans)
+# LinkedIn cookie-based rate limit config (fast UX, minimal delay)
 LINKEDIN_COOKIE_RATE_LIMIT = RateLimitConfig(
-    requests_per_window=2,
+    requests_per_window=10,
     window_seconds=60,
-    min_delay_ms=30000,  # 30 seconds minimum between requests
-    max_delay_ms=60000,  # 60 seconds maximum (random delay)
-    daily_limit=10  # Max 10 messages per day
+    min_delay_ms=1000,  # 1 second minimum between requests
+    max_delay_ms=3000,  # 3 seconds maximum (random delay)
+    daily_limit=100  # Max 100 messages per day
 )
 
 
@@ -45,10 +45,10 @@ class LinkedInCookieAdapter(BasePlatformAdapter):
     """
     
     # Rate limiting constants
-    FETCH_INTERVAL_SECONDS = 30  # 1 request per 30 seconds for fetching
-    SEND_INTERVAL_SECONDS = 120  # 1 message per 2 minutes
-    DAILY_MESSAGE_LIMIT = 10  # Max 10 messages per day
-    RATE_LIMIT_PAUSE_SECONDS = 900  # 15 minutes pause on rate limit
+    FETCH_INTERVAL_SECONDS = 3  # 1 request per 3 seconds for fetching
+    SEND_INTERVAL_SECONDS = 3  # 1 message per 3 seconds
+    DAILY_MESSAGE_LIMIT = 100  # Max 100 messages per day
+    RATE_LIMIT_PAUSE_SECONDS = 120  # 2 minutes pause on rate limit
     
     def __init__(self):
         super().__init__('linkedin')

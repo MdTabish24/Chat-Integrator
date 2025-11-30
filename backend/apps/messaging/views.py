@@ -210,6 +210,23 @@ class SendMessageView(AsyncAPIView):
                     return Response({
                         'error': f'Failed to send message via Twitter: {str(twitter_err)}',
                     }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            elif conversation.account.platform == 'linkedin':
+                # Use cookie-based adapter for LinkedIn messages
+                from apps.platforms.adapters.linkedin_cookie import linkedin_cookie_adapter
+                try:
+                    # Run sync function in thread pool
+                    sent_msg = await sync_to_async(linkedin_cookie_adapter.send_message)(
+                        account_id=str(conversation.account.id),
+                        conversation_id=conversation.platform_conversation_id,
+                        content=content
+                    )
+                except Exception as linkedin_err:
+                    print(f'[send-message] LinkedIn send failed: {linkedin_err}')
+                    import traceback
+                    traceback.print_exc()
+                    return Response({
+                        'error': f'Failed to send message via LinkedIn: {str(linkedin_err)}',
+                    }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
             else:
                 # Use adapter for other platforms
                 from apps.platforms.adapters.factory import get_adapter
