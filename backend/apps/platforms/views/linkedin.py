@@ -627,6 +627,20 @@ class LinkedInDesktopSyncView(APIView):
             saved_conversations = 0
             saved_messages = 0
             
+            # Get list of valid conversation IDs from sync data
+            valid_conv_ids = [conv.get('id') for conv in conversations_data if conv.get('id')]
+            
+            # Remove old conversations that no longer exist (ghost data cleanup)
+            if valid_conv_ids:
+                from apps.conversations.models import Conversation
+                deleted_count = Conversation.objects.filter(
+                    account=account
+                ).exclude(
+                    platform_conversation_id__in=valid_conv_ids
+                ).delete()[0]
+                if deleted_count > 0:
+                    print(f'[linkedin-desktop] Cleaned up {deleted_count} old conversations')
+            
             for conv_data in conversations_data:
                 conv_id = conv_data.get('id')
                 if not conv_id:
