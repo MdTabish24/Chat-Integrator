@@ -534,25 +534,61 @@ class LinkedInCookieAdapter(BasePlatformAdapter):
         content: str
     ) -> Dict:
         """
-        Send a message using linkedin-api.
+        Send a message using direct HTTP request.
         
         Requirements: 4.3
         """
-        client = self._get_or_create_client(account_id)
+        import requests
+        
+        cookies = self._get_cookies(account_id)
         account = ConnectedAccount.objects.get(id=account_id)
         
         try:
-            # Apply human-like delay (2 minutes between messages)
+            # Apply human-like delay
             self.apply_human_delay(account_id)
             
-            # Send the message
-            # linkedin-api uses send_message(conversation_id, message_body)
-            result = client.send_message(
-                conversation_id=conversation_id,
-                message_body=content
+            # Direct HTTP request to send message
+            headers = {
+                'cookie': f'li_at={cookies["li_at"]}; JSESSIONID="{cookies["JSESSIONID"]}"',
+                'csrf-token': cookies['JSESSIONID'],
+                'x-restli-protocol-version': '2.0.0',
+                'content-type': 'application/json',
+                'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            }
+            
+            # LinkedIn message send payload
+            payload = {
+                'eventCreate': {
+                    'value': {
+                        'com.linkedin.voyager.messaging.create.MessageCreate': {
+                            'body': content,
+                            'attachments': [],
+                            'attributedBody': {
+                                'text': content,
+                                'attributes': []
+                            },
+                            'mediaAttachments': []
+                        }
+                    }
+                }
+            }
+            
+            response = requests.post(
+                f'https://www.linkedin.com/voyager/api/messaging/conversations/{conversation_id}/events?action=create',
+                headers=headers,
+                json=payload,
+                timeout=30
             )
             
-            # Generate message ID from result or timestamp
+            if response.status_code not in [200, 201]:
+                raise PlatformAPIError(
+                    f'LinkedIn API returned {response.status_code}: {response.text[:200]}',
+                    'linkedin',
+                    status_code=response.status_code,
+                    retryable=response.status_code >= 500
+                )
+            
+            # Generate message ID from timestamp
             message_id = str(int(time.time() * 1000))
             
             return {
