@@ -328,13 +328,7 @@ const ChatView: React.FC<ChatViewProps> = ({
       )}
 
       {/* Message Input */}
-      {platform !== 'twitter' ? (
-        <MessageInput onSendMessage={handleSendMessage} disabled={isLoading || !!error} placeholder="Type a message..." />
-      ) : (
-        <div className="p-4 bg-gray-50 border-t border-gray-200 text-center text-sm text-gray-500">
-          Twitter mentions are read-only. Reply directly on Twitter.
-        </div>
-      )}
+      <MessageInput onSendMessage={handleSendMessage} disabled={isLoading || !!error} placeholder="Type a message..." />
     </div>
   );
 };

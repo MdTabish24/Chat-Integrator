@@ -16,6 +16,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   clearPlatform: (platform) => ipcRenderer.invoke('clear-platform', platform),
   clearAll: () => ipcRenderer.invoke('clear-all'),
   
+  // Twitter login with username/password
+  loginTwitter: (data) => ipcRenderer.invoke('login-twitter', data),
+  
   // Status updates
   onSyncStatus: (callback) => {
     ipcRenderer.on('sync-status', (event, data) => callback(data));

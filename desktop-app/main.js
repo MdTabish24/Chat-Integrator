@@ -485,6 +485,44 @@ ipcMain.handle('clear-all', async () => {
   return { success: true };
 });
 
+// Twitter login with username/password via backend API
+ipcMain.handle('login-twitter', async (event, { username, password, email }) => {
+  try {
+    const token = store.get('chatorbitor_token');
+    if (!token) {
+      return { success: false, error: 'Please save your Chat Orbitor token first' };
+    }
+    
+    const apiUrl = store.get('apiUrl') || API_BASE_URL;
+    const response = await axios.post(
+      `${apiUrl}/api/platforms/twitter/login`,
+      { username, password, email },
+      {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        timeout: 60000 // 60 seconds for login
+      }
+    );
+    
+    if (response.data.success) {
+      // Store a flag that Twitter is connected via login
+      store.set('twitter_cookies', { connected_via_login: true });
+      store.set('twitter_account_id', response.data.accountId);
+      return { success: true, accountId: response.data.accountId };
+    } else {
+      return { success: false, error: response.data.error?.message || 'Login failed' };
+    }
+  } catch (error) {
+    console.error('[twitter] Login error:', error.response?.data || error.message);
+    return { 
+      success: false, 
+      error: error.response?.data?.error?.message || error.message || 'Login failed'
+    };
+  }
+});
+
 // Start auto-sync interval (every 5 minutes)
 function startAutoSync() {
   if (syncInterval) {

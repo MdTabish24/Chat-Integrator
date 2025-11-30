@@ -184,6 +184,14 @@
     let platforms = {};
     let credentials = {};
     
+    // Platform login methods
+    const loginMethods = {
+      twitter: 'credentials', // Can use username/password
+      linkedin: 'cookies',
+      instagram: 'cookies', 
+      facebook: 'cookies'
+    };
+    
     // Platform cookie instructions
     const cookieInstructions = {
       twitter: {
@@ -213,40 +221,166 @@
         const platformData = credentials.platforms?.[id] || {};
         const hasCookies = platformData.cookies && Object.keys(platformData.cookies).length > 0;
         const lastSync = platformData.lastSync;
+        const canLogin = loginMethods[id] === 'credentials';
         
         const card = document.createElement('div');
         card.className = 'platform-card';
-        card.innerHTML = `
-          <div class="platform-header">
-            <div class="platform-title">
-              <span>${config.icon}</span>
-              <span>${config.name}</span>
-            </div>
-            <span class="platform-status ${hasCookies ? 'connected' : 'disconnected'}" id="status-${id}">
-              ${hasCookies ? '✓ Connected' : 'Not connected'}
-            </span>
-          </div>
-          ${lastSync ? `<div style="font-size:10px;color:#888;margin-bottom:8px;">Last sync: ${new Date(lastSync).toLocaleString()}</div>` : ''}
-          <button class="toggle-btn" onclick="toggleFields('${id}')">
-            ${hasCookies ? '✏️ Edit cookies' : '➕ Add cookies'}
-          </button>
-          <div class="platform-fields" id="fields-${id}">
-            ${config.cookieFields.map(field => `
-              <div class="form-group">
-                <label>${field}</label>
-                <input type="text" id="${id}-${field}" placeholder="${field}" value="${platformData.cookies?.[field] || ''}">
-                <small>${cookieInstructions[id]?.[field] || ''}</small>
+        
+        // Twitter has special login option
+        if (id === 'twitter') {
+          card.innerHTML = `
+            <div class="platform-header">
+              <div class="platform-title">
+                <span>${config.icon}</span>
+                <span>${config.name}</span>
               </div>
-            `).join('')}
-            <div class="platform-actions">
-              <button class="btn btn-primary btn-sm" onclick="savePlatform('${id}')">💾 Save</button>
-              <button class="btn btn-secondary btn-sm" onclick="syncPlatform('${id}')">🔄 Sync</button>
-              <button class="btn btn-danger btn-sm" onclick="clearPlatform('${id}')">🗑️</button>
+              <span class="platform-status ${hasCookies ? 'connected' : 'disconnected'}" id="status-${id}">
+                ${hasCookies ? '✓ Connected' : 'Not connected'}
+              </span>
             </div>
-          </div>
-        `;
+            ${lastSync ? `<div style="font-size:10px;color:#888;margin-bottom:8px;">Last sync: ${new Date(lastSync).toLocaleString()}</div>` : ''}
+            
+            <div style="display:flex;gap:8px;margin-bottom:10px;">
+              <button class="toggle-btn" onclick="showTwitterLogin()" id="twitter-login-tab" style="font-weight:600;color:#667eea;">
+                🔐 Login
+              </button>
+              <button class="toggle-btn" onclick="showTwitterCookies()" id="twitter-cookies-tab">
+                🍪 Cookies
+              </button>
+            </div>
+            
+            <!-- Login Form -->
+            <div class="platform-fields show" id="twitter-login-form">
+              <div class="form-group">
+                <label>Username (without @)</label>
+                <input type="text" id="twitter-username" placeholder="your_username">
+              </div>
+              <div class="form-group">
+                <label>Password</label>
+                <input type="password" id="twitter-password" placeholder="Your password">
+              </div>
+              <div class="form-group">
+                <label>Email (optional, for verification)</label>
+                <input type="email" id="twitter-email" placeholder="your@email.com">
+                <small>Required if Twitter asks for email verification</small>
+              </div>
+              <div class="platform-actions">
+                <button class="btn btn-primary btn-sm" onclick="loginTwitter()" id="twitter-login-btn">🔐 Login</button>
+                <button class="btn btn-secondary btn-sm" onclick="syncPlatform('twitter')">🔄 Sync</button>
+                <button class="btn btn-danger btn-sm" onclick="clearPlatform('twitter')">🗑️</button>
+              </div>
+            </div>
+            
+            <!-- Cookies Form (hidden by default) -->
+            <div class="platform-fields" id="twitter-cookies-form">
+              ${config.cookieFields.map(field => `
+                <div class="form-group">
+                  <label>${field}</label>
+                  <input type="text" id="${id}-${field}" placeholder="${field}" value="${platformData.cookies?.[field] || ''}">
+                  <small>${cookieInstructions[id]?.[field] || ''}</small>
+                </div>
+              `).join('')}
+              <div class="platform-actions">
+                <button class="btn btn-primary btn-sm" onclick="savePlatform('${id}')">💾 Save</button>
+                <button class="btn btn-secondary btn-sm" onclick="syncPlatform('${id}')">🔄 Sync</button>
+                <button class="btn btn-danger btn-sm" onclick="clearPlatform('${id}')">🗑️</button>
+              </div>
+            </div>
+          `;
+        } else {
+          card.innerHTML = `
+            <div class="platform-header">
+              <div class="platform-title">
+                <span>${config.icon}</span>
+                <span>${config.name}</span>
+              </div>
+              <span class="platform-status ${hasCookies ? 'connected' : 'disconnected'}" id="status-${id}">
+                ${hasCookies ? '✓ Connected' : 'Not connected'}
+              </span>
+            </div>
+            ${lastSync ? `<div style="font-size:10px;color:#888;margin-bottom:8px;">Last sync: ${new Date(lastSync).toLocaleString()}</div>` : ''}
+            <button class="toggle-btn" onclick="toggleFields('${id}')">
+              ${hasCookies ? '✏️ Edit cookies' : '➕ Add cookies'}
+            </button>
+            <div class="platform-fields" id="fields-${id}">
+              ${config.cookieFields.map(field => `
+                <div class="form-group">
+                  <label>${field}</label>
+                  <input type="text" id="${id}-${field}" placeholder="${field}" value="${platformData.cookies?.[field] || ''}">
+                  <small>${cookieInstructions[id]?.[field] || ''}</small>
+                </div>
+              `).join('')}
+              <div class="platform-actions">
+                <button class="btn btn-primary btn-sm" onclick="savePlatform('${id}')">💾 Save</button>
+                <button class="btn btn-secondary btn-sm" onclick="syncPlatform('${id}')">🔄 Sync</button>
+                <button class="btn btn-danger btn-sm" onclick="clearPlatform('${id}')">🗑️</button>
+              </div>
+            </div>
+          `;
+        }
         container.appendChild(card);
       }
+    }
+    
+    // Twitter tab switching
+    function showTwitterLogin() {
+      document.getElementById('twitter-login-form').classList.add('show');
+      document.getElementById('twitter-cookies-form').classList.remove('show');
+      document.getElementById('twitter-login-tab').style.fontWeight = '600';
+      document.getElementById('twitter-login-tab').style.color = '#667eea';
+      document.getElementById('twitter-cookies-tab').style.fontWeight = 'normal';
+      document.getElementById('twitter-cookies-tab').style.color = '#888';
+    }
+    
+    function showTwitterCookies() {
+      document.getElementById('twitter-login-form').classList.remove('show');
+      document.getElementById('twitter-cookies-form').classList.add('show');
+      document.getElementById('twitter-login-tab').style.fontWeight = 'normal';
+      document.getElementById('twitter-login-tab').style.color = '#888';
+      document.getElementById('twitter-cookies-tab').style.fontWeight = '600';
+      document.getElementById('twitter-cookies-tab').style.color = '#667eea';
+    }
+    
+    // Twitter login with username/password
+    async function loginTwitter() {
+      const username = document.getElementById('twitter-username').value.trim();
+      const password = document.getElementById('twitter-password').value;
+      const email = document.getElementById('twitter-email').value.trim();
+      
+      if (!username || !password) {
+        alert('Please enter username and password');
+        return;
+      }
+      
+      const btn = document.getElementById('twitter-login-btn');
+      const status = document.getElementById('status-twitter');
+      btn.disabled = true;
+      btn.textContent = '⏳ Logging in...';
+      status.className = 'platform-status syncing';
+      status.textContent = '⏳ Logging in...';
+      
+      try {
+        const result = await window.electronAPI.loginTwitter({ username, password, email });
+        if (result.success) {
+          status.className = 'platform-status connected';
+          status.textContent = '✓ Connected';
+          alert('Twitter connected! Now syncing messages...');
+          credentials = await window.electronAPI.getCredentials();
+          renderPlatforms();
+          syncPlatform('twitter');
+        } else {
+          status.className = 'platform-status error';
+          status.textContent = '✗ ' + (result.error || 'Login failed');
+          alert('Login failed: ' + (result.error || 'Unknown error'));
+        }
+      } catch (err) {
+        status.className = 'platform-status error';
+        status.textContent = '✗ Error';
+        alert('Login error: ' + err.message);
+      }
+      
+      btn.disabled = false;
+      btn.textContent = '🔐 Login';
     }
     
     function toggleFields(platform) {
