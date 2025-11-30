@@ -15,6 +15,7 @@ from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import AllowAny
 from django.utils import timezone
+from adrf.views import APIView as AsyncAPIView
 
 from apps.platforms.adapters.twitter_cookie import twitter_cookie_adapter
 from apps.oauth.models import ConnectedAccount
@@ -23,7 +24,7 @@ from apps.messaging.models import Message
 from apps.core.utils.crypto import encrypt
 
 
-class TwitterLoginView(APIView):
+class TwitterLoginView(AsyncAPIView):
     """
     Login to Twitter using username/password.
     
@@ -40,7 +41,7 @@ class TwitterLoginView(APIView):
     """
     permission_classes = [AllowAny]
     
-    def post(self, request):
+    async def post(self, request):
         try:
             if not hasattr(request, 'user_jwt') or not request.user_jwt:
                 return Response({
@@ -76,15 +77,12 @@ class TwitterLoginView(APIView):
                     }
                 }, status=status.HTTP_400_BAD_REQUEST)
             
-            # Login using twikit
-            import asyncio
-            result = asyncio.get_event_loop().run_until_complete(
-                twitter_cookie_adapter.login_with_credentials(
-                    user_id=user_id,
-                    username=username,
-                    password=password,
-                    email=email
-                )
+            # Login using twikit (async)
+            result = await twitter_cookie_adapter.login_with_credentials(
+                user_id=user_id,
+                username=username,
+                password=password,
+                email=email
             )
             
             print(f'[twitter] Login successful for user {user_id}, account {result["accountId"]}')
