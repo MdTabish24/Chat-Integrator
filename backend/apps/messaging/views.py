@@ -193,11 +193,14 @@ class SendMessageView(AsyncAPIView):
                     }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
             elif conversation.account.platform == 'twitter':
                 # Use cookie-based adapter for Twitter DMs (async)
+                # Twitter needs participant_id (user ID), not conversation_id
                 from apps.platforms.adapters.twitter_cookie import twitter_cookie_adapter
                 try:
+                    # Use participant_id for Twitter DMs (twikit needs user ID)
+                    recipient_id = conversation.participant_id or conversation.platform_conversation_id
                     sent_msg = await twitter_cookie_adapter._send_dm(
                         account_id=str(conversation.account.id),
-                        conversation_id=conversation.platform_conversation_id,
+                        conversation_id=recipient_id,
                         content=content
                     )
                 except Exception as twitter_err:
