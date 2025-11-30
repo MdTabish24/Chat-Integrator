@@ -26,13 +26,13 @@ from apps.core.services.rate_limiter import (
 )
 
 
-# Twitter cookie-based rate limit config (more conservative than OAuth)
+# Twitter cookie-based rate limit config (fast UX, minimal delay)
 TWITTER_COOKIE_RATE_LIMIT = RateLimitConfig(
-    requests_per_window=3,
+    requests_per_window=10,
     window_seconds=60,
-    min_delay_ms=45000,  # 45 seconds minimum between requests
-    max_delay_ms=90000,  # 90 seconds maximum (random delay)
-    daily_limit=15  # Max 15 DMs per day
+    min_delay_ms=1000,  # 1 second minimum between requests
+    max_delay_ms=3000,  # 3 seconds maximum (random delay)
+    daily_limit=100  # Max 100 DMs per day
 )
 
 
@@ -47,10 +47,10 @@ class TwitterCookieAdapter(BasePlatformAdapter):
     """
     
     # Rate limiting constants
-    FETCH_INTERVAL_SECONDS = 20  # 1 request per 20 seconds for fetching
-    SEND_INTERVAL_SECONDS = 60  # 1 message per 60 seconds
-    DAILY_MESSAGE_LIMIT = 15  # Max 15 messages per day
-    RATE_LIMIT_PAUSE_SECONDS = 900  # 15 minutes pause on rate limit
+    FETCH_INTERVAL_SECONDS = 3  # 1 request per 3 seconds for fetching
+    SEND_INTERVAL_SECONDS = 3  # 1 message per 3 seconds
+    DAILY_MESSAGE_LIMIT = 100  # Max 100 messages per day
+    RATE_LIMIT_PAUSE_SECONDS = 120  # 2 minutes pause on rate limit
     
     def __init__(self):
         super().__init__('twitter')

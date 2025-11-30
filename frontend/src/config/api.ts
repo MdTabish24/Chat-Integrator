@@ -9,7 +9,7 @@ export const apiClient = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
-  timeout: 60000, // 60 seconds - needed for Telegram DC migration
+  timeout: 180000, // 180 seconds (3 min) - needed for Twitter rate limiting + Telegram DC migration
 });
 
 // Request interceptor to add auth token
