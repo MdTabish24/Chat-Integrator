@@ -513,7 +513,7 @@ class TwitterCookieAdapter(BasePlatformAdapter):
         Requirements: 3.2
         """
         client = await self._get_or_create_client(account_id)
-        account = ConnectedAccount.objects.get(id=account_id)
+        account = await sync_to_async(ConnectedAccount.objects.get)(id=account_id)
         
         try:
             # Apply human-like delay
@@ -655,7 +655,7 @@ class TwitterCookieAdapter(BasePlatformAdapter):
         Requirements: 3.3, 3.4
         """
         client = await self._get_or_create_client(account_id)
-        account = ConnectedAccount.objects.get(id=account_id)
+        account = await sync_to_async(ConnectedAccount.objects.get)(id=account_id)
         
         try:
             # Apply human-like delay (60 seconds between messages)
