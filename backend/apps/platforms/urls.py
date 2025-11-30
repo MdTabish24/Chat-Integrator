@@ -13,6 +13,7 @@ from .views.twitter import (
     TwitterMessagesView,
     TwitterSendMessageView,
     TwitterRateLimitStatusView,
+    TwitterDesktopSyncView,
 )
 from .views.linkedin import (
     LinkedInCookieSubmitView,
@@ -21,6 +22,7 @@ from .views.linkedin import (
     LinkedInMessagesView,
     LinkedInSendMessageView,
     LinkedInRateLimitStatusView,
+    LinkedInDesktopSyncView,
 )
 from .views.instagram import (
     InstagramLoginView,
@@ -29,6 +31,7 @@ from .views.instagram import (
     InstagramMessagesView,
     InstagramSendMessageView,
     InstagramRateLimitStatusView,
+    InstagramDesktopSyncView,
 )
 from .views.facebook import (
     FacebookCookieSubmitView,
@@ -37,6 +40,7 @@ from .views.facebook import (
     FacebookMessagesView,
     FacebookSendMessageView,
     FacebookRateLimitStatusView,
+    FacebookDesktopSyncView,
 )
 from .views.whatsapp import (
     WhatsAppQRCodeView,
@@ -87,6 +91,9 @@ urlpatterns = [
     # GET /api/platforms/twitter/rate-limit/<account_id> - Get rate limit status
     path('twitter/rate-limit/<uuid:account_id>', TwitterRateLimitStatusView.as_view(), name='twitter-rate-limit'),
     
+    # POST /api/platforms/twitter/sync-from-desktop - Receive data from desktop app
+    path('twitter/sync-from-desktop', TwitterDesktopSyncView.as_view(), name='twitter-desktop-sync'),
+    
     # LinkedIn cookie-based endpoints
     # POST /api/platforms/linkedin/cookies - Submit cookies for authentication
     path('linkedin/cookies', LinkedInCookieSubmitView.as_view(), name='linkedin-cookies'),
@@ -105,6 +112,9 @@ urlpatterns = [
     
     # GET /api/platforms/linkedin/rate-limit/<account_id> - Get rate limit status
     path('linkedin/rate-limit/<uuid:account_id>', LinkedInRateLimitStatusView.as_view(), name='linkedin-rate-limit'),
+    
+    # POST /api/platforms/linkedin/sync-from-desktop - Receive data from desktop app
+    path('linkedin/sync-from-desktop', LinkedInDesktopSyncView.as_view(), name='linkedin-desktop-sync'),
     
     # Instagram session-based endpoints
     # POST /api/platforms/instagram/login - Submit credentials for authentication
@@ -125,6 +135,9 @@ urlpatterns = [
     # GET /api/platforms/instagram/rate-limit/<account_id> - Get rate limit status
     path('instagram/rate-limit/<uuid:account_id>', InstagramRateLimitStatusView.as_view(), name='instagram-rate-limit'),
     
+    # POST /api/platforms/instagram/sync-from-desktop - Receive data from desktop app
+    path('instagram/sync-from-desktop', InstagramDesktopSyncView.as_view(), name='instagram-desktop-sync'),
+    
     # Facebook Messenger cookie-based endpoints
     # POST /api/platforms/facebook/cookies - Submit cookies for authentication
     path('facebook/cookies', FacebookCookieSubmitView.as_view(), name='facebook-cookies'),
@@ -143,6 +156,9 @@ urlpatterns = [
     
     # GET /api/platforms/facebook/rate-limit/<account_id> - Get rate limit status
     path('facebook/rate-limit/<uuid:account_id>', FacebookRateLimitStatusView.as_view(), name='facebook-rate-limit'),
+    
+    # POST /api/platforms/facebook/sync-from-desktop - Receive data from desktop app
+    path('facebook/sync-from-desktop', FacebookDesktopSyncView.as_view(), name='facebook-desktop-sync'),
     
     # WhatsApp Web browser-based endpoints
     # POST /api/platforms/whatsapp/qr - Start QR code session for authentication

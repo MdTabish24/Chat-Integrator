@@ -557,3 +557,90 @@ class LinkedInRateLimitStatusView(APIView):
                     'retryable': True,
                 }
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class LinkedInDesktopSyncView(APIView):
+    """
+    Receive LinkedIn message data from the desktop app.
+    
+    POST /api/platforms/linkedin/sync-from-desktop
+    """
+    permission_classes = [AllowAny]
+    
+    def post(self, request):
+        try:
+            if not hasattr(request, 'user_jwt') or not request.user_jwt:
+                return Response({
+                    'error': {'code': 'UNAUTHORIZED', 'message': 'User not authenticated', 'retryable': False}
+                }, status=status.HTTP_401_UNAUTHORIZED)
+            
+            user_id = request.user_jwt['user_id']
+            conversations_data = request.data.get('conversations', [])
+            
+            from apps.oauth.models import ConnectedAccount
+            from apps.conversations.models import Conversation
+            from apps.messaging.models import Message
+            from apps.core.utils.crypto import encrypt
+            from django.utils import timezone
+            
+            try:
+                account = ConnectedAccount.objects.get(user_id=user_id, platform='linkedin', is_active=True)
+            except ConnectedAccount.DoesNotExist:
+                return Response({
+                    'error': {'code': 'ACCOUNT_NOT_FOUND', 'message': 'No active LinkedIn account found', 'retryable': False}
+                }, status=status.HTTP_404_NOT_FOUND)
+            
+            saved_conversations = 0
+            saved_messages = 0
+            
+            for conv_data in conversations_data:
+                conv_id = conv_data.get('id')
+                if not conv_id:
+                    continue
+                
+                participants = conv_data.get('participants', [])
+                participant_name = participants[0].get('name', 'LinkedIn User') if participants else 'LinkedIn User'
+                participant_id = participants[0].get('id', '') if participants else ''
+                
+                conversation, _ = Conversation.objects.update_or_create(
+                    account=account,
+                    platform_conversation_id=conv_id,
+                    defaults={
+                        'participant_name': participant_name,
+                        'participant_id': participant_id,
+                        'participant_avatar_url': f'https://ui-avatars.com/api/?name={participant_name}&background=0077B5&color=fff',
+                        'last_message_at': timezone.now(),
+                    }
+                )
+                saved_conversations += 1
+                
+                for msg_data in conv_data.get('messages', []):
+                    msg_id = msg_data.get('id')
+                    if not msg_id:
+                        continue
+                    
+                    from django.utils.dateparse import parse_datetime
+                    sent_at = parse_datetime(msg_data.get('createdAt')) or timezone.now()
+                    is_outgoing = msg_data.get('senderId') == str(account.platform_user_id)
+                    
+                    _, created = Message.objects.get_or_create(
+                        conversation=conversation,
+                        platform_message_id=str(msg_id),
+                        defaults={
+                            'content': encrypt(msg_data.get('text', '')),
+                            'sender_id': msg_data.get('senderId', ''),
+                            'sender_name': participant_name if not is_outgoing else 'You',
+                            'sent_at': sent_at,
+                            'is_outgoing': is_outgoing,
+                            'is_read': True,
+                        }
+                    )
+                    if created:
+                        saved_messages += 1
+            
+            print(f'[linkedin-desktop] Synced {saved_conversations} conversations, {saved_messages} messages')
+            return Response({'success': True, 'savedConversations': saved_conversations, 'savedMessages': saved_messages})
+            
+        except Exception as e:
+            print(f'[linkedin-desktop] Sync failed: {e}')
+            return Response({'error': {'code': 'SYNC_FAILED', 'message': str(e), 'retryable': True}}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

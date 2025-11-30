@@ -656,3 +656,168 @@ class TwitterRateLimitStatusView(APIView):
                     'retryable': True,
                 }
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class TwitterDesktopSyncView(APIView):
+    """
+    Receive Twitter DM data from the desktop app.
+    
+    POST /api/platforms/twitter/sync-from-desktop
+    
+    Request body:
+    {
+        "conversations": [
+            {
+                "id": "conversation_id",
+                "participants": [...],
+                "messages": [
+                    {
+                        "id": "message_id",
+                        "text": "message text",
+                        "senderId": "sender_id",
+                        "createdAt": "ISO datetime"
+                    }
+                ]
+            }
+        ]
+    }
+    """
+    permission_classes = [AllowAny]
+    
+    def post(self, request):
+        try:
+            if not hasattr(request, 'user_jwt') or not request.user_jwt:
+                return Response({
+                    'error': {
+                        'code': 'UNAUTHORIZED',
+                        'message': 'User not authenticated',
+                        'retryable': False,
+                    }
+                }, status=status.HTTP_401_UNAUTHORIZED)
+            
+            user_id = request.user_jwt['user_id']
+            conversations_data = request.data.get('conversations', [])
+            
+            if not conversations_data:
+                return Response({
+                    'error': {
+                        'code': 'NO_DATA',
+                        'message': 'No conversations data provided',
+                        'retryable': False,
+                    }
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Get user's Twitter account
+            try:
+                account = ConnectedAccount.objects.get(
+                    user_id=user_id,
+                    platform='twitter',
+                    is_active=True
+                )
+            except ConnectedAccount.DoesNotExist:
+                return Response({
+                    'error': {
+                        'code': 'ACCOUNT_NOT_FOUND',
+                        'message': 'No active Twitter account found. Please connect Twitter first.',
+                        'retryable': False,
+                    }
+                }, status=status.HTTP_404_NOT_FOUND)
+            
+            # Process and save conversations
+            saved_conversations = 0
+            saved_messages = 0
+            
+            for conv_data in conversations_data:
+                conv_id = conv_data.get('id')
+                if not conv_id:
+                    continue
+                
+                # Get participant info
+                participants = conv_data.get('participants', [])
+                participant_name = 'Twitter User'
+                participant_id = ''
+                
+                # Find the other participant (not the current user)
+                for p in participants:
+                    p_id = str(p.get('user_id', p.get('id', '')))
+                    if p_id and p_id != str(account.platform_user_id):
+                        participant_name = p.get('name', p.get('screen_name', 'Twitter User'))
+                        participant_id = p_id
+                        break
+                
+                # Create or update conversation
+                conversation, created = Conversation.objects.update_or_create(
+                    account=account,
+                    platform_conversation_id=conv_id,
+                    defaults={
+                        'participant_name': participant_name,
+                        'participant_id': participant_id,
+                        'participant_avatar_url': f'https://ui-avatars.com/api/?name={participant_name}&background=1DA1F2&color=fff',
+                        'last_message_at': timezone.now(),
+                    }
+                )
+                saved_conversations += 1
+                
+                # Save messages
+                messages = conv_data.get('messages', [])
+                for msg_data in messages:
+                    msg_id = msg_data.get('id')
+                    if not msg_id:
+                        continue
+                    
+                    text = msg_data.get('text', '')
+                    sender_id = str(msg_data.get('senderId', ''))
+                    created_at = msg_data.get('createdAt')
+                    
+                    # Determine if outgoing
+                    is_outgoing = sender_id == str(account.platform_user_id)
+                    
+                    # Parse datetime
+                    from django.utils.dateparse import parse_datetime
+                    sent_at = parse_datetime(created_at) if created_at else timezone.now()
+                    if not sent_at:
+                        sent_at = timezone.now()
+                    
+                    # Create message if not exists
+                    msg, msg_created = Message.objects.get_or_create(
+                        conversation=conversation,
+                        platform_message_id=str(msg_id),
+                        defaults={
+                            'content': encrypt(text),
+                            'sender_id': sender_id,
+                            'sender_name': participant_name if not is_outgoing else 'You',
+                            'sent_at': sent_at,
+                            'is_outgoing': is_outgoing,
+                            'is_read': True,
+                        }
+                    )
+                    
+                    if msg_created:
+                        saved_messages += 1
+                
+                # Update conversation last message time
+                latest_msg = Message.objects.filter(conversation=conversation).order_by('-sent_at').first()
+                if latest_msg:
+                    conversation.last_message_at = latest_msg.sent_at
+                    conversation.save()
+            
+            print(f'[twitter-desktop] Synced {saved_conversations} conversations, {saved_messages} new messages for user {user_id}')
+            
+            return Response({
+                'success': True,
+                'savedConversations': saved_conversations,
+                'savedMessages': saved_messages,
+                'message': f'Synced {saved_conversations} conversations with {saved_messages} new messages',
+            }, status=status.HTTP_200_OK)
+            
+        except Exception as e:
+            print(f'[twitter-desktop] Sync failed: {e}')
+            import traceback
+            traceback.print_exc()
+            return Response({
+                'error': {
+                    'code': 'SYNC_FAILED',
+                    'message': str(e) or 'Failed to sync Twitter data',
+                    'retryable': True,
+                }
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

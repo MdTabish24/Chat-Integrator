@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Chat Orbitor - Multi-Platform Sync</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      color: #333;
+    }
+    
+    .container { padding: 15px; max-width: 520px; margin: 0 auto; }
+    
+    .header {
+      text-align: center;
+      padding: 15px 0;
+      color: white;
+    }
+    .header h1 { font-size: 22px; margin-bottom: 3px; }
+    .header p { opacity: 0.9; font-size: 13px; }
+    
+    .card {
+      background: white;
+      border-radius: 10px;
+      padding: 15px;
+      margin-bottom: 12px;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+    }
+    
+    .card h2 {
+      font-size: 14px;
+      margin-bottom: 12px;
+      color: #333;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    
+    .form-group { margin-bottom: 12px; }
+    .form-group label {
+      display: block;
+      font-size: 12px;
+      font-weight: 500;
+      margin-bottom: 4px;
+      color: #555;
+    }
+    .form-group input {
+      width: 100%;
+      padding: 8px 10px;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      font-size: 13px;
+    }
+    .form-group input:focus {
+      outline: none;
+      border-color: #667eea;
+    }
+    .form-group small {
+      display: block;
+      margin-top: 3px;
+      font-size: 10px;
+      color: #888;
+    }
+    
+    .btn {
+      padding: 10px 15px;
+      border: none;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .btn-primary {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      width: 100%;
+    }
+    .btn-primary:hover { transform: translateY(-1px); }
+    .btn-sm { padding: 6px 12px; font-size: 11px; }
+    .btn-secondary { background: #f0f0f0; color: #333; }
+    .btn-danger { background: #ff4757; color: white; }
+    .btn:disabled { opacity: 0.6; cursor: not-allowed; }
+    
+    .platform-card {
+      border: 1px solid #eee;
+      border-radius: 8px;
+      padding: 12px;
+      margin-bottom: 10px;
+    }
+    .platform-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+    .platform-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 600;
+      font-size: 14px;
+    }
+    .platform-status {
+      font-size: 11px;
+      padding: 3px 8px;
+      border-radius: 10px;
+    }
+    .platform-status.connected { background: #d4edda; color: #155724; }
+    .platform-status.disconnected { background: #f8f9fa; color: #6c757d; }
+    .platform-status.syncing { background: #cce5ff; color: #004085; }
+    .platform-status.error { background: #f8d7da; color: #721c24; }
+    
+    .platform-fields { display: none; margin-top: 10px; }
+    .platform-fields.show { display: block; }
+    
+    .platform-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 10px;
+    }
+    
+    .toggle-btn {
+      background: none;
+      border: none;
+      color: #667eea;
+      cursor: pointer;
+      font-size: 12px;
+      padding: 0;
+    }
+    
+    .sync-info {
+      text-align: center;
+      padding: 8px;
+      font-size: 11px;
+      color: rgba(255,255,255,0.8);
+    }
+    
+    .global-actions {
+      display: flex;
+      gap: 10px;
+      margin-top: 10px;
+    }
+    .global-actions .btn { flex: 1; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>💬 Chat Orbitor Sync</h1>
+      <p>Multi-Platform Message Sync</p>
+    </div>
+    
+    <div class="card">
+      <h2>🔑 Chat Orbitor Token</h2>
+      <div class="form-group">
+        <input type="password" id="chatorbitor-token" placeholder="Paste your Chat Orbitor API token">
+        <small>Get from Chat Orbitor → Settings → API Token</small>
+      </div>
+      <button class="btn btn-primary btn-sm" id="save-token-btn">Save Token</button>
+    </div>
+    
+    <div class="card">
+      <h2>📱 Platforms</h2>
+      <div id="platforms-container"></div>
+      
+      <div class="global-actions">
+        <button class="btn btn-primary" id="sync-all-btn">🔄 Sync All</button>
+        <button class="btn btn-secondary" id="clear-all-btn">🗑️ Clear All</button>
+      </div>
+    </div>
+    
+    <div class="sync-info">
+      Auto-syncs every 5 minutes when running
+    </div>
+  </div>
+  
+  <script>
+    let platforms = {};
+    let credentials = {};
+    
+    // Platform cookie instructions
+    const cookieInstructions = {
+      twitter: {
+        auth_token: 'Login to x.com → F12 → Application → Cookies → auth_token',
+        ct0: 'Same location → ct0'
+      },
+      linkedin: {
+        li_at: 'Login to linkedin.com → F12 → Application → Cookies → li_at',
+        JSESSIONID: 'Same location → JSESSIONID (include quotes)'
+      },
+      instagram: {
+        sessionid: 'Login to instagram.com → F12 → Application → Cookies → sessionid',
+        csrftoken: 'Same location → csrftoken'
+      },
+      facebook: {
+        c_user: 'Login to facebook.com → F12 → Application → Cookies → c_user',
+        xs: 'Same location → xs'
+      }
+    };
+    
+    // Render platforms
+    function renderPlatforms() {
+      const container = document.getElementById('platforms-container');
+      container.innerHTML = '';
+      
+      for (const [id, config] of Object.entries(platforms)) {
+        const platformData = credentials.platforms?.[id] || {};
+        const hasCookies = platformData.cookies && Object.keys(platformData.cookies).length > 0;
+        const lastSync = platformData.lastSync;
+        
+        const card = document.createElement('div');
+        card.className = 'platform-card';
+        card.innerHTML = `
+          <div class="platform-header">
+            <div class="platform-title">
+              <span>${config.icon}</span>
+              <span>${config.name}</span>
+            </div>
+            <span class="platform-status ${hasCookies ? 'connected' : 'disconnected'}" id="status-${id}">
+              ${hasCookies ? '✓ Connected' : 'Not connected'}
+            </span>
+          </div>
+          ${lastSync ? `<div style="font-size:10px;color:#888;margin-bottom:8px;">Last sync: ${new Date(lastSync).toLocaleString()}</div>` : ''}
+          <button class="toggle-btn" onclick="toggleFields('${id}')">
+            ${hasCookies ? '✏️ Edit cookies' : '➕ Add cookies'}
+          </button>
+          <div class="platform-fields" id="fields-${id}">
+            ${config.cookieFields.map(field => `
+              <div class="form-group">
+                <label>${field}</label>
+                <input type="text" id="${id}-${field}" placeholder="${field}" value="${platformData.cookies?.[field] || ''}">
+                <small>${cookieInstructions[id]?.[field] || ''}</small>
+              </div>
+            `).join('')}
+            <div class="platform-actions">
+              <button class="btn btn-primary btn-sm" onclick="savePlatform('${id}')">💾 Save</button>
+              <button class="btn btn-secondary btn-sm" onclick="syncPlatform('${id}')">🔄 Sync</button>
+              <button class="btn btn-danger btn-sm" onclick="clearPlatform('${id}')">🗑️</button>
+            </div>
+          </div>
+        `;
+        container.appendChild(card);
+      }
+    }
+    
+    function toggleFields(platform) {
+      const fields = document.getElementById(`fields-${platform}`);
+      fields.classList.toggle('show');
+    }
+    
+    async function savePlatform(platform) {
+      const config = platforms[platform];
+      const cookies = {};
+      
+      for (const field of config.cookieFields) {
+        const value = document.getElementById(`${platform}-${field}`).value.trim();
+        if (value) cookies[field] = value;
+      }
+      
+      if (Object.keys(cookies).length !== config.cookieFields.length) {
+        alert(`Please fill all cookie fields for ${config.name}`);
+        return;
+      }
+      
+      await window.electronAPI.saveCredentials({ platform, cookies });
+      credentials = await window.electronAPI.getCredentials();
+      renderPlatforms();
+      
+      // Auto sync after save
+      syncPlatform(platform);
+    }
+    
+    async function syncPlatform(platform) {
+      const status = document.getElementById(`status-${platform}`);
+      status.className = 'platform-status syncing';
+      status.textContent = '⏳ Syncing...';
+      
+      await window.electronAPI.syncPlatform(platform);
+    }
+    
+    async function clearPlatform(platform) {
+      if (confirm(`Clear ${platforms[platform].name} credentials?`)) {
+        await window.electronAPI.clearPlatform(platform);
+        credentials = await window.electronAPI.getCredentials();
+        renderPlatforms();
+      }
+    }
+    
+    // Global actions
+    document.getElementById('save-token-btn').addEventListener('click', async () => {
+      const token = document.getElementById('chatorbitor-token').value.trim();
+      if (!token) {
+        alert('Please enter your Chat Orbitor token');
+        return;
+      }
+      await window.electronAPI.saveCredentials({ chatOrbitorToken: token });
+      alert('Token saved!');
+    });
+    
+    document.getElementById('sync-all-btn').addEventListener('click', async () => {
+      document.getElementById('sync-all-btn').disabled = true;
+      document.getElementById('sync-all-btn').textContent = '⏳ Syncing...';
+      await window.electronAPI.syncAll();
+      document.getElementById('sync-all-btn').disabled = false;
+      document.getElementById('sync-all-btn').textContent = '🔄 Sync All';
+    });
+    
+    document.getElementById('clear-all-btn').addEventListener('click', async () => {
+      if (confirm('Clear ALL credentials? This cannot be undone.')) {
+        await window.electronAPI.clearAll();
+        credentials = await window.electronAPI.getCredentials();
+        document.getElementById('chatorbitor-token').value = '';
+        renderPlatforms();
+      }
+    });
+    
+    // Listen for sync status updates
+    window.electronAPI.onSyncStatus((data) => {
+      const status = document.getElementById(`status-${data.platform}`);
+      if (!status) return;
+      
+      if (data.syncing) {
+        status.className = 'platform-status syncing';
+        status.textContent = '⏳ Syncing...';
+      } else if (data.success) {
+        status.className = 'platform-status connected';
+        status.textContent = '✓ ' + data.message;
+        // Refresh to show last sync time
+        setTimeout(async () => {
+          credentials = await window.electronAPI.getCredentials();
+          renderPlatforms();
+        }, 1000);
+      } else {
+        status.className = 'platform-status error';
+        status.textContent = '✗ ' + (data.message || 'Error');
+      }
+    });
+    
+    // Initialize
+    async function init() {
+      platforms = await window.electronAPI.getPlatforms();
+      credentials = await window.electronAPI.getCredentials();
+      document.getElementById('chatorbitor-token').value = credentials.chatOrbitorToken || '';
+      renderPlatforms();
+    }
+    
+    init();
+  </script>
+</body>
+</html>

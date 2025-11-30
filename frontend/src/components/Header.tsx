@@ -71,6 +71,15 @@ const Header: React.FC<HeaderProps> = ({
             Manage accounts
           </button>
 
+          {/* Settings Button */}
+          <button
+            onClick={() => navigate('/settings')}
+            className="px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
+            title="Settings & Desktop App"
+          >
+            ⚙️
+          </button>
+
           {/* User Email */}
           {user?.email && (
             <span className="text-sm text-gray-600 hidden sm:block">{user.email}</span>

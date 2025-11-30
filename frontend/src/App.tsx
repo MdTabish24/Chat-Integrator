@@ -6,6 +6,7 @@ import Login from './pages/Login';
 import Register from './pages/Register';
 import Dashboard from './pages/Dashboard';
 import Accounts from './pages/Accounts';
+import Settings from './pages/Settings';
 import OAuthCallback from './pages/OAuthCallback';
 import { TelegramAuth } from './pages/TelegramAuth';
 import { TelegramPhoneAuth } from './pages/TelegramPhoneAuth';
@@ -48,6 +49,14 @@ function App() {
               element={
                 <ProtectedRoute>
                   <TelegramPhoneAuth />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/settings"
+              element={
+                <ProtectedRoute>
+                  <Settings />
                 </ProtectedRoute>
               }
             />
