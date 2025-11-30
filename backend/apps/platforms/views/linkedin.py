@@ -635,6 +635,10 @@ class LinkedInDesktopSyncView(APIView):
                 participants = conv_data.get('participants', [])
                 participant_name = participants[0].get('name', 'LinkedIn User') if participants else 'LinkedIn User'
                 participant_id = participants[0].get('id', '') if participants else ''
+                participant_avatar = participants[0].get('avatar', '') if participants else ''
+                
+                # Use provided avatar or generate one
+                avatar_url = participant_avatar if participant_avatar else f'https://ui-avatars.com/api/?name={participant_name}&background=0077B5&color=fff'
                 
                 conversation, _ = Conversation.objects.update_or_create(
                     account=account,
@@ -642,7 +646,7 @@ class LinkedInDesktopSyncView(APIView):
                     defaults={
                         'participant_name': participant_name,
                         'participant_id': participant_id,
-                        'participant_avatar_url': f'https://ui-avatars.com/api/?name={participant_name}&background=0077B5&color=fff',
+                        'participant_avatar_url': avatar_url,
                         'last_message_at': timezone.now(),
                     }
                 )

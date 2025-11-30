@@ -312,37 +312,120 @@ function parseLinkedInResponse(data) {
   const conversations = [];
   const elements = data.elements || [];
   
+  // LinkedIn includes related data in 'included' array
+  const included = data.included || [];
+  const profilesMap = {};
+  const messagesMap = {};
+  
+  // Build lookup maps from included data
+  for (const item of included) {
+    if (item.$type === 'com.linkedin.voyager.identity.shared.MiniProfile' || item.firstName) {
+      const id = item.entityUrn?.split(':').pop() || item['*miniProfile']?.split(':').pop() || '';
+      if (id) {
+        profilesMap[id] = {
+          id,
+          name: `${item.firstName || ''} ${item.lastName || ''}`.trim() || 'LinkedIn User',
+          avatar: item.picture?.['com.linkedin.common.VectorImage']?.rootUrl || ''
+        };
+      }
+    }
+    if (item.$type === 'com.linkedin.voyager.messaging.event.MessageEvent' || item.body) {
+      const id = item.entityUrn?.split(':').pop() || '';
+      if (id) {
+        messagesMap[id] = {
+          id,
+          text: item.body || item.attributedBody?.text || '',
+          senderId: item['*from']?.split(':').pop() || '',
+          createdAt: item.createdAt ? new Date(item.createdAt).toISOString() : new Date().toISOString()
+        };
+      }
+    }
+  }
+  
   for (const conv of elements) {
-    const convId = conv.entityUrn?.split(':').pop() || '';
+    const convId = conv.entityUrn?.split(':').pop() || conv['*thread']?.split(':').pop() || '';
     
-    // Get participants
+    // Get participants from conversation or included data
     const participants = [];
-    for (const p of (conv.participants || [])) {
-      const member = p['com.linkedin.voyager.messaging.MessagingMember'] || {};
-      const profile = member.miniProfile || {};
-      participants.push({
-        id: profile.entityUrn?.split(':').pop() || '',
-        name: `${profile.firstName || ''} ${profile.lastName || ''}`.trim() || 'LinkedIn User'
-      });
+    const participantRefs = conv.participants || conv['*participants'] || [];
+    
+    for (const p of participantRefs) {
+      let profile = null;
+      
+      // Handle different participant formats
+      if (typeof p === 'string') {
+        const profileId = p.split(':').pop();
+        profile = profilesMap[profileId];
+      } else {
+        const member = p['com.linkedin.voyager.messaging.MessagingMember'] || p;
+        const miniProfile = member.miniProfile || {};
+        const profileId = miniProfile.entityUrn?.split(':').pop() || member['*miniProfile']?.split(':').pop() || '';
+        
+        profile = profilesMap[profileId] || {
+          id: profileId,
+          name: `${miniProfile.firstName || ''} ${miniProfile.lastName || ''}`.trim() || 'LinkedIn User',
+          avatar: miniProfile.picture?.['com.linkedin.common.VectorImage']?.rootUrl || ''
+        };
+      }
+      
+      if (profile) {
+        participants.push(profile);
+      }
     }
 
-    // Get messages from events
+    // Get messages from events or included data
     const messages = [];
-    for (const event of (conv.events || [])) {
-      const msgBody = event.eventContent?.['com.linkedin.voyager.messaging.event.MessageEvent']?.body || '';
-      messages.push({
-        id: event.entityUrn?.split(':').pop() || '',
-        text: msgBody,
-        senderId: event.from?.['com.linkedin.voyager.messaging.MessagingMember']?.miniProfile?.entityUrn?.split(':').pop() || '',
-        createdAt: new Date(event.createdAt).toISOString()
-      });
+    const events = conv.events || [];
+    
+    for (const event of events) {
+      let msgText = '';
+      let msgId = '';
+      let senderId = '';
+      let createdAt = new Date().toISOString();
+      
+      // Handle different event formats
+      if (typeof event === 'string') {
+        const eventId = event.split(':').pop();
+        const msg = messagesMap[eventId];
+        if (msg) {
+          messages.push(msg);
+          continue;
+        }
+      }
+      
+      msgId = event.entityUrn?.split(':').pop() || event.dashEntityUrn?.split(':').pop() || '';
+      createdAt = event.createdAt ? new Date(event.createdAt).toISOString() : new Date().toISOString();
+      
+      // Try different paths for message body
+      const eventContent = event.eventContent || {};
+      const msgEvent = eventContent['com.linkedin.voyager.messaging.event.MessageEvent'] || eventContent;
+      msgText = msgEvent.body || msgEvent.attributedBody?.text || event.body || '';
+      
+      // Get sender
+      const fromMember = event.from?.['com.linkedin.voyager.messaging.MessagingMember'] || event.from || {};
+      senderId = fromMember.miniProfile?.entityUrn?.split(':').pop() || 
+                 fromMember['*miniProfile']?.split(':').pop() || 
+                 event['*from']?.split(':').pop() || '';
+      
+      if (msgId) {
+        messages.push({
+          id: msgId,
+          text: msgText || '[No content]',
+          senderId,
+          createdAt
+        });
+      }
     }
 
     if (convId) {
+      // Get last activity time
+      const lastActivity = conv.lastActivityAt || conv.lastReadAt || Date.now();
+      
       conversations.push({
         id: convId,
         participants,
-        messages
+        messages,
+        lastActivityAt: new Date(lastActivity).toISOString()
       });
     }
   }
