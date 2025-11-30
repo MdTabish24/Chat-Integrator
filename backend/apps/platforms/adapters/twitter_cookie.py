@@ -149,6 +149,115 @@ class TwitterCookieAdapter(BasePlatformAdapter):
         if account_id in self._clients:
             del self._clients[account_id]
     
+    async def login_with_credentials(
+        self,
+        user_id: str,
+        username: str,
+        password: str,
+        email: Optional[str] = None
+    ) -> Dict[str, str]:
+        """
+        Login to Twitter using username/password and store session cookies.
+        
+        Args:
+            user_id: The user's ID
+            username: Twitter username (without @)
+            password: Twitter password
+            email: Email for verification if needed
+            
+        Returns:
+            Dict with accountId and username
+            
+        Requirements: 3.1
+        """
+        try:
+            from twikit import Client
+            
+            print(f'[twitter] Attempting login for @{username}')
+            
+            # Create twikit client
+            client = Client('en-US')
+            
+            # Login with credentials
+            await client.login(
+                auth_info_1=username,
+                auth_info_2=email,  # Used if Twitter asks for email verification
+                password=password
+            )
+            
+            # Get user info
+            user = await client.user()
+            platform_user_id = str(user.id)
+            platform_username = user.screen_name or username
+            
+            print(f'[twitter] Login successful for @{platform_username} (ID: {platform_user_id})')
+            
+            # Get cookies from the client session
+            cookies = client.get_cookies()
+            auth_token = cookies.get('auth_token', '')
+            ct0 = cookies.get('ct0', '')
+            
+            if not auth_token or not ct0:
+                raise PlatformAPIError(
+                    'Failed to get session cookies after login',
+                    'twitter',
+                    status_code=500,
+                    retryable=True
+                )
+            
+            # Store the cookies
+            account_id = self.store_cookies(
+                user_id=user_id,
+                platform_user_id=platform_user_id,
+                platform_username=platform_username,
+                auth_token=auth_token,
+                ct0=ct0
+            )
+            
+            # Cache the client
+            self._clients[account_id] = client
+            
+            return {
+                'accountId': account_id,
+                'username': platform_username,
+            }
+            
+        except Exception as e:
+            error_str = str(e).lower()
+            print(f'[twitter] Login failed: {e}')
+            
+            if 'incorrect' in error_str or 'wrong' in error_str or 'invalid' in error_str:
+                raise PlatformAPIError(
+                    'Invalid username or password',
+                    'twitter',
+                    status_code=401,
+                    retryable=False
+                )
+            
+            if 'locked' in error_str or 'suspended' in error_str:
+                raise PlatformAPIError(
+                    'Account is locked or suspended',
+                    'twitter',
+                    status_code=403,
+                    retryable=False
+                )
+            
+            if 'verification' in error_str or 'challenge' in error_str:
+                raise PlatformAPIError(
+                    'Twitter requires additional verification. Please try logging in on twitter.com first.',
+                    'twitter',
+                    status_code=403,
+                    retryable=False
+                )
+            
+            raise PlatformAPIError(
+                f'Login failed: {str(e)}',
+                'twitter',
+                status_code=500,
+                retryable=True,
+                original_error=e
+            )
+    
     def store_cookies(
         self,
         user_id: str,

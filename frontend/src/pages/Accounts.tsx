@@ -7,32 +7,16 @@ import PlatformCard from '../components/PlatformCard';
 import ConnectedAccountsList from '../components/ConnectedAccountsList';
 import ConfirmDialog from '../components/ConfirmDialog';
 import CookieInputModal, { CookieField } from '../components/CookieInputModal';
+import TwitterLoginModal from '../components/TwitterLoginModal';
 import WhatsAppQRModal from '../components/WhatsAppQRModal';
 import LoadingSpinner from '../components/LoadingSpinner';
 import ErrorDisplay from '../components/ErrorDisplay';
 
-// Cookie-based platform configurations
+// Cookie-based platform configurations (for platforms that still need cookies)
 const cookiePlatformConfigs: Record<string, {
   fields: CookieField[];
   endpoint: string;
 }> = {
-  twitter: {
-    fields: [
-      {
-        name: 'auth_token',
-        label: 'auth_token',
-        placeholder: 'Enter your auth_token cookie value',
-        helpText: 'Found in cookies after logging into Twitter/X',
-      },
-      {
-        name: 'ct0',
-        label: 'ct0',
-        placeholder: 'Enter your ct0 cookie value',
-        helpText: 'CSRF token cookie from Twitter/X',
-      },
-    ],
-    endpoint: '/api/platforms/twitter/cookies',
-  },
   linkedin: {
     fields: [
       {
@@ -94,6 +78,8 @@ const Accounts: React.FC = () => {
   const [showCookieModal, setShowCookieModal] = useState<Platform | null>(null);
   const [isSubmittingCookies, setIsSubmittingCookies] = useState(false);
   const [showWhatsAppQRModal, setShowWhatsAppQRModal] = useState(false);
+  const [showTwitterLoginModal, setShowTwitterLoginModal] = useState(false);
+  const [isSubmittingTwitter, setIsSubmittingTwitter] = useState(false);
 
   useEffect(() => {
     fetchConnectedAccounts();
@@ -151,6 +137,13 @@ const Accounts: React.FC = () => {
       // For Telegram, use phone authentication
       if (platform === 'telegram') {
         navigate('/auth/telegram-phone');
+        return;
+      }
+      
+      // For Twitter, use username/password login
+      if (platform === 'twitter') {
+        setShowTwitterLoginModal(true);
+        setConnectingPlatform(null);
         return;
       }
       
@@ -230,6 +223,33 @@ const Accounts: React.FC = () => {
 
   const handleWhatsAppQRCancel = () => {
     setShowWhatsAppQRModal(false);
+  };
+
+  const handleTwitterLogin = async (credentials: { username: string; password: string; email?: string }) => {
+    try {
+      setIsSubmittingTwitter(true);
+      console.log(`🐦 [ACCOUNTS DEBUG] Logging in to Twitter as @${credentials.username}`);
+      
+      await apiClient.post('/api/platforms/twitter/login', credentials);
+      
+      console.log('✅ [ACCOUNTS DEBUG] Twitter login successful');
+      showSuccess('Twitter/X connected successfully');
+      setShowTwitterLoginModal(false);
+      
+      // Refresh the accounts list
+      await fetchConnectedAccounts();
+    } catch (err: any) {
+      console.error('❌ [ACCOUNTS DEBUG] Twitter login error:', err);
+      const errorMessage = err.response?.data?.error?.message || err.response?.data?.error || 'Failed to connect Twitter';
+      throw new Error(errorMessage);
+    } finally {
+      setIsSubmittingTwitter(false);
+    }
+  };
+
+  const handleTwitterLoginCancel = () => {
+    setShowTwitterLoginModal(false);
+    setIsSubmittingTwitter(false);
   };
 
   const handleDisconnectClick = (account: ConnectedAccount) => {
@@ -361,6 +381,15 @@ const Accounts: React.FC = () => {
           <WhatsAppQRModal
             onSuccess={handleWhatsAppQRSuccess}
             onCancel={handleWhatsAppQRCancel}
+          />
+        )}
+
+        {/* Twitter Login Modal */}
+        {showTwitterLoginModal && (
+          <TwitterLoginModal
+            onSubmit={handleTwitterLogin}
+            onCancel={handleTwitterLoginCancel}
+            isSubmitting={isSubmittingTwitter}
           />
         )}
       </div>

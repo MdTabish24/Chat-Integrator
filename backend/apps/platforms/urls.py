@@ -6,6 +6,7 @@ Routes for cookie-based and session-based platform integrations.
 
 from django.urls import path
 from .views.twitter import (
+    TwitterLoginView,
     TwitterCookieSubmitView,
     TwitterVerifyCookiesView,
     TwitterConversationsView,
@@ -64,8 +65,11 @@ from .views.gmail import (
 app_name = 'platforms'
 
 urlpatterns = [
-    # Twitter/X cookie-based endpoints
-    # POST /api/platforms/twitter/cookies - Submit cookies for authentication
+    # Twitter/X endpoints
+    # POST /api/platforms/twitter/login - Login with username/password (recommended)
+    path('twitter/login', TwitterLoginView.as_view(), name='twitter-login'),
+    
+    # POST /api/platforms/twitter/cookies - Submit cookies for authentication (advanced)
     path('twitter/cookies', TwitterCookieSubmitView.as_view(), name='twitter-cookies'),
     
     # GET /api/platforms/twitter/verify/<account_id> - Verify cookies are valid

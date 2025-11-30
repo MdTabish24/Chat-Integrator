@@ -23,9 +23,104 @@ from apps.messaging.models import Message
 from apps.core.utils.crypto import encrypt
 
 
+class TwitterLoginView(APIView):
+    """
+    Login to Twitter using username/password.
+    
+    POST /api/platforms/twitter/login
+    
+    Request body:
+    {
+        "username": "string",  # Twitter username (without @)
+        "password": "string",  # Twitter password
+        "email": "string"      # Optional: email for verification
+    }
+    
+    Requirements: 3.1
+    """
+    permission_classes = [AllowAny]
+    
+    def post(self, request):
+        try:
+            if not hasattr(request, 'user_jwt') or not request.user_jwt:
+                return Response({
+                    'error': {
+                        'code': 'UNAUTHORIZED',
+                        'message': 'User not authenticated',
+                        'retryable': False,
+                    }
+                }, status=status.HTTP_401_UNAUTHORIZED)
+            
+            user_id = request.user_jwt['user_id']
+            
+            # Validate required fields
+            username = request.data.get('username', '').strip().lstrip('@')
+            password = request.data.get('password', '')
+            email = request.data.get('email', '').strip() or None
+            
+            if not username:
+                return Response({
+                    'error': {
+                        'code': 'MISSING_USERNAME',
+                        'message': 'Twitter username is required',
+                        'retryable': False,
+                    }
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            if not password:
+                return Response({
+                    'error': {
+                        'code': 'MISSING_PASSWORD',
+                        'message': 'Twitter password is required',
+                        'retryable': False,
+                    }
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Login using twikit
+            import asyncio
+            result = asyncio.get_event_loop().run_until_complete(
+                twitter_cookie_adapter.login_with_credentials(
+                    user_id=user_id,
+                    username=username,
+                    password=password,
+                    email=email
+                )
+            )
+            
+            print(f'[twitter] Login successful for user {user_id}, account {result["accountId"]}')
+            
+            return Response({
+                'success': True,
+                'accountId': result['accountId'],
+                'username': result['username'],
+                'message': 'Twitter connected successfully',
+            }, status=status.HTTP_201_CREATED)
+            
+        except Exception as e:
+            error_str = str(e)
+            print(f'[twitter] Login failed: {e}')
+            
+            # Determine appropriate status code
+            status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
+            if 'invalid' in error_str.lower() or 'incorrect' in error_str.lower():
+                status_code = status.HTTP_401_UNAUTHORIZED
+            elif 'locked' in error_str.lower() or 'suspended' in error_str.lower():
+                status_code = status.HTTP_403_FORBIDDEN
+            elif 'verification' in error_str.lower():
+                status_code = status.HTTP_403_FORBIDDEN
+            
+            return Response({
+                'error': {
+                    'code': 'LOGIN_FAILED',
+                    'message': error_str or 'Failed to login to Twitter',
+                    'retryable': status_code == status.HTTP_500_INTERNAL_SERVER_ERROR,
+                }
+            }, status=status_code)
+
+
 class TwitterCookieSubmitView(APIView):
     """
-    Submit Twitter cookies for authentication.
+    Submit Twitter cookies for authentication (advanced users).
     
     POST /api/platforms/twitter/cookies
     
