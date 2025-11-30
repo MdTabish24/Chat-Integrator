@@ -9,8 +9,8 @@ const Settings: React.FC = () => {
   const [showToken, setShowToken] = useState(false);
 
   useEffect(() => {
-    // Get token from localStorage
-    const storedToken = localStorage.getItem('token') || '';
+    // Get token from localStorage (saved as 'access_token' during login)
+    const storedToken = localStorage.getItem('access_token') || '';
     setToken(storedToken);
   }, []);
 
