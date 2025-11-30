@@ -360,50 +360,38 @@ class TelegramUserClientService:
             chat_id_int = int(chat_id)
             entity = None
             
-            # Method 1: Try to get entity directly
-            print(f'[telegram-user] Trying to get entity for chat_id: {chat_id_int}')
+            # IMPORTANT: Always fetch dialogs first to populate entity cache
+            # This is required because Telethon needs access_hash which is only available
+            # after fetching dialogs or having previous interaction with the entity
+            print(f'[telegram-user] Fetching dialogs to populate entity cache...')
             try:
-                entity = await client.get_entity(chat_id_int)
-                print(f'[telegram-user] Got entity directly: {type(entity).__name__}')
-            except ValueError:
-                print(f'[telegram-user] Entity not in cache, fetching dialogs...')
-                # Method 2: Fetch dialogs to populate entity cache
-                try:
-                    dialogs = await client.get_dialogs(limit=100)
-                    # Find the dialog with matching ID
-                    for dialog in dialogs:
-                        if dialog.id == chat_id_int:
-                            entity = dialog.entity
-                            print(f'[telegram-user] Found entity in dialogs: {type(entity).__name__}')
-                            break
-                except Exception as dialog_err:
-                    print(f'[telegram-user] Error fetching dialogs: {dialog_err}')
+                dialogs = await client.get_dialogs(limit=100)
+                print(f'[telegram-user] Fetched {len(dialogs)} dialogs')
+                
+                # Find the dialog with matching ID
+                for dialog in dialogs:
+                    entity_id = getattr(dialog.entity, 'id', None)
+                    if entity_id == chat_id_int or dialog.id == chat_id_int:
+                        entity = dialog.entity
+                        print(f'[telegram-user] Found entity in dialogs: {type(entity).__name__}, id={entity_id}')
+                        break
+            except Exception as dialog_err:
+                print(f'[telegram-user] Error fetching dialogs: {dialog_err}')
             
-            # Method 3: If still no entity, try get_input_entity with PeerUser/PeerChat
+            # If not found in dialogs, try get_entity (might work if cached from dialogs)
             if entity is None:
-                print(f'[telegram-user] Trying InputPeerUser...')
+                print(f'[telegram-user] Entity not found in dialogs, trying get_entity...')
                 try:
-                    from telethon.tl.types import InputPeerUser, InputPeerChat, InputPeerChannel
-                    # For users (positive IDs)
-                    if chat_id_int > 0:
-                        # We need access_hash, try to get it from dialogs
-                        dialogs = await client.get_dialogs(limit=100)
-                        for dialog in dialogs:
-                            if hasattr(dialog.entity, 'id') and dialog.entity.id == chat_id_int:
-                                entity = dialog.entity
-                                break
-                    else:
-                        # For groups/channels (negative IDs)
-                        entity = chat_id_int
-                except Exception as peer_err:
-                    print(f'[telegram-user] InputPeer error: {peer_err}')
-                    entity = chat_id_int
+                    entity = await client.get_entity(chat_id_int)
+                    print(f'[telegram-user] Got entity via get_entity: {type(entity).__name__}')
+                except ValueError as ve:
+                    print(f'[telegram-user] get_entity failed: {ve}')
             
             if entity is None:
-                raise Exception(f'Could not find chat with ID {chat_id}. Please sync your conversations first.')
+                raise Exception(f'Could not find chat with ID {chat_id}. The contact may not be in your recent conversations. Please sync your conversations first.')
             
             # Send message
-            print(f'[telegram-user] Sending message to entity: {type(entity).__name__ if hasattr(entity, "__name__") else type(entity)}')
+            print(f'[telegram-user] Sending message to entity: {type(entity).__name__}')
             msg = await client.send_message(entity, text)
             
             print(f'[telegram-user] Message sent successfully to chat {chat_id}, msg_id: {msg.id}')
