@@ -231,9 +231,22 @@ class TwitterCookieAdapter(BasePlatformAdapter):
             
         except Exception as e:
             error_str = str(e).lower()
+            original_error = str(e)
             print(f'[twitter] Login failed: {e}')
+            print(f'[twitter] Error type: {type(e).__name__}')
+            import traceback
+            traceback.print_exc()
             
-            if 'incorrect' in error_str or 'wrong' in error_str or 'invalid' in error_str:
+            # Check for specific twikit errors
+            if 'bad_guest_token' in error_str or 'guest token' in error_str:
+                raise PlatformAPIError(
+                    'Twitter is blocking automated requests. Please try again later.',
+                    'twitter',
+                    status_code=429,
+                    retryable=True
+                )
+            
+            if 'incorrect' in error_str or 'wrong' in error_str:
                 raise PlatformAPIError(
                     'Invalid username or password',
                     'twitter',
@@ -241,7 +254,8 @@ class TwitterCookieAdapter(BasePlatformAdapter):
                     retryable=False
                 )
             
-            if 'locked' in error_str or 'suspended' in error_str:
+            # Only show locked/suspended if it's clearly about the account
+            if ('account' in error_str and 'locked' in error_str) or ('account' in error_str and 'suspended' in error_str):
                 raise PlatformAPIError(
                     'Account is locked or suspended',
                     'twitter',
@@ -257,8 +271,17 @@ class TwitterCookieAdapter(BasePlatformAdapter):
                     retryable=False
                 )
             
+            if 'arkose' in error_str or 'captcha' in error_str or 'funcaptcha' in error_str:
+                raise PlatformAPIError(
+                    'Twitter requires CAPTCHA verification. This usually happens with automated logins. Please try the cookie method instead.',
+                    'twitter',
+                    status_code=403,
+                    retryable=False
+                )
+            
+            # Show the actual error for debugging
             raise PlatformAPIError(
-                f'Login failed: {str(e)}',
+                f'Twitter login failed: {original_error}',
                 'twitter',
                 status_code=500,
                 retryable=True,
