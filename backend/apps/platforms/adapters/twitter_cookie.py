@@ -664,10 +664,19 @@ class TwitterCookieAdapter(BasePlatformAdapter):
             # Send the message
             message = await client.send_dm(conversation_id, content)
             
+            # Get message ID safely (twikit response can vary)
+            msg_id = ''
+            if message:
+                msg_id = getattr(message, 'id', '') or getattr(message, 'message_id', '') or str(int(time.time() * 1000))
+            else:
+                msg_id = str(int(time.time() * 1000))
+            
+            print(f'[twitter] DM sent successfully, message_id: {msg_id}')
+            
             return {
                 'id': '',
                 'conversationId': '',
-                'platformMessageId': message.id,
+                'platformMessageId': str(msg_id),
                 'senderId': str(account.platform_user_id),
                 'senderName': account.platform_username or str(account.platform_user_id),
                 'content': content,

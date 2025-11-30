@@ -240,24 +240,30 @@ class SendMessageView(AsyncAPIView):
             # Create message object with encrypted content (wrap in sync_to_async)
             @sync_to_async
             def save_message_to_db():
-                msg = Message.objects.create(
-                    conversation=conversation,
-                    platform_message_id=sent_msg.get('platformMessageId', str(timezone.now().timestamp())),
-                    sender_id=sent_msg.get('senderId', 'me'),
-                    sender_name=sent_msg.get('senderName', 'You'),
-                    content=encrypt(content),
-                    message_type=sent_msg.get('messageType', 'text'),
-                    media_url=encrypt(sent_msg.get('mediaUrl')) if sent_msg.get('mediaUrl') else None,
-                    is_outgoing=True,
-                    is_read=True,
-                    sent_at=timezone.now()
-                )
-                
-                # Update conversation
-                conversation.last_message_at = msg.sent_at
-                conversation.save()
-                
-                return msg
+                try:
+                    msg = Message.objects.create(
+                        conversation=conversation,
+                        platform_message_id=str(sent_msg.get('platformMessageId', '') or timezone.now().timestamp()),
+                        sender_id=str(sent_msg.get('senderId', 'me') or 'me'),
+                        sender_name=str(sent_msg.get('senderName', 'You') or 'You'),
+                        content=encrypt(content),
+                        message_type=sent_msg.get('messageType', 'text') or 'text',
+                        media_url=encrypt(sent_msg.get('mediaUrl')) if sent_msg.get('mediaUrl') else None,
+                        is_outgoing=True,
+                        is_read=True,
+                        sent_at=timezone.now()
+                    )
+                    
+                    # Update conversation
+                    conversation.last_message_at = msg.sent_at
+                    conversation.save()
+                    
+                    return msg
+                except Exception as db_err:
+                    print(f'[send-message] DB save failed: {db_err}')
+                    import traceback
+                    traceback.print_exc()
+                    raise
             
             message = await save_message_to_db()
             serializer = MessageSerializer(message)
