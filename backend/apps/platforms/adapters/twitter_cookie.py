@@ -14,6 +14,7 @@ from typing import List, Dict, Optional, Any
 from datetime import datetime, timedelta
 from django.utils import timezone
 from django.core.cache import cache
+from asgiref.sync import sync_to_async
 
 from .base import BasePlatformAdapter, PlatformAPIError, RateLimitError
 from apps.oauth.models import ConnectedAccount
@@ -81,8 +82,8 @@ class TwitterCookieAdapter(BasePlatformAdapter):
         try:
             from twikit import Client
             
-            # Get account and decrypt cookies
-            account = ConnectedAccount.objects.get(id=account_id, is_active=True)
+            # Get account and decrypt cookies (use sync_to_async for ORM call in async context)
+            account = await sync_to_async(ConnectedAccount.objects.get)(id=account_id, is_active=True)
             
             if not account.access_token:
                 raise PlatformAPIError(
