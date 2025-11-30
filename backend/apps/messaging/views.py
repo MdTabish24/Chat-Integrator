@@ -120,6 +120,7 @@ class ConversationMessagesView(APIView):
 
 
 from adrf.views import APIView as AsyncAPIView
+from asgiref.sync import sync_to_async
 
 class SendMessageView(AsyncAPIView):
     """
@@ -144,13 +145,19 @@ class SendMessageView(AsyncAPIView):
             
             content = serializer.validated_data['content']
             
-            # Verify user has access
-            try:
-                conversation = Conversation.objects.select_related('account').get(
-                    id=conversation_id,
-                    account__user_id=user_id
-                )
-            except Conversation.DoesNotExist:
+            # Verify user has access (wrap in sync_to_async for async context)
+            @sync_to_async
+            def get_conversation():
+                try:
+                    return Conversation.objects.select_related('account').get(
+                        id=conversation_id,
+                        account__user_id=user_id
+                    )
+                except Conversation.DoesNotExist:
+                    return None
+            
+            conversation = await get_conversation()
+            if not conversation:
                 return Response(
                     {'error': 'Conversation not found or access denied'},
                     status=status.HTTP_404_NOT_FOUND
@@ -194,34 +201,45 @@ class SendMessageView(AsyncAPIView):
                     content=content
                 )
             
-            # Create message object with encrypted content
-            message = Message.objects.create(
-                conversation=conversation,
-                platform_message_id=sent_msg.get('platformMessageId', str(timezone.now().timestamp())),
-                sender_id=sent_msg.get('senderId', 'me'),
-                sender_name=sent_msg.get('senderName', 'You'),
-                content=encrypt(content),
-                message_type=sent_msg.get('messageType', 'text'),
-                media_url=encrypt(sent_msg.get('mediaUrl')) if sent_msg.get('mediaUrl') else None,
-                is_outgoing=True,
-                is_read=True,
-                sent_at=timezone.now()
-            )
+            # Create message object with encrypted content (wrap in sync_to_async)
+            @sync_to_async
+            def save_message_to_db():
+                msg = Message.objects.create(
+                    conversation=conversation,
+                    platform_message_id=sent_msg.get('platformMessageId', str(timezone.now().timestamp())),
+                    sender_id=sent_msg.get('senderId', 'me'),
+                    sender_name=sent_msg.get('senderName', 'You'),
+                    content=encrypt(content),
+                    message_type=sent_msg.get('messageType', 'text'),
+                    media_url=encrypt(sent_msg.get('mediaUrl')) if sent_msg.get('mediaUrl') else None,
+                    is_outgoing=True,
+                    is_read=True,
+                    sent_at=timezone.now()
+                )
+                
+                # Update conversation
+                conversation.last_message_at = msg.sent_at
+                conversation.save()
+                
+                return msg
             
-            # Update conversation
-            conversation.last_message_at = message.sent_at
-            conversation.save()
-            
+            message = await save_message_to_db()
             serializer = MessageSerializer(message)
             
             # Emit WebSocket event for real-time update
             from apps.websocket.services import websocket_service
             from apps.conversations.serializers import ConversationSerializer
             
+            @sync_to_async
+            def get_conversation_data():
+                return ConversationSerializer(conversation).data
+            
+            conv_data = await get_conversation_data()
+            
             websocket_service.emit_new_message(
                 user_id=user_id,
                 message=serializer.data,
-                conversation=ConversationSerializer(conversation).data
+                conversation=conv_data
             )
             
             return Response({

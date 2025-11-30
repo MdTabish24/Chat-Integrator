@@ -237,19 +237,25 @@ const Dashboard: React.FC = () => {
   };
 
   const handlePlatformExpand = (platform: Platform) => {
+    const platformData = platformsData.get(platform);
+    if (!platformData) return;
+    
+    const newIsExpanded = !platformData.isExpanded;
+    
+    // Update expanded state first
     setPlatformsData((prev) => {
       const updated = new Map(prev);
-      const platformData = updated.get(platform);
-      if (platformData) {
-        const newIsExpanded = !platformData.isExpanded;
-        updated.set(platform, { ...platformData, isExpanded: newIsExpanded });
-        // Always load conversations when expanding (to get fresh data)
-        if (newIsExpanded) {
-          loadConversationsForPlatform(platform);
-        }
+      const data = updated.get(platform);
+      if (data) {
+        updated.set(platform, { ...data, isExpanded: newIsExpanded });
       }
       return updated;
     });
+    
+    // Load conversations after state update (outside of setState callback)
+    if (newIsExpanded) {
+      loadConversationsForPlatform(platform);
+    }
   };
 
   const handleConversationClick = (conversationId: string, platform: Platform) => {
