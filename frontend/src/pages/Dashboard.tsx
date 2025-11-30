@@ -197,24 +197,8 @@ const Dashboard: React.FC = () => {
         }
       }
 
-      // For Twitter, show desktop app message
-      // Twitter/Cloudflare blocks API requests from server IPs
-      if (platform === 'twitter') {
-        setPlatformsData((prev) => {
-          const updated = new Map(prev);
-          const platformData = updated.get(platform);
-          if (platformData) {
-            updated.set(platform, {
-              ...platformData,
-              conversations: [],
-              isLoading: false,
-              error: 'To sync Twitter DMs, please download and run the Chat Orbitor Desktop App. Twitter blocks server-side access, so the app runs on your computer to fetch DMs.',
-            });
-          }
-          return updated;
-        });
-        return; // Don't try to load conversations
-      }
+      // For Twitter - load conversations synced from Desktop App
+      // Note: Twitter blocks server-side access, so Desktop App is needed for syncing
 
       // Now load conversations (after sync completes or fails)
       const response = await apiClient.get('/api/conversations', { params: { platform } });
