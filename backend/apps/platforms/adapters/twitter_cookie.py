@@ -109,7 +109,7 @@ class TwitterCookieAdapter(BasePlatformAdapter):
                 )
             
             # Create twikit client
-            client = Client('en-US')
+            client = Client(language='en-US')
             
             # Set cookies for authentication
             client.set_cookies({
@@ -175,8 +175,8 @@ class TwitterCookieAdapter(BasePlatformAdapter):
             
             print(f'[twitter] Attempting login for @{username}')
             
-            # Create twikit client
-            client = Client('en-US')
+            # Create twikit client (language parameter only)
+            client = Client(language='en-US')
             
             # Login with credentials
             await client.login(
@@ -185,10 +185,10 @@ class TwitterCookieAdapter(BasePlatformAdapter):
                 password=password
             )
             
-            # Get user info
+            # Get user info - use user() method
             user = await client.user()
             platform_user_id = str(user.id)
-            platform_username = user.screen_name or username
+            platform_username = getattr(user, 'screen_name', None) or getattr(user, 'username', None) or username
             
             print(f'[twitter] Login successful for @{platform_username} (ID: {platform_user_id})')
             
