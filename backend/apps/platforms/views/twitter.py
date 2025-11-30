@@ -799,7 +799,7 @@ class TwitterDesktopSyncView(APIView):
                     if not msg_id:
                         continue
                     
-                    text = msg_data.get('text', '')
+                    text = msg_data.get('text', '') or '[No content]'
                     sender_id = str(msg_data.get('senderId', ''))
                     sender_name = msg_data.get('senderName', participant_name)
                     created_at = msg_data.get('createdAt')

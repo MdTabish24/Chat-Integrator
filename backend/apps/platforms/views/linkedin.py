@@ -649,11 +649,14 @@ class LinkedInDesktopSyncView(APIView):
                     sent_at = parse_datetime(msg_data.get('createdAt')) or timezone.now()
                     is_outgoing = msg_data.get('senderId') == str(account.platform_user_id)
                     
+                    # Skip empty messages
+                    msg_text = msg_data.get('text', '') or '[No content]'
+                    
                     _, created = Message.objects.get_or_create(
                         conversation=conversation,
                         platform_message_id=str(msg_id),
                         defaults={
-                            'content': encrypt(msg_data.get('text', '')),
+                            'content': encrypt(msg_text),
                             'sender_id': msg_data.get('senderId', ''),
                             'sender_name': participant_name if not is_outgoing else 'You',
                             'sent_at': sent_at,
