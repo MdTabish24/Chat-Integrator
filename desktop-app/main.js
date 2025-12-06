@@ -2,6 +2,17 @@ const { app, BrowserWindow, Tray, Menu, ipcMain, shell, session } = require('ele
 const path = require('path');
 const Store = require('electron-store');
 const axios = require('axios');
+const https = require('https');
+
+// Create axios instance for Instagram that doesn't follow redirects
+const instagramAxios = axios.create({
+  maxRedirects: 0,
+  timeout: 30000,
+  httpsAgent: new https.Agent({
+    rejectUnauthorized: true,
+  }),
+  validateStatus: () => true, // Accept all status codes
+});
 
 // Store for persistent data
 const store = new Store();
@@ -1108,26 +1119,37 @@ async function checkAndSendPendingMessages() {
   }
 }
 
+// Track messages being sent to avoid duplicate sends
+const sendingMessages = new Set();
+
 // Send a single Instagram message using the BROADCAST endpoint (correct way)
 async function sendInstagramMessage(msg, cookies, token, apiUrl) {
+  // Prevent duplicate sends
+  if (sendingMessages.has(msg.id)) {
+    console.log(`[instagram] Message ${msg.id} already being sent, skipping...`);
+    return;
+  }
+  sendingMessages.add(msg.id);
+  
   console.log(`[instagram] Sending message ${msg.id} to thread ${msg.platformConversationId}`);
   console.log(`[instagram] Content: "${msg.content.substring(0, 50)}..."`);
   
   try {
-    // Build cookie string
+    // Build cookie string with all available cookies
     const cookieString = [
       `sessionid=${cookies.sessionid}`,
       `csrftoken=${cookies.csrftoken}`,
       cookies.ds_user_id ? `ds_user_id=${cookies.ds_user_id}` : '',
       'ig_nrcb=1',
+      'ig_did=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx',
     ].filter(Boolean).join('; ');
 
     // Generate unique identifiers for this message
-    const clientContext = `6${Date.now()}${Math.floor(Math.random() * 100000000)}`;
-    const offlineThreadingId = `6${Date.now()}${Math.floor(Math.random() * 100000000)}`;
+    const timestamp = Date.now();
+    const clientContext = `6${timestamp}${Math.floor(Math.random() * 100000000)}`;
+    const offlineThreadingId = `6${timestamp}${Math.floor(Math.random() * 100000000)}`;
     
     const headers = {
-      'authority': 'www.instagram.com',
       'accept': '*/*',
       'accept-language': 'en-US,en;q=0.9',
       'content-type': 'application/x-www-form-urlencoded',
@@ -1145,7 +1167,7 @@ async function sendInstagramMessage(msg, cookies, token, apiUrl) {
       'x-asbd-id': '129477',
       'x-csrftoken': cookies.csrftoken,
       'x-ig-app-id': '936619743392459',
-      'x-ig-www-claim': 'hmac.AR3W0DThY2Mu5Fag4sW5u3RhaR3qhFD_5wvYbOJOD9qaPjM',
+      'x-ig-www-claim': '0',
       'x-instagram-ajax': '1011201729',
       'x-requested-with': 'XMLHttpRequest',
     };
@@ -1153,7 +1175,7 @@ async function sendInstagramMessage(msg, cookies, token, apiUrl) {
     // Use the BROADCAST TEXT endpoint (correct Instagram API)
     const formData = new URLSearchParams();
     formData.append('action', 'send_item');
-    formData.append('thread_ids', `["${msg.platformConversationId}"]`); // Array format with quotes
+    formData.append('thread_ids', `["${msg.platformConversationId}"]`);
     formData.append('client_context', clientContext);
     formData.append('text', msg.content);
     formData.append('offline_threading_id', offlineThreadingId);
@@ -1161,23 +1183,36 @@ async function sendInstagramMessage(msg, cookies, token, apiUrl) {
     console.log('[instagram] Sending via broadcast/text/ endpoint...');
     console.log('[instagram] thread_ids:', `["${msg.platformConversationId}"]`);
     
-    const sendResponse = await axios.post(
-      'https://www.instagram.com/api/v1/direct_v2/threads/broadcast/text/',
-      formData.toString(),
-      { 
-        headers, 
-        timeout: 30000,
-        validateStatus: (status) => status < 500
-      }
-    );
+    // Use custom Instagram axios instance (no redirects)
+    const sendResponse = await instagramAxios({
+      method: 'POST',
+      url: 'https://www.instagram.com/api/v1/direct_v2/threads/broadcast/text/',
+      data: formData.toString(),
+      headers: headers,
+    });
     
     console.log('[instagram] Send response status:', sendResponse.status);
+    
+    // Check for redirects (means session expired)
+    if (sendResponse.status === 301 || sendResponse.status === 302 || sendResponse.status === 303) {
+      const location = sendResponse.headers?.location || '';
+      console.log('[instagram] Redirect detected to:', location);
+      sendingMessages.delete(msg.id);
+      throw new Error('Instagram session expired (redirect). Please re-login via Desktop App.');
+    }
     
     if (sendResponse.data) {
       const dataStr = typeof sendResponse.data === 'string' 
         ? sendResponse.data.substring(0, 500) 
         : JSON.stringify(sendResponse.data).substring(0, 500);
       console.log('[instagram] Send response data:', dataStr);
+      
+      // Check if response is HTML (means login page)
+      if (typeof sendResponse.data === 'string' && 
+          (sendResponse.data.includes('<!DOCTYPE') || sendResponse.data.includes('login'))) {
+        sendingMessages.delete(msg.id);
+        throw new Error('Instagram session expired (login page). Please re-login via Desktop App.');
+      }
     }
     
     // Check if successful
@@ -1209,6 +1244,7 @@ async function sendInstagramMessage(msg, cookies, token, apiUrl) {
         );
         
         console.log(`[instagram] Message ${msg.id} sent successfully!`);
+        sendingMessages.delete(msg.id);
         
         // Notify UI
         if (mainWindow) {
@@ -1222,18 +1258,38 @@ async function sendInstagramMessage(msg, cookies, token, apiUrl) {
       }
     }
     
-    // Check for login required / session expired
-    if (sendResponse.status === 302 || sendResponse.status === 301 || 
-        (typeof sendResponse.data === 'string' && sendResponse.data.includes('login'))) {
+    // If we get here, check for specific errors
+    if (sendResponse.status === 400) {
+      const errorMsg = sendResponse.data?.message || 'Bad request';
+      throw new Error(`Instagram rejected: ${errorMsg}`);
+    }
+    
+    if (sendResponse.status === 401 || sendResponse.status === 403) {
       throw new Error('Instagram session expired. Please re-login via Desktop App.');
     }
     
     // If we get here, something went wrong
-    const errorMsg = sendResponse.data?.message || sendResponse.data?.error || 'Message not sent';
+    const errorMsg = sendResponse.data?.message || sendResponse.data?.error || `Status ${sendResponse.status}`;
     throw new Error(`Instagram: ${errorMsg}`);
     
   } catch (error) {
-    console.error(`[instagram] Failed to send message ${msg.id}:`, error.message);
+    sendingMessages.delete(msg.id);
+    
+    // Check if this is a redirect error (session expired)
+    const errorMsg = error.message || '';
+    const isRedirectError = errorMsg.includes('redirect') || 
+                           errorMsg.includes('Redirect') ||
+                           errorMsg.includes('Maximum') ||
+                           error.code === 'ERR_FR_TOO_MANY_REDIRECTS';
+    
+    let displayError = error.message;
+    if (isRedirectError) {
+      displayError = 'Instagram session expired. Please click "Open Instagram Login" in Desktop App to re-login.';
+      console.error(`[instagram] Session expired (redirect error) for message ${msg.id}`);
+    } else {
+      console.error(`[instagram] Failed to send message ${msg.id}:`, error.message);
+    }
+    
     if (error.response) {
       console.error('[instagram] Response status:', error.response.status);
       const dataStr = typeof error.response.data === 'string' 
@@ -1249,7 +1305,7 @@ async function sendInstagramMessage(msg, cookies, token, apiUrl) {
         {
           pending_id: msg.id,
           success: false,
-          error: error.message || 'Failed to send message'
+          error: displayError
         },
         {
           headers: {
@@ -1268,8 +1324,17 @@ async function sendInstagramMessage(msg, cookies, token, apiUrl) {
       mainWindow.webContents.send('instagram-message-sent', {
         success: false,
         pendingId: msg.id,
-        error: error.message
+        error: displayError
       });
+      
+      // If session expired, update UI to show re-login needed
+      if (isRedirectError) {
+        mainWindow.webContents.send('sync-status', { 
+          platform: 'instagram', 
+          success: false, 
+          message: 'Session expired - please re-login'
+        });
+      }
     }
   }
 }
