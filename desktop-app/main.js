@@ -253,7 +253,19 @@ async function syncPlatform(platform, cookies, token) {
 }
 
 // ============ TWITTER ============
-async function fetchTwitterDMs(cookies) {
+// Track last Twitter fetch time
+let lastTwitterFetch = 0;
+const TWITTER_MIN_INTERVAL = 15000; // 15 seconds between fetches
+
+async function fetchTwitterDMs(cookies, retryCount = 0) {
+  // Rate limit check
+  const now = Date.now();
+  const timeSinceLastFetch = now - lastTwitterFetch;
+  if (timeSinceLastFetch < TWITTER_MIN_INTERVAL && retryCount === 0) {
+    console.log(`[twitter] Rate limit: waiting ${Math.ceil((TWITTER_MIN_INTERVAL - timeSinceLastFetch) / 1000)}s`);
+    await new Promise(resolve => setTimeout(resolve, TWITTER_MIN_INTERVAL - timeSinceLastFetch));
+  }
+
   const headers = {
     'authorization': 'Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA',
     'cookie': `auth_token=${cookies.auth_token}; ct0=${cookies.ct0}`,
@@ -265,12 +277,31 @@ async function fetchTwitterDMs(cookies) {
     'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
   };
   
-  const response = await axios.get(
-    'https://api.twitter.com/1.1/dm/inbox_initial_state.json?include_profile_interstitial_type=1&include_blocking=1&include_blocked_by=1&include_followed_by=1&include_want_retweets=1&include_mute_edge=1&include_can_dm=1&include_can_media_tag=1&skip_status=1&dm_secret_conversations_enabled=false&cards_platform=Web-12&include_cards=1&include_ext_alt_text=true&include_quote_count=true&include_reply_count=1&tweet_mode=extended&count=50',
-    { headers, timeout: 60000 }
-  );
-  
-  return parseTwitterResponse(response.data);
+  try {
+    const response = await axios.get(
+      'https://api.twitter.com/1.1/dm/inbox_initial_state.json?include_profile_interstitial_type=1&include_blocking=1&include_blocked_by=1&include_followed_by=1&include_want_retweets=1&include_mute_edge=1&include_can_dm=1&include_can_media_tag=1&skip_status=1&dm_secret_conversations_enabled=false&cards_platform=Web-12&include_cards=1&include_ext_alt_text=true&include_quote_count=true&include_reply_count=1&tweet_mode=extended&count=50',
+      { headers, timeout: 60000 }
+    );
+    
+    lastTwitterFetch = Date.now();
+    return parseTwitterResponse(response.data);
+  } catch (error) {
+    console.error('[twitter] Fetch error:', error.message);
+    
+    // Retry on connection errors
+    const isRetryableError = error.message.includes('ECONNRESET') || 
+                            error.message.includes('ETIMEDOUT') ||
+                            error.message.includes('socket hang up');
+    
+    if (isRetryableError && retryCount < 3) {
+      const waitTime = Math.pow(2, retryCount) * 3000; // 3s, 6s, 12s
+      console.log(`[twitter] Retrying in ${waitTime/1000}s... (attempt ${retryCount + 1}/3)`);
+      await new Promise(resolve => setTimeout(resolve, waitTime));
+      return fetchTwitterDMs(cookies, retryCount + 1);
+    }
+    
+    throw error;
+  }
 }
 
 function parseTwitterResponse(data) {
@@ -454,7 +485,19 @@ function parseLinkedInResponse(data) {
 }
 
 // ============ INSTAGRAM ============
-async function fetchInstagramDMs(cookies) {
+// Track last Instagram fetch time to avoid rate limiting
+let lastInstagramFetch = 0;
+const INSTAGRAM_MIN_INTERVAL = 30000; // 30 seconds between fetches
+
+async function fetchInstagramDMs(cookies, retryCount = 0) {
+  // Rate limit check - don't fetch too frequently
+  const now = Date.now();
+  const timeSinceLastFetch = now - lastInstagramFetch;
+  if (timeSinceLastFetch < INSTAGRAM_MIN_INTERVAL && retryCount === 0) {
+    console.log(`[instagram] Rate limit: waiting ${Math.ceil((INSTAGRAM_MIN_INTERVAL - timeSinceLastFetch) / 1000)}s before next fetch`);
+    await new Promise(resolve => setTimeout(resolve, INSTAGRAM_MIN_INTERVAL - timeSinceLastFetch));
+  }
+  
   console.log('[instagram] Fetching DMs with cookies...');
   console.log('[instagram] sessionid:', cookies.sessionid ? 'present' : 'missing');
   console.log('[instagram] csrftoken:', cookies.csrftoken ? 'present' : 'missing');
@@ -465,8 +508,14 @@ async function fetchInstagramDMs(cookies) {
     'x-ig-app-id': '936619743392459',
     'x-requested-with': 'XMLHttpRequest',
     'x-ig-www-claim': '0',
+    'x-asbd-id': '198387',
     'origin': 'https://www.instagram.com',
     'referer': 'https://www.instagram.com/direct/inbox/',
+    'accept': '*/*',
+    'accept-language': 'en-US,en;q=0.9',
+    'sec-fetch-dest': 'empty',
+    'sec-fetch-mode': 'cors',
+    'sec-fetch-site': 'same-origin',
     'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
   };
 
@@ -478,11 +527,18 @@ async function fetchInstagramDMs(cookies) {
         timeout: 60000,
         maxRedirects: 5,
         validateStatus: function (status) {
-          return status < 500; // Accept any status < 500
-        }
+          return status < 500;
+        },
+        // Better SSL handling
+        httpsAgent: new (require('https').Agent)({
+          rejectUnauthorized: true,
+          keepAlive: true,
+          timeout: 60000
+        })
       }
     );
     
+    lastInstagramFetch = Date.now();
     console.log('[instagram] Response status:', response.status);
     
     if (response.status === 401 || response.status === 403) {
@@ -497,9 +553,22 @@ async function fetchInstagramDMs(cookies) {
     return parseInstagramResponse(response.data);
   } catch (error) {
     console.error('[instagram] Fetch error:', error.message);
+    
+    // Retry on SSL/connection errors (max 3 retries with exponential backoff)
+    const isRetryableError = error.message.includes('SSL') || 
+                            error.message.includes('ECONNRESET') || 
+                            error.message.includes('ETIMEDOUT') ||
+                            error.message.includes('CLOSE_NOTIFY');
+    
+    if (isRetryableError && retryCount < 3) {
+      const waitTime = Math.pow(2, retryCount) * 5000; // 5s, 10s, 20s
+      console.log(`[instagram] Retrying in ${waitTime/1000}s... (attempt ${retryCount + 1}/3)`);
+      await new Promise(resolve => setTimeout(resolve, waitTime));
+      return fetchInstagramDMs(cookies, retryCount + 1);
+    }
+    
     if (error.response) {
       console.error('[instagram] Response status:', error.response.status);
-      console.error('[instagram] Response data:', JSON.stringify(error.response.data).substring(0, 500));
     }
     throw error;
   }
