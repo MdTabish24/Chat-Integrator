@@ -198,6 +198,30 @@ const ChatView: React.FC<ChatViewProps> = ({
     setSendError(null);
     try {
       const response = await apiClient.post(`/api/messages/${conversationId}/send`, { content });
+      
+      // Check if message is pending (Instagram via Desktop App)
+      if (response.status === 202 || response.data.pendingId) {
+        // Message queued for Desktop App
+        const pendingMessage: Message = {
+          id: response.data.pendingId || `pending_${Date.now()}`,
+          conversationId: conversationId,
+          platformMessageId: '',
+          senderId: 'me',
+          senderName: 'You',
+          content: content,
+          messageType: 'text',
+          isOutgoing: true,
+          isRead: true,
+          sentAt: new Date().toISOString(),
+          createdAt: new Date().toISOString(),
+        };
+        setMessages((prev) => [...prev, pendingMessage]);
+        setTimeout(() => scrollToBottom(true), 100);
+        showSuccess('Message queued - Desktop App will send it');
+        onMessageSent?.();
+        return;
+      }
+      
       const m = response.data.message;
       // Map snake_case to camelCase
       const newMessage: Message = {
@@ -391,13 +415,13 @@ const ChatView: React.FC<ChatViewProps> = ({
         </div>
       )}
 
-      {/* Instagram Warning */}
+      {/* Instagram Info */}
       {platform === 'instagram' && (
         <div className="px-4 py-2 bg-gradient-to-r from-pink-50 to-purple-50 border-t border-pink-200">
           <div className="flex items-center space-x-2">
             <span className="text-pink-500">📷</span>
             <span className="text-xs text-pink-700">
-              <strong>Instagram:</strong> Sending messages from web is blocked by Instagram. Use the <strong>Desktop App</strong> to reply. Messages are synced via Desktop App.
+              <strong>Instagram:</strong> Messages are sent via Desktop App (running on your PC). Make sure Desktop App is open!
             </span>
           </div>
         </div>
@@ -406,8 +430,8 @@ const ChatView: React.FC<ChatViewProps> = ({
       {/* Message Input */}
       <MessageInput 
         onSendMessage={handleSendMessage} 
-        disabled={isLoading || !!error || platform === 'instagram'} 
-        placeholder={platform === 'instagram' ? "Use Desktop App to send Instagram DMs..." : "Type a message..."} 
+        disabled={isLoading || !!error} 
+        placeholder={platform === 'instagram' ? "Type message (sent via Desktop App)..." : "Type a message..."} 
       />
     </div>
   );
