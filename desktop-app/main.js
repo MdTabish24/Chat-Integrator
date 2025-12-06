@@ -515,12 +515,76 @@ function parseInstagramResponse(data) {
       name: u.full_name || u.username || ''
     }));
 
-    const messages = (thread.items || []).map(item => ({
-      id: item.item_id || '',
-      text: item.text || item.link?.text || '[Media]',
-      senderId: item.user_id?.toString() || '',
-      createdAt: new Date(item.timestamp / 1000).toISOString()
-    }));
+    const messages = (thread.items || []).map(item => {
+      // Extract text from various Instagram message types
+      let text = '';
+      
+      // Regular text message
+      if (item.text) {
+        text = item.text;
+      }
+      // Link share
+      else if (item.link?.text) {
+        text = item.link.text;
+      }
+      // Reel share
+      else if (item.reel_share) {
+        text = item.reel_share.text || '[Shared a Reel]';
+      }
+      // Story share
+      else if (item.story_share) {
+        text = item.story_share.message || '[Shared a Story]';
+      }
+      // Media share (posts)
+      else if (item.media_share) {
+        const caption = item.media_share.caption?.text || '';
+        text = caption ? `[Post] ${caption.substring(0, 100)}` : '[Shared a Post]';
+      }
+      // Clip (Reels in DM)
+      else if (item.clip) {
+        const caption = item.clip.clip?.caption?.text || '';
+        text = caption ? `[Clip] ${caption.substring(0, 100)}` : '[Shared a Clip]';
+      }
+      // Voice message
+      else if (item.voice_media) {
+        text = '[Voice Message]';
+      }
+      // Visual media (photo/video)
+      else if (item.visual_media) {
+        text = '[Photo/Video]';
+      }
+      // Animated media (GIF)
+      else if (item.animated_media) {
+        text = '[GIF]';
+      }
+      // Like/reaction
+      else if (item.like) {
+        text = '❤️';
+      }
+      // Reactions
+      else if (item.reactions) {
+        text = '[Reaction]';
+      }
+      // Placeholder message
+      else if (item.placeholder) {
+        text = item.placeholder.message || '[Message unavailable]';
+      }
+      // Action log (e.g., "liked a message")
+      else if (item.action_log) {
+        text = item.action_log.description || '[Action]';
+      }
+      // Default fallback
+      else {
+        text = '[Media]';
+      }
+      
+      return {
+        id: item.item_id || '',
+        text: text,
+        senderId: item.user_id?.toString() || '',
+        createdAt: new Date(item.timestamp / 1000).toISOString()
+      };
+    });
 
     conversations.push({
       id: thread.thread_id || '',

@@ -391,8 +391,24 @@ const ChatView: React.FC<ChatViewProps> = ({
         </div>
       )}
 
+      {/* Instagram Warning */}
+      {platform === 'instagram' && (
+        <div className="px-4 py-2 bg-gradient-to-r from-pink-50 to-purple-50 border-t border-pink-200">
+          <div className="flex items-center space-x-2">
+            <span className="text-pink-500">📷</span>
+            <span className="text-xs text-pink-700">
+              <strong>Instagram:</strong> Sending messages from web is blocked by Instagram. Use the <strong>Desktop App</strong> to reply. Messages are synced via Desktop App.
+            </span>
+          </div>
+        </div>
+      )}
+
       {/* Message Input */}
-      <MessageInput onSendMessage={handleSendMessage} disabled={isLoading || !!error} placeholder="Type a message..." />
+      <MessageInput 
+        onSendMessage={handleSendMessage} 
+        disabled={isLoading || !!error || platform === 'instagram'} 
+        placeholder={platform === 'instagram' ? "Use Desktop App to send Instagram DMs..." : "Type a message..."} 
+      />
     </div>
   );
 };

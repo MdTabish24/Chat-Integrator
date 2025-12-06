@@ -578,6 +578,10 @@ class InstagramSendMessageView(APIView):
     
     POST /api/platforms/instagram/send/:accountId
     
+    NOTE: Instagram blocks server-side message sending.
+    This endpoint returns an error explaining that Instagram DMs
+    can only be sent via the Desktop App (which runs on user's PC).
+    
     Request body:
     {
         "conversation_id": "string",  # Instagram thread ID
@@ -589,6 +593,18 @@ class InstagramSendMessageView(APIView):
     permission_classes = [AllowAny]
     
     def post(self, request, account_id):
+        # Instagram blocks server-side operations
+        # Return clear error message
+        return Response({
+            'error': {
+                'code': 'INSTAGRAM_SERVER_BLOCKED',
+                'message': 'Instagram blocks server-side message sending. Please use the Desktop App to send Instagram DMs. The Desktop App runs on your PC so Instagram allows it.',
+                'retryable': False,
+                'useDesktopApp': True,
+            }
+        }, status=status.HTTP_403_FORBIDDEN)
+        
+        # Original code below - kept for reference but not used
         try:
             if not hasattr(request, 'user_jwt') or not request.user_jwt:
                 return Response({
