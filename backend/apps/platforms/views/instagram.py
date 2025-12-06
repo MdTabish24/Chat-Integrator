@@ -770,6 +770,16 @@ class InstagramDesktopSyncView(APIView):
     Receive Instagram DM data from the desktop app.
     
     POST /api/platforms/instagram/sync-from-desktop
+    
+    Request body:
+    {
+        "conversations": [...],     # DM conversations from desktop app
+        "cookies": {                # Instagram cookies (optional, for auto-creating account)
+            "sessionid": "...",
+            "csrftoken": "...",
+            "ds_user_id": "..."     # Instagram user ID
+        }
+    }
     """
     permission_classes = [AllowAny]
     
@@ -782,6 +792,11 @@ class InstagramDesktopSyncView(APIView):
             
             user_id = request.user_jwt['user_id']
             conversations_data = request.data.get('conversations', [])
+            cookies = request.data.get('cookies', {})
+            
+            print(f'[instagram-desktop] Sync request from user {user_id}')
+            print(f'[instagram-desktop] Conversations count: {len(conversations_data)}')
+            print(f'[instagram-desktop] Cookies provided: {bool(cookies)}')
             
             from apps.oauth.models import ConnectedAccount
             from apps.conversations.models import Conversation
@@ -789,12 +804,51 @@ class InstagramDesktopSyncView(APIView):
             from apps.core.utils.crypto import encrypt
             from django.utils import timezone
             
+            # Try to find existing account or create new one if cookies provided
+            account = None
             try:
                 account = ConnectedAccount.objects.get(user_id=user_id, platform='instagram', is_active=True)
+                print(f'[instagram-desktop] Found existing account: {account.id}')
             except ConnectedAccount.DoesNotExist:
-                return Response({
-                    'error': {'code': 'ACCOUNT_NOT_FOUND', 'message': 'No active Instagram account found', 'retryable': False}
-                }, status=status.HTTP_404_NOT_FOUND)
+                # If cookies provided, create new account
+                if cookies and cookies.get('sessionid'):
+                    print(f'[instagram-desktop] No account found, creating new one from cookies...')
+                    
+                    # Get user ID from cookies or extract from first conversation
+                    platform_user_id = cookies.get('ds_user_id', '')
+                    platform_username = 'instagram_user'
+                    
+                    # Try to get username from conversations
+                    if conversations_data and len(conversations_data) > 0:
+                        # The user is likely not in participants, but we can use ds_user_id
+                        pass
+                    
+                    # Create encrypted session data (like InstagramLoginView does)
+                    session_data = {
+                        'sessionid': cookies.get('sessionid', ''),
+                        'csrftoken': cookies.get('csrftoken', ''),
+                        'ds_user_id': platform_user_id,
+                        'from_desktop': True,  # Mark as coming from desktop app
+                    }
+                    
+                    import json
+                    encrypted_session = encrypt(json.dumps(session_data))
+                    
+                    # Create the account
+                    account = ConnectedAccount.objects.create(
+                        user_id=user_id,
+                        platform='instagram',
+                        platform_user_id=platform_user_id or f'desktop_{user_id[:8]}',
+                        platform_username=platform_username,
+                        access_token=encrypted_session,  # Store session data here
+                        is_active=True,
+                    )
+                    print(f'[instagram-desktop] Created new account: {account.id}')
+                else:
+                    print(f'[instagram-desktop] No account and no cookies - cannot sync')
+                    return Response({
+                        'error': {'code': 'ACCOUNT_NOT_FOUND', 'message': 'No active Instagram account found. Please login via the desktop app first.', 'retryable': False}
+                    }, status=status.HTTP_404_NOT_FOUND)
             
             saved_conversations = 0
             saved_messages = 0

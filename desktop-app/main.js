@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Tray, Menu, ipcMain, shell } = require('electron');
+const { app, BrowserWindow, Tray, Menu, ipcMain, shell, session } = require('electron');
 const path = require('path');
 const Store = require('electron-store');
 const axios = require('axios');
@@ -9,6 +9,7 @@ const store = new Store();
 let mainWindow = null;
 let tray = null;
 let syncInterval = null;
+let instagramLoginWindow = null;
 
 // Chat Orbitor API URL
 const API_BASE_URL = store.get('apiUrl') || 'https://chat-integrator.onrender.com';
@@ -641,6 +642,187 @@ ipcMain.handle('login-twitter', async (event, { username, password, email }) => 
       error: error.response?.data?.error?.message || error.message || 'Login failed'
     };
   }
+});
+
+// Instagram browser-based login (opens Instagram in a window, extracts cookies after login)
+ipcMain.handle('login-instagram-browser', async () => {
+  return new Promise((resolve) => {
+    try {
+      const token = store.get('chatorbitor_token');
+      if (!token) {
+        resolve({ success: false, error: 'Please save your Chat Orbitor token first' });
+        return;
+      }
+
+      // Close existing Instagram login window if open
+      if (instagramLoginWindow && !instagramLoginWindow.isDestroyed()) {
+        instagramLoginWindow.close();
+      }
+
+      // Create a new session for Instagram login (isolated from main app)
+      const instagramSession = session.fromPartition('instagram-login');
+      
+      // Clear any existing cookies to start fresh
+      instagramSession.clearStorageData({ storages: ['cookies'] });
+
+      // Create Instagram login window
+      instagramLoginWindow = new BrowserWindow({
+        width: 450,
+        height: 700,
+        resizable: true,
+        title: 'Login to Instagram',
+        parent: mainWindow,
+        modal: false,
+        webPreferences: {
+          nodeIntegration: false,
+          contextIsolation: true,
+          session: instagramSession
+        }
+      });
+
+      // Load Instagram login page
+      instagramLoginWindow.loadURL('https://www.instagram.com/accounts/login/');
+
+      console.log('[instagram] Login window opened');
+
+      // Notify main window that login window is open
+      if (mainWindow) {
+        mainWindow.webContents.send('instagram-login-status', { status: 'window_opened' });
+      }
+
+      // Check for successful login by monitoring URL and cookies
+      let loginCheckInterval = null;
+      let isResolved = false;
+
+      const checkForLogin = async () => {
+        if (isResolved) return;
+        
+        try {
+          if (instagramLoginWindow.isDestroyed()) {
+            clearInterval(loginCheckInterval);
+            if (!isResolved) {
+              isResolved = true;
+              resolve({ success: false, error: 'Login window was closed' });
+            }
+            return;
+          }
+
+          const currentURL = instagramLoginWindow.webContents.getURL();
+          
+          // Check if user is logged in (URL changed to home or feed)
+          if (currentURL.includes('instagram.com') && 
+              !currentURL.includes('/accounts/login') && 
+              !currentURL.includes('/challenge') &&
+              !currentURL.includes('/two_factor')) {
+            
+            // Get cookies from the session
+            const cookies = await instagramSession.cookies.get({ domain: '.instagram.com' });
+            
+            // Find required cookies
+            let sessionid = '';
+            let csrftoken = '';
+            let ds_user_id = '';
+
+            for (const cookie of cookies) {
+              if (cookie.name === 'sessionid') sessionid = cookie.value;
+              if (cookie.name === 'csrftoken') csrftoken = cookie.value;
+              if (cookie.name === 'ds_user_id') ds_user_id = cookie.value;
+            }
+
+            console.log('[instagram] Checking cookies - sessionid:', !!sessionid, 'csrftoken:', !!csrftoken);
+
+            // If we have the required cookies, login was successful
+            if (sessionid && csrftoken) {
+              clearInterval(loginCheckInterval);
+              isResolved = true;
+
+              console.log('[instagram] Login successful! Extracting cookies...');
+
+              // Save cookies
+              const instagramCookies = { sessionid, csrftoken, ds_user_id };
+              store.set('instagram_cookies', instagramCookies);
+
+              // Close login window
+              if (!instagramLoginWindow.isDestroyed()) {
+                instagramLoginWindow.close();
+              }
+
+              // Notify main window
+              if (mainWindow) {
+                mainWindow.webContents.send('instagram-login-status', { 
+                  status: 'success',
+                  message: 'Login successful!'
+                });
+              }
+
+              resolve({ success: true, cookies: instagramCookies });
+              
+              // Auto-sync after successful login
+              const chatToken = store.get('chatorbitor_token');
+              if (chatToken) {
+                setTimeout(() => {
+                  syncPlatform('instagram', instagramCookies, chatToken);
+                }, 1000);
+              }
+            }
+          }
+        } catch (err) {
+          console.error('[instagram] Error checking login status:', err.message);
+        }
+      };
+
+      // Start checking for login every 2 seconds
+      loginCheckInterval = setInterval(checkForLogin, 2000);
+
+      // Also check when page finishes loading
+      instagramLoginWindow.webContents.on('did-finish-load', () => {
+        setTimeout(checkForLogin, 1000);
+      });
+
+      // Handle window close
+      instagramLoginWindow.on('closed', () => {
+        clearInterval(loginCheckInterval);
+        instagramLoginWindow = null;
+        
+        if (!isResolved) {
+          isResolved = true;
+          if (mainWindow) {
+            mainWindow.webContents.send('instagram-login-status', { 
+              status: 'cancelled',
+              message: 'Login cancelled'
+            });
+          }
+          resolve({ success: false, error: 'Login window was closed' });
+        }
+      });
+
+      // Timeout after 5 minutes
+      setTimeout(() => {
+        if (!isResolved) {
+          clearInterval(loginCheckInterval);
+          isResolved = true;
+          
+          if (instagramLoginWindow && !instagramLoginWindow.isDestroyed()) {
+            instagramLoginWindow.close();
+          }
+          
+          resolve({ success: false, error: 'Login timed out. Please try again.' });
+        }
+      }, 5 * 60 * 1000);
+
+    } catch (error) {
+      console.error('[instagram] Login error:', error.message);
+      resolve({ success: false, error: error.message });
+    }
+  });
+});
+
+// Close Instagram login window
+ipcMain.handle('close-instagram-login', async () => {
+  if (instagramLoginWindow && !instagramLoginWindow.isDestroyed()) {
+    instagramLoginWindow.close();
+  }
+  return { success: true };
 });
 
 // Start auto-sync interval (every 5 minutes)

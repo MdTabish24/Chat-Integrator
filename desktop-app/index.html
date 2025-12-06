@@ -188,7 +188,7 @@
     const loginMethods = {
       twitter: 'credentials', // Can use username/password
       linkedin: 'cookies',
-      instagram: 'cookies', 
+      instagram: 'browser', // Can use browser login (opens Instagram)
       facebook: 'cookies'
     };
     
@@ -287,6 +287,71 @@
               </div>
             </div>
           `;
+        } 
+        // Instagram has browser login option (like Twitter but opens Instagram website)
+        else if (id === 'instagram') {
+          card.innerHTML = `
+            <div class="platform-header">
+              <div class="platform-title">
+                <span>${config.icon}</span>
+                <span>${config.name}</span>
+              </div>
+              <span class="platform-status ${hasCookies ? 'connected' : 'disconnected'}" id="status-${id}">
+                ${hasCookies ? '✓ Connected' : 'Not connected'}
+              </span>
+            </div>
+            ${lastSync ? `<div style="font-size:10px;color:#888;margin-bottom:8px;">Last sync: ${new Date(lastSync).toLocaleString()}</div>` : ''}
+            
+            <div style="display:flex;gap:8px;margin-bottom:10px;">
+              <button class="toggle-btn" onclick="showInstagramLogin()" id="instagram-login-tab" style="font-weight:600;color:#667eea;">
+                🔐 Login (Recommended)
+              </button>
+              <button class="toggle-btn" onclick="showInstagramCookies()" id="instagram-cookies-tab">
+                🍪 Cookies
+              </button>
+            </div>
+            
+            <!-- Browser Login (Recommended) -->
+            <div class="platform-fields show" id="instagram-login-form">
+              <div style="background:#f0f7ff;padding:12px;border-radius:8px;margin-bottom:12px;">
+                <div style="font-size:12px;color:#004085;margin-bottom:8px;">
+                  <strong>🌐 Browser Login (Best Method)</strong>
+                </div>
+                <div style="font-size:11px;color:#555;line-height:1.5;">
+                  1. Click "Open Instagram Login" below<br>
+                  2. Login to Instagram normally in the popup<br>
+                  3. After login, cookies will be extracted automatically<br>
+                  4. Handles 2FA & verification automatically!
+                </div>
+              </div>
+              <div class="platform-actions">
+                <button class="btn btn-primary btn-sm" onclick="loginInstagramBrowser()" id="instagram-login-btn" style="background:linear-gradient(45deg, #f09433, #e6683c, #dc2743, #cc2366, #bc1888);">
+                  🔐 Open Instagram Login
+                </button>
+                <button class="btn btn-secondary btn-sm" onclick="syncPlatform('instagram')">🔄 Sync</button>
+                <button class="btn btn-danger btn-sm" onclick="clearPlatform('instagram')">🗑️</button>
+              </div>
+            </div>
+            
+            <!-- Cookies Form (Manual - hidden by default) -->
+            <div class="platform-fields" id="instagram-cookies-form">
+              <div style="background:#fff3cd;padding:8px;border-radius:6px;margin-bottom:10px;font-size:10px;color:#856404;">
+                ⚠️ Manual method - Use Browser Login above if possible
+              </div>
+              ${config.cookieFields.map(field => `
+                <div class="form-group">
+                  <label>${field}</label>
+                  <input type="text" id="${id}-${field}" placeholder="${field}" value="${platformData.cookies?.[field] || ''}">
+                  <small>${cookieInstructions[id]?.[field] || ''}</small>
+                </div>
+              `).join('')}
+              <div class="platform-actions">
+                <button class="btn btn-primary btn-sm" onclick="savePlatform('${id}')">💾 Save</button>
+                <button class="btn btn-secondary btn-sm" onclick="syncPlatform('${id}')">🔄 Sync</button>
+                <button class="btn btn-danger btn-sm" onclick="clearPlatform('${id}')">🗑️</button>
+              </div>
+            </div>
+          `;
         } else {
           card.innerHTML = `
             <div class="platform-header">
@@ -339,6 +404,61 @@
       document.getElementById('twitter-login-tab').style.color = '#888';
       document.getElementById('twitter-cookies-tab').style.fontWeight = '600';
       document.getElementById('twitter-cookies-tab').style.color = '#667eea';
+    }
+    
+    // Instagram tab switching
+    function showInstagramLogin() {
+      document.getElementById('instagram-login-form').classList.add('show');
+      document.getElementById('instagram-cookies-form').classList.remove('show');
+      document.getElementById('instagram-login-tab').style.fontWeight = '600';
+      document.getElementById('instagram-login-tab').style.color = '#667eea';
+      document.getElementById('instagram-cookies-tab').style.fontWeight = 'normal';
+      document.getElementById('instagram-cookies-tab').style.color = '#888';
+    }
+    
+    function showInstagramCookies() {
+      document.getElementById('instagram-login-form').classList.remove('show');
+      document.getElementById('instagram-cookies-form').classList.add('show');
+      document.getElementById('instagram-login-tab').style.fontWeight = 'normal';
+      document.getElementById('instagram-login-tab').style.color = '#888';
+      document.getElementById('instagram-cookies-tab').style.fontWeight = '600';
+      document.getElementById('instagram-cookies-tab').style.color = '#667eea';
+    }
+    
+    // Instagram browser login - opens Instagram in a popup window
+    async function loginInstagramBrowser() {
+      const btn = document.getElementById('instagram-login-btn');
+      const status = document.getElementById('status-instagram');
+      
+      btn.disabled = true;
+      btn.textContent = '⏳ Opening Instagram...';
+      status.className = 'platform-status syncing';
+      status.textContent = '⏳ Opening login...';
+      
+      try {
+        const result = await window.electronAPI.loginInstagramBrowser();
+        
+        if (result.success) {
+          status.className = 'platform-status connected';
+          status.textContent = '✓ Connected';
+          alert('Instagram connected successfully! Syncing messages...');
+          credentials = await window.electronAPI.getCredentials();
+          renderPlatforms();
+        } else {
+          status.className = 'platform-status error';
+          status.textContent = '✗ ' + (result.error || 'Login failed');
+          if (result.error && result.error !== 'Login window was closed') {
+            alert('Login failed: ' + result.error);
+          }
+        }
+      } catch (err) {
+        status.className = 'platform-status error';
+        status.textContent = '✗ Error';
+        alert('Login error: ' + err.message);
+      }
+      
+      btn.disabled = false;
+      btn.textContent = '🔐 Open Instagram Login';
     }
     
     // Twitter login with username/password
@@ -473,6 +593,41 @@
       } else {
         status.className = 'platform-status error';
         status.textContent = '✗ ' + (data.message || 'Error');
+      }
+    });
+    
+    // Listen for Instagram login status updates
+    window.electronAPI.onInstagramLoginStatus((data) => {
+      const status = document.getElementById('status-instagram');
+      const btn = document.getElementById('instagram-login-btn');
+      
+      if (!status) return;
+      
+      if (data.status === 'window_opened') {
+        status.className = 'platform-status syncing';
+        status.textContent = '⏳ Waiting for login...';
+        if (btn) {
+          btn.textContent = '⏳ Login in progress...';
+        }
+      } else if (data.status === 'success') {
+        status.className = 'platform-status connected';
+        status.textContent = '✓ Connected';
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = '🔐 Open Instagram Login';
+        }
+        // Refresh credentials
+        setTimeout(async () => {
+          credentials = await window.electronAPI.getCredentials();
+          renderPlatforms();
+        }, 500);
+      } else if (data.status === 'cancelled') {
+        status.className = 'platform-status disconnected';
+        status.textContent = 'Not connected';
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = '🔐 Open Instagram Login';
+        }
       }
     });
     

@@ -19,8 +19,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Twitter login with username/password
   loginTwitter: (data) => ipcRenderer.invoke('login-twitter', data),
   
+  // Instagram browser-based login (opens Instagram website)
+  loginInstagramBrowser: () => ipcRenderer.invoke('login-instagram-browser'),
+  closeInstagramLogin: () => ipcRenderer.invoke('close-instagram-login'),
+  
   // Status updates
   onSyncStatus: (callback) => {
     ipcRenderer.on('sync-status', (event, data) => callback(data));
+  },
+  
+  // Instagram login status updates
+  onInstagramLoginStatus: (callback) => {
+    ipcRenderer.on('instagram-login-status', (event, data) => callback(data));
   }
 });
