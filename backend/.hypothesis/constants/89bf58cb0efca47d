@@ -1,0 +1,4 @@
+# file: C:\Users\Mohammad Tabish\OneDrive\ドキュメント\MERGER CHAT INTEGRATION\backend\apps\conversations\admin.py
+# hypothesis_version: 6.148.3
+
+['-last_message_at', 'Participant', 'Platform', 'Status', 'Timestamps', 'account', 'account__platform', 'created_at', 'fields', 'id', 'last_message_at', 'participant_id', 'participant_name', 'platform', 'unread_count', 'updated_at']

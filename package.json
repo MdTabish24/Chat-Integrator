@@ -1,0 +1,43 @@
+{
+  "name": "multi-platform-messaging-hub",
+  "version": "1.0.0",
+  "description": "Multi-Platform Messaging Hub - Unified inbox for social media platforms",
+  "private": true,
+  "scripts": {
+    "install:all": "npm install && cd backend && npm install && cd ../frontend && npm install",
+    "dev:backend": "cd backend && npm run dev",
+    "dev:frontend": "cd frontend && npm run dev",
+    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "build:backend": "cd backend && npm run build",
+    "build:frontend": "cd frontend && npm install && npm run build",
+    "build": "npm run build:backend && npm run build:frontend",
+    "start": "cd backend && npm start",
+    "lint": "npm run lint:backend && npm run lint:frontend",
+    "lint:backend": "cd backend && npm run lint",
+    "lint:frontend": "cd frontend && npm run lint",
+    "format": "npm run format:backend && npm run format:frontend",
+    "format:backend": "cd backend && npm run format",
+    "format:frontend": "cd frontend && npm run format",
+    "type-check": "npm run type-check:backend && npm run type-check:frontend",
+    "type-check:backend": "cd backend && npm run type-check",
+    "type-check:frontend": "cd frontend && npm run type-check",
+    "docker:up": "docker-compose up -d",
+    "docker:down": "docker-compose down",
+    "docker:logs": "docker-compose logs -f"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2",
+    "husky": "^8.0.3",
+    "lint-staged": "^15.2.0"
+  },
+  "lint-staged": {
+    "backend/src/**/*.ts": [
+      "cd backend && npm run lint",
+      "cd backend && npm run format"
+    ],
+    "frontend/src/**/*.{ts,tsx}": [
+      "cd frontend && npm run lint",
+      "cd frontend && npm run format"
+    ]
+  }
+}

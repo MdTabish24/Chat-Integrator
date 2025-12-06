@@ -1,0 +1,4 @@
+# file: C:\Users\Mohammad Tabish\OneDrive\ドキュメント\MERGER CHAT INTEGRATION\backend\apps\authentication\admin.py
+# hypothesis_version: 6.148.3
+
+['-created_at', 'Security', 'Timestamps', 'Token Information', 'User Information', 'Valid', 'Validity', 'created_at', 'email', 'expires_at', 'fields', 'id', 'is_valid', 'password_hash', 'revoked_at', 'token', 'updated_at', 'user', 'user__email']
