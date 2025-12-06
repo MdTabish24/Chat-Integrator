@@ -933,15 +933,21 @@ ipcMain.handle('login-instagram-browser', async () => {
             // Get cookies from the session
             const cookies = await instagramSession.cookies.get({ domain: '.instagram.com' });
             
-            // Find required cookies
+            // Find ALL required cookies (more cookies = better authentication)
             let sessionid = '';
             let csrftoken = '';
             let ds_user_id = '';
+            let mid = '';
+            let ig_did = '';
+            let rur = '';
 
             for (const cookie of cookies) {
               if (cookie.name === 'sessionid') sessionid = cookie.value;
               if (cookie.name === 'csrftoken') csrftoken = cookie.value;
               if (cookie.name === 'ds_user_id') ds_user_id = cookie.value;
+              if (cookie.name === 'mid') mid = cookie.value;
+              if (cookie.name === 'ig_did') ig_did = cookie.value;
+              if (cookie.name === 'rur') rur = cookie.value;
             }
 
             console.log('[instagram] Checking cookies - sessionid:', !!sessionid, 'csrftoken:', !!csrftoken, 'ds_user_id:', ds_user_id || 'NOT FOUND');
@@ -951,15 +957,24 @@ ipcMain.handle('login-instagram-browser', async () => {
               clearInterval(loginCheckInterval);
               isResolved = true;
 
-              console.log('[instagram] Login successful! Extracting cookies...');
-              console.log('[instagram] ds_user_id (your Instagram user ID):', ds_user_id || 'NOT FOUND - THIS IS A PROBLEM!');
+              console.log('[instagram] Login successful! Extracting ALL cookies...');
+              console.log('[instagram] ds_user_id (your Instagram ID):', ds_user_id || 'NOT FOUND!');
+              console.log('[instagram] mid:', mid ? 'present' : 'missing');
+              console.log('[instagram] ig_did:', ig_did ? 'present' : 'missing');
               
               if (!ds_user_id) {
                 console.log('[instagram] WARNING: ds_user_id not found. Outgoing messages may not be detected correctly!');
               }
 
-              // Save cookies
-              const instagramCookies = { sessionid, csrftoken, ds_user_id };
+              // Save ALL cookies (needed for POST operations)
+              const instagramCookies = { 
+                sessionid, 
+                csrftoken, 
+                ds_user_id,
+                mid: mid || '',
+                ig_did: ig_did || '',
+                rur: rur || ''
+              };
               store.set('instagram_cookies', instagramCookies);
 
               // Close login window
@@ -1131,7 +1146,7 @@ async function checkAndSendPendingMessages() {
 // Track messages being sent to avoid duplicate sends
 const sendingMessages = new Set();
 
-// Send a single Instagram message using the BROADCAST endpoint (correct way)
+// Send a single Instagram message using MOBILE API (more reliable than web API)
 async function sendInstagramMessage(msg, cookies, token, apiUrl) {
   // Prevent duplicate sends
   if (sendingMessages.has(msg.id)) {
@@ -1144,61 +1159,93 @@ async function sendInstagramMessage(msg, cookies, token, apiUrl) {
   console.log(`[instagram] Content: "${msg.content.substring(0, 50)}..."`);
   
   try {
-    // Build cookie string with all available cookies
-    const cookieString = [
+    // Generate unique identifiers
+    const timestamp = Date.now();
+    const uuid = `${Math.random().toString(36).substring(2, 10)}-${Math.random().toString(36).substring(2, 6)}-${Math.random().toString(36).substring(2, 6)}-${Math.random().toString(36).substring(2, 6)}-${Math.random().toString(36).substring(2, 14)}`;
+    const clientContext = `6${timestamp}${Math.floor(Math.random() * 1000000000)}`;
+    
+    // Try METHOD 1: Mobile API (i.instagram.com)
+    console.log('[instagram] Trying Mobile API (i.instagram.com)...');
+    
+    // Build full cookie string with ALL available cookies
+    const allCookies = [
       `sessionid=${cookies.sessionid}`,
       `csrftoken=${cookies.csrftoken}`,
       cookies.ds_user_id ? `ds_user_id=${cookies.ds_user_id}` : '',
+      cookies.mid ? `mid=${cookies.mid}` : '',
+      cookies.ig_did ? `ig_did=${cookies.ig_did}` : '',
+      cookies.rur ? `rur=${cookies.rur}` : '',
       'ig_nrcb=1',
-      'ig_did=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx',
     ].filter(Boolean).join('; ');
-
-    // Generate unique identifiers for this message
-    const timestamp = Date.now();
-    const clientContext = `6${timestamp}${Math.floor(Math.random() * 100000000)}`;
-    const offlineThreadingId = `6${timestamp}${Math.floor(Math.random() * 100000000)}`;
     
-    const headers = {
-      'accept': '*/*',
-      'accept-language': 'en-US,en;q=0.9',
-      'content-type': 'application/x-www-form-urlencoded',
-      'cookie': cookieString,
-      'origin': 'https://www.instagram.com',
-      'referer': `https://www.instagram.com/direct/t/${msg.platformConversationId}/`,
-      'sec-ch-prefers-color-scheme': 'light',
-      'sec-ch-ua': '"Google Chrome";v="120", "Chromium";v="120", "Not_A Brand";v="24"',
-      'sec-ch-ua-mobile': '?0',
-      'sec-ch-ua-platform': '"Windows"',
-      'sec-fetch-dest': 'empty',
-      'sec-fetch-mode': 'cors',
-      'sec-fetch-site': 'same-origin',
-      'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      'x-asbd-id': '129477',
-      'x-csrftoken': cookies.csrftoken,
-      'x-ig-app-id': '936619743392459',
-      'x-ig-www-claim': '0',
-      'x-instagram-ajax': '1011201729',
-      'x-requested-with': 'XMLHttpRequest',
+    console.log('[instagram] Using cookies:', allCookies.substring(0, 100) + '...');
+    
+    const mobileHeaders = {
+      'User-Agent': 'Instagram 269.0.0.18.75 Android (26/8.0.0; 480dpi; 1080x1920; OnePlus; 6T Dev; devitron; qcom; en_US; 314665256)',
+      'Accept': '*/*',
+      'Accept-Language': 'en-US',
+      'Accept-Encoding': 'gzip, deflate',
+      'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+      'X-IG-Capabilities': '3brTvwE=',
+      'X-IG-Connection-Type': 'WIFI',
+      'X-IG-App-ID': '567067343352427',
+      'Cookie': allCookies,
+      'X-CSRFToken': cookies.csrftoken,
     };
     
-    // Use the BROADCAST TEXT endpoint (correct Instagram API)
-    const formData = new URLSearchParams();
-    formData.append('action', 'send_item');
-    formData.append('thread_ids', `["${msg.platformConversationId}"]`);
-    formData.append('client_context', clientContext);
-    formData.append('text', msg.content);
-    formData.append('offline_threading_id', offlineThreadingId);
-
-    console.log('[instagram] Sending via broadcast/text/ endpoint...');
-    console.log('[instagram] thread_ids:', `["${msg.platformConversationId}"]`);
+    // Mobile API payload
+    const mobilePayload = new URLSearchParams();
+    mobilePayload.append('_uuid', uuid);
+    mobilePayload.append('_csrftoken', cookies.csrftoken);
+    mobilePayload.append('thread_ids', `[${msg.platformConversationId}]`);
+    mobilePayload.append('client_context', clientContext);
+    mobilePayload.append('text', msg.content);
+    mobilePayload.append('action', 'send_item');
     
-    // Use custom Instagram axios instance (no redirects)
-    const sendResponse = await instagramAxios({
+    let sendResponse = await instagramAxios({
       method: 'POST',
-      url: 'https://www.instagram.com/api/v1/direct_v2/threads/broadcast/text/',
-      data: formData.toString(),
-      headers: headers,
+      url: 'https://i.instagram.com/api/v1/direct_v2/threads/broadcast/text/',
+      data: mobilePayload.toString(),
+      headers: mobileHeaders,
     });
+    
+    console.log('[instagram] Mobile API response status:', sendResponse.status);
+    
+    // If mobile API fails, try Web API as fallback
+    if (sendResponse.status !== 200 || (typeof sendResponse.data === 'string' && sendResponse.data.includes('login'))) {
+      console.log('[instagram] Mobile API failed, trying Web API...');
+      
+      const webHeaders = {
+        'accept': '*/*',
+        'accept-language': 'en-US,en;q=0.9',
+        'content-type': 'application/x-www-form-urlencoded',
+        'cookie': allCookies,
+        'origin': 'https://www.instagram.com',
+        'referer': `https://www.instagram.com/direct/t/${msg.platformConversationId}/`,
+        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'x-csrftoken': cookies.csrftoken,
+        'x-ig-app-id': '936619743392459',
+        'x-ig-www-claim': 'hmac.AR3W0DThY2Mu5Fag4sW5u3RhaR3qhFD_5wvYbOJOD9qaPjIf',
+        'x-instagram-ajax': '1011201729',
+        'x-requested-with': 'XMLHttpRequest',
+      };
+      
+      const webPayload = new URLSearchParams();
+      webPayload.append('action', 'send_item');
+      webPayload.append('thread_ids', `["${msg.platformConversationId}"]`);
+      webPayload.append('client_context', clientContext);
+      webPayload.append('text', msg.content);
+      webPayload.append('offline_threading_id', clientContext);
+      
+      sendResponse = await instagramAxios({
+        method: 'POST',
+        url: 'https://www.instagram.com/api/v1/direct_v2/threads/broadcast/text/',
+        data: webPayload.toString(),
+        headers: webHeaders,
+      });
+      
+      console.log('[instagram] Web API response status:', sendResponse.status);
+    }
     
     console.log('[instagram] Send response status:', sendResponse.status);
     
