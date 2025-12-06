@@ -270,6 +270,21 @@ const Dashboard: React.FC = () => {
         }
       }
       
+      // For Instagram, trigger backend sync first (backend fetches DMs via instagrapi)
+      if (platform === 'instagram') {
+        try {
+          const account = connectedAccounts.find(acc => acc.platform === 'instagram');
+          if (account) {
+            console.log('[instagram] Triggering backend sync...');
+            await apiClient.get(`/api/platforms/instagram/conversations/${account.id}`, {
+              timeout: 60000, // 60 seconds for Instagram (slow due to rate limits)
+            });
+          }
+        } catch (err) {
+          console.log('[instagram] Sync error (will still load cached):', err);
+        }
+      }
+      
       loadConversationsForPlatform(platform);
     }
   };

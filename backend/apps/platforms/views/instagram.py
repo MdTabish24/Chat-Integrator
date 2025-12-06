@@ -209,9 +209,14 @@ class InstagramVerifySessionView(APIView):
 
 class InstagramConversationsView(APIView):
     """
-    Get Instagram DM conversations (inbox threads).
+    Get Instagram DM conversations (inbox threads) and sync to database.
     
     GET /api/platforms/instagram/conversations/:accountId
+    
+    This endpoint:
+    1. Fetches conversations from Instagram API
+    2. Saves them to database for caching
+    3. Returns the conversations
     
     Requirements: 5.2
     """
@@ -247,12 +252,46 @@ class InstagramConversationsView(APIView):
                     }
                 }, status=status.HTTP_404_NOT_FOUND)
             
-            # Fetch conversations
+            # Fetch conversations from Instagram API
             conversations = instagram_session_adapter.get_conversations(str(account_id))
+            
+            # Save conversations to database for caching
+            from apps.conversations.models import Conversation
+            from django.utils.dateparse import parse_datetime
+            
+            saved_count = 0
+            for conv_data in conversations:
+                conv_id = conv_data.get('platformConversationId')
+                if not conv_id:
+                    continue
+                
+                # Parse last message time
+                last_message_at = None
+                if conv_data.get('lastMessageAt'):
+                    last_message_at = parse_datetime(conv_data['lastMessageAt'])
+                if not last_message_at:
+                    last_message_at = timezone.now()
+                
+                # Create or update conversation in database
+                conversation, created = Conversation.objects.update_or_create(
+                    account=account,
+                    platform_conversation_id=conv_id,
+                    defaults={
+                        'participant_name': conv_data.get('participantName', 'Instagram User'),
+                        'participant_id': conv_data.get('participantId', ''),
+                        'participant_avatar_url': conv_data.get('participantAvatarUrl') or f'https://ui-avatars.com/api/?name={conv_data.get("participantName", "U")}&background=E1306C&color=fff',
+                        'last_message_at': last_message_at,
+                        'unread_count': conv_data.get('unreadCount', 0),
+                    }
+                )
+                saved_count += 1
+            
+            print(f'[instagram] Synced {saved_count} conversations to database')
             
             return Response({
                 'conversations': conversations,
                 'count': len(conversations),
+                'syncedToDb': saved_count,
             })
             
         except Exception as e:
