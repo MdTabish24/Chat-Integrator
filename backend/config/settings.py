@@ -56,8 +56,9 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
-    'django.middleware.security.SecurityMiddleware',
+    # CORS must be first to handle preflight requests
     'corsheaders.middleware.CorsMiddleware',
+    'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -154,17 +155,43 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # CORS Configuration
 # Migrated from backend/src/index.ts CORS settings
-CORS_ALLOW_ALL_ORIGINS = True  # Allow all origins for now (Render free tier issues)
+# NOTE: Using permissive CORS for development/free tier
+CORS_ALLOW_ALL_ORIGINS = True  # Allow all origins
+CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOW_METHODS = [
+    'DELETE',
+    'GET',
+    'OPTIONS',
+    'PATCH',
+    'POST',
+    'PUT',
+]
+CORS_ALLOW_HEADERS = [
+    'accept',
+    'accept-encoding',
+    'authorization',
+    'content-type',
+    'dnt',
+    'origin',
+    'user-agent',
+    'x-csrftoken',
+    'x-requested-with',
+]
+# Preflight cache time (1 hour)
+CORS_PREFLIGHT_MAX_AGE = 3600
+
+# Also set explicit allowed origins as fallback
 CORS_ALLOWED_ORIGINS = [
     'http://localhost:5173',
     'http://localhost:3000',
+    'http://localhost:8000',
     'https://chatintegrator.onrender.com',
     'https://chatorbitor.onrender.com',
     'https://chat-integrator.onrender.com',
 ]
-CORS_ALLOW_CREDENTIALS = True
-CORS_ALLOW_METHODS = ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS']
-CORS_ALLOW_HEADERS = ['Content-Type', 'Authorization', 'X-CSRF-Token', 'Accept', 'Origin', 'X-Requested-With']
+
+# Allow all headers and expose response headers
+CORS_EXPOSE_HEADERS = ['Content-Type', 'X-CSRFToken']
 
 # Security Settings
 # Migrated from backend/src/middleware/security.ts
