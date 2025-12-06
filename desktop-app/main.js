@@ -1074,78 +1074,123 @@ async function checkAndSendPendingMessages() {
 
 // Send a single Instagram message
 async function sendInstagramMessage(msg, cookies, token, apiUrl) {
-  console.log(`[instagram] Sending message ${msg.id} to conversation ${msg.platformConversationId}`);
+  console.log(`[instagram] Sending message ${msg.id} to thread ${msg.platformConversationId}`);
+  console.log(`[instagram] Content: "${msg.content.substring(0, 50)}..."`);
   
   try {
-    // Send message via Instagram Direct API
+    // Build all necessary cookies
+    const allCookies = [
+      `sessionid=${cookies.sessionid}`,
+      `csrftoken=${cookies.csrftoken}`,
+      `ds_user_id=${cookies.ds_user_id || ''}`,
+      `ig_did=${cookies.ig_did || ''}`,
+      `mid=${cookies.mid || ''}`,
+      `ig_nrcb=1`,
+      `rur="CLN\\05425f831b2-d3b9-4ddd-b173-a2b88334ce2b\\0541765014830:01f7d8b9c8d7c9e8f7a6b5c4d3e2f1a0b9c8d7e6"`,
+    ].filter(c => !c.endsWith('=')).join('; ');
+
     const headers = {
-      'cookie': `sessionid=${cookies.sessionid}; csrftoken=${cookies.csrftoken}; ds_user_id=${cookies.ds_user_id || ''}`,
+      'authority': 'www.instagram.com',
+      'accept': '*/*',
+      'accept-language': 'en-US,en;q=0.9',
+      'content-type': 'application/x-www-form-urlencoded',
+      'cookie': allCookies,
+      'origin': 'https://www.instagram.com',
+      'referer': 'https://www.instagram.com/direct/inbox/',
+      'sec-ch-prefers-color-scheme': 'dark',
+      'sec-ch-ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+      'sec-ch-ua-full-version-list': '"Not_A Brand";v="8.0.0.0", "Chromium";v="120.0.6099.130", "Google Chrome";v="120.0.6099.130"',
+      'sec-ch-ua-mobile': '?0',
+      'sec-ch-ua-platform': '"Windows"',
+      'sec-fetch-dest': 'empty',
+      'sec-fetch-mode': 'cors',
+      'sec-fetch-site': 'same-origin',
+      'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'x-asbd-id': '129477',
       'x-csrftoken': cookies.csrftoken,
       'x-ig-app-id': '936619743392459',
+      'x-ig-www-claim': 'hmac.AR3W0DThY2Mu5Fag4sW5u3RhaR3qhFD_5wvYbOJOD9qaPjM',
+      'x-instagram-ajax': '1011201729',
       'x-requested-with': 'XMLHttpRequest',
-      'x-ig-www-claim': '0',
-      'content-type': 'application/x-www-form-urlencoded',
-      'origin': 'https://www.instagram.com',
-      'referer': `https://www.instagram.com/direct/t/${msg.platformConversationId}/`,
-      'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     };
     
-    // Instagram Direct API for sending messages
+    // Send message to specific thread
     const formData = new URLSearchParams();
     formData.append('action', 'send_item');
-    formData.append('thread_ids', `[${msg.platformConversationId}]`);
-    formData.append('client_context', `${Date.now()}`);
+    formData.append('thread_id', msg.platformConversationId); // Use thread_id not thread_ids
+    formData.append('client_context', `6${Date.now()}${Math.floor(Math.random() * 1000000)}`);
+    formData.append('mutation_token', `6${Date.now()}${Math.floor(Math.random() * 1000000)}`);
     formData.append('text', msg.content);
+    formData.append('offline_threading_id', `6${Date.now()}${Math.floor(Math.random() * 1000000)}`);
+
+    console.log('[instagram] Sending to endpoint...');
     
     const sendResponse = await axios.post(
-      'https://www.instagram.com/api/v1/direct_v2/threads/broadcast/text/',
+      `https://www.instagram.com/api/v1/direct_v2/threads/${msg.platformConversationId}/items/`,
       formData.toString(),
       { 
         headers, 
         timeout: 30000,
-        maxRedirects: 5
+        maxRedirects: 0, // Don't follow redirects
+        validateStatus: (status) => status < 500
       }
     );
     
-    console.log('[instagram] Send response:', sendResponse.status);
+    console.log('[instagram] Send response status:', sendResponse.status);
+    console.log('[instagram] Send response data:', JSON.stringify(sendResponse.data).substring(0, 300));
     
     // Check if successful
-    if (sendResponse.data && (sendResponse.data.status === 'ok' || sendResponse.status === 200)) {
-      // Report success to backend
-      const messageId = sendResponse.data.payload?.item_id || sendResponse.data.message_id || '';
+    if (sendResponse.status === 200 && sendResponse.data) {
+      const isSuccess = sendResponse.data.status === 'ok' || 
+                       sendResponse.data.payload || 
+                       sendResponse.data.thread;
       
-      await axios.post(
-        `${apiUrl}/api/platforms/instagram/message-sent`,
-        {
-          pending_id: msg.id,
-          success: true,
-          platform_message_id: messageId
-        },
-        {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
+      if (isSuccess) {
+        // Report success to backend
+        const messageId = sendResponse.data.payload?.item_id || 
+                         sendResponse.data.payload?.message_id || 
+                         `sent_${Date.now()}`;
+        
+        await axios.post(
+          `${apiUrl}/api/platforms/instagram/message-sent`,
+          {
+            pending_id: msg.id,
+            success: true,
+            platform_message_id: messageId
           },
-          timeout: 30000
+          {
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json'
+            },
+            timeout: 30000
+          }
+        );
+        
+        console.log(`[instagram] Message ${msg.id} sent successfully!`);
+        
+        // Notify UI
+        if (mainWindow) {
+          mainWindow.webContents.send('instagram-message-sent', {
+            success: true,
+            pendingId: msg.id,
+            message: 'Message sent!'
+          });
         }
-      );
-      
-      console.log(`[instagram] Message ${msg.id} sent successfully!`);
-      
-      // Notify UI
-      if (mainWindow) {
-        mainWindow.webContents.send('instagram-message-sent', {
-          success: true,
-          pendingId: msg.id,
-          message: 'Message sent!'
-        });
+        return;
       }
-    } else {
-      throw new Error('Instagram returned unexpected response');
     }
+    
+    // If we get here, something went wrong
+    const errorMsg = sendResponse.data?.message || sendResponse.data?.error || 'Unknown error';
+    throw new Error(`Instagram API error: ${errorMsg}`);
     
   } catch (error) {
     console.error(`[instagram] Failed to send message ${msg.id}:`, error.message);
+    if (error.response) {
+      console.error('[instagram] Response status:', error.response.status);
+      console.error('[instagram] Response data:', JSON.stringify(error.response.data || {}).substring(0, 500));
+    }
     
     // Report failure to backend
     try {
