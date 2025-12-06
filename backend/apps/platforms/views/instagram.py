@@ -1138,6 +1138,7 @@ class InstagramDesktopSyncView(APIView):
             
             saved_conversations = 0
             saved_messages = 0
+            from django.utils.dateparse import parse_datetime
             
             for conv_data in conversations_data:
                 conv_id = conv_data.get('id')
@@ -1149,6 +1150,22 @@ class InstagramDesktopSyncView(APIView):
                 participant_name = strip_emojis(raw_name) or 'Instagram User'
                 participant_id = participants[0].get('id', '') if participants else ''
                 
+                # Get the ACTUAL last message timestamp from messages
+                messages_list = conv_data.get('messages', [])
+                last_message_at = None
+                
+                if messages_list:
+                    # Find the most recent message timestamp
+                    for msg in messages_list:
+                        msg_time = parse_datetime(msg.get('createdAt'))
+                        if msg_time:
+                            if last_message_at is None or msg_time > last_message_at:
+                                last_message_at = msg_time
+                
+                # Fallback to now if no messages found
+                if not last_message_at:
+                    last_message_at = timezone.now()
+                
                 conversation, _ = Conversation.objects.update_or_create(
                     account=account,
                     platform_conversation_id=conv_id,
@@ -1156,17 +1173,16 @@ class InstagramDesktopSyncView(APIView):
                         'participant_name': participant_name,
                         'participant_id': participant_id,
                         'participant_avatar_url': f'https://ui-avatars.com/api/?name={participant_name}&background=E1306C&color=fff',
-                        'last_message_at': timezone.now(),
+                        'last_message_at': last_message_at,
                     }
                 )
                 saved_conversations += 1
                 
-                for msg_data in conv_data.get('messages', []):
+                for msg_data in messages_list:
                     msg_id = msg_data.get('id')
                     if not msg_id:
                         continue
                     
-                    from django.utils.dateparse import parse_datetime
                     sent_at = parse_datetime(msg_data.get('createdAt')) or timezone.now()
                     is_outgoing = msg_data.get('senderId') == str(account.platform_user_id)
                     
