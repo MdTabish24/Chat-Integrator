@@ -1108,34 +1108,34 @@ async function checkAndSendPendingMessages() {
   }
 }
 
-// Send a single Instagram message
+// Send a single Instagram message using the BROADCAST endpoint (correct way)
 async function sendInstagramMessage(msg, cookies, token, apiUrl) {
   console.log(`[instagram] Sending message ${msg.id} to thread ${msg.platformConversationId}`);
   console.log(`[instagram] Content: "${msg.content.substring(0, 50)}..."`);
   
   try {
-    // Build all necessary cookies
-    const allCookies = [
+    // Build cookie string
+    const cookieString = [
       `sessionid=${cookies.sessionid}`,
       `csrftoken=${cookies.csrftoken}`,
-      `ds_user_id=${cookies.ds_user_id || ''}`,
-      `ig_did=${cookies.ig_did || ''}`,
-      `mid=${cookies.mid || ''}`,
-      `ig_nrcb=1`,
-      `rur="CLN\\05425f831b2-d3b9-4ddd-b173-a2b88334ce2b\\0541765014830:01f7d8b9c8d7c9e8f7a6b5c4d3e2f1a0b9c8d7e6"`,
-    ].filter(c => !c.endsWith('=')).join('; ');
+      cookies.ds_user_id ? `ds_user_id=${cookies.ds_user_id}` : '',
+      'ig_nrcb=1',
+    ].filter(Boolean).join('; ');
 
+    // Generate unique identifiers for this message
+    const clientContext = `6${Date.now()}${Math.floor(Math.random() * 100000000)}`;
+    const offlineThreadingId = `6${Date.now()}${Math.floor(Math.random() * 100000000)}`;
+    
     const headers = {
       'authority': 'www.instagram.com',
       'accept': '*/*',
       'accept-language': 'en-US,en;q=0.9',
       'content-type': 'application/x-www-form-urlencoded',
-      'cookie': allCookies,
+      'cookie': cookieString,
       'origin': 'https://www.instagram.com',
-      'referer': 'https://www.instagram.com/direct/inbox/',
-      'sec-ch-prefers-color-scheme': 'dark',
-      'sec-ch-ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
-      'sec-ch-ua-full-version-list': '"Not_A Brand";v="8.0.0.0", "Chromium";v="120.0.6099.130", "Google Chrome";v="120.0.6099.130"',
+      'referer': `https://www.instagram.com/direct/t/${msg.platformConversationId}/`,
+      'sec-ch-prefers-color-scheme': 'light',
+      'sec-ch-ua': '"Google Chrome";v="120", "Chromium";v="120", "Not_A Brand";v="24"',
       'sec-ch-ua-mobile': '?0',
       'sec-ch-ua-platform': '"Windows"',
       'sec-fetch-dest': 'empty',
@@ -1150,36 +1150,41 @@ async function sendInstagramMessage(msg, cookies, token, apiUrl) {
       'x-requested-with': 'XMLHttpRequest',
     };
     
-    // Send message to specific thread
+    // Use the BROADCAST TEXT endpoint (correct Instagram API)
     const formData = new URLSearchParams();
     formData.append('action', 'send_item');
-    formData.append('thread_id', msg.platformConversationId); // Use thread_id not thread_ids
-    formData.append('client_context', `6${Date.now()}${Math.floor(Math.random() * 1000000)}`);
-    formData.append('mutation_token', `6${Date.now()}${Math.floor(Math.random() * 1000000)}`);
+    formData.append('thread_ids', `["${msg.platformConversationId}"]`); // Array format with quotes
+    formData.append('client_context', clientContext);
     formData.append('text', msg.content);
-    formData.append('offline_threading_id', `6${Date.now()}${Math.floor(Math.random() * 1000000)}`);
+    formData.append('offline_threading_id', offlineThreadingId);
 
-    console.log('[instagram] Sending to endpoint...');
+    console.log('[instagram] Sending via broadcast/text/ endpoint...');
+    console.log('[instagram] thread_ids:', `["${msg.platformConversationId}"]`);
     
     const sendResponse = await axios.post(
-      `https://www.instagram.com/api/v1/direct_v2/threads/${msg.platformConversationId}/items/`,
+      'https://www.instagram.com/api/v1/direct_v2/threads/broadcast/text/',
       formData.toString(),
       { 
         headers, 
         timeout: 30000,
-        maxRedirects: 0, // Don't follow redirects
         validateStatus: (status) => status < 500
       }
     );
     
     console.log('[instagram] Send response status:', sendResponse.status);
-    console.log('[instagram] Send response data:', JSON.stringify(sendResponse.data).substring(0, 300));
+    
+    if (sendResponse.data) {
+      const dataStr = typeof sendResponse.data === 'string' 
+        ? sendResponse.data.substring(0, 500) 
+        : JSON.stringify(sendResponse.data).substring(0, 500);
+      console.log('[instagram] Send response data:', dataStr);
+    }
     
     // Check if successful
     if (sendResponse.status === 200 && sendResponse.data) {
       const isSuccess = sendResponse.data.status === 'ok' || 
                        sendResponse.data.payload || 
-                       sendResponse.data.thread;
+                       sendResponse.data.threads;
       
       if (isSuccess) {
         // Report success to backend
@@ -1217,15 +1222,24 @@ async function sendInstagramMessage(msg, cookies, token, apiUrl) {
       }
     }
     
+    // Check for login required / session expired
+    if (sendResponse.status === 302 || sendResponse.status === 301 || 
+        (typeof sendResponse.data === 'string' && sendResponse.data.includes('login'))) {
+      throw new Error('Instagram session expired. Please re-login via Desktop App.');
+    }
+    
     // If we get here, something went wrong
-    const errorMsg = sendResponse.data?.message || sendResponse.data?.error || 'Unknown error';
-    throw new Error(`Instagram API error: ${errorMsg}`);
+    const errorMsg = sendResponse.data?.message || sendResponse.data?.error || 'Message not sent';
+    throw new Error(`Instagram: ${errorMsg}`);
     
   } catch (error) {
     console.error(`[instagram] Failed to send message ${msg.id}:`, error.message);
     if (error.response) {
       console.error('[instagram] Response status:', error.response.status);
-      console.error('[instagram] Response data:', JSON.stringify(error.response.data || {}).substring(0, 500));
+      const dataStr = typeof error.response.data === 'string' 
+        ? error.response.data.substring(0, 500) 
+        : JSON.stringify(error.response.data || {}).substring(0, 500);
+      console.error('[instagram] Response data:', dataStr);
     }
     
     // Report failure to backend

@@ -201,23 +201,23 @@ const ChatView: React.FC<ChatViewProps> = ({
       
       // Check if message is pending (Instagram via Desktop App)
       if (response.status === 202 || response.data.pendingId) {
-        // Message queued for Desktop App
+        // Message queued for Desktop App - show as PENDING (not sent yet)
         const pendingMessage: Message = {
           id: response.data.pendingId || `pending_${Date.now()}`,
           conversationId: conversationId,
           platformMessageId: '',
           senderId: 'me',
-          senderName: 'You',
-          content: content,
+          senderName: 'You (Pending...)',
+          content: `⏳ ${content}`,  // Show pending icon
           messageType: 'text',
           isOutgoing: true,
-          isRead: true,
+          isRead: false,  // Not read because not sent yet
           sentAt: new Date().toISOString(),
           createdAt: new Date().toISOString(),
         };
         setMessages((prev) => [...prev, pendingMessage]);
         setTimeout(() => scrollToBottom(true), 100);
-        showSuccess('Message queued - Desktop App will send it');
+        showSuccess('⏳ Message queued - Desktop App will send shortly');
         onMessageSent?.();
         return;
       }
@@ -418,11 +418,18 @@ const ChatView: React.FC<ChatViewProps> = ({
       {/* Instagram Info */}
       {platform === 'instagram' && (
         <div className="px-4 py-2 bg-gradient-to-r from-pink-50 to-purple-50 border-t border-pink-200">
-          <div className="flex items-center space-x-2">
-            <span className="text-pink-500">📷</span>
-            <span className="text-xs text-pink-700">
-              <strong>Instagram:</strong> Messages are sent via Desktop App (running on your PC). Make sure Desktop App is open!
-            </span>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-2">
+              <span className="text-pink-500">📷</span>
+              <span className="text-xs text-pink-700">
+                <strong>Instagram:</strong> Messages sent via Desktop App. Keep it running!
+              </span>
+            </div>
+            <div className="flex items-center space-x-1">
+              <span className="text-xs text-gray-500">⏳ = Pending</span>
+              <span className="text-xs text-gray-500 mx-1">|</span>
+              <span className="text-xs text-gray-500">✓ = Sent</span>
+            </div>
           </div>
         </div>
       )}
