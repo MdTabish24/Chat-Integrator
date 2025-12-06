@@ -276,12 +276,45 @@ const Dashboard: React.FC = () => {
           const account = connectedAccounts.find(acc => acc.platform === 'instagram');
           if (account) {
             console.log('[instagram] Triggering backend sync...');
-            await apiClient.get(`/api/platforms/instagram/conversations/${account.id}`, {
+            const response = await apiClient.get(`/api/platforms/instagram/conversations/${account.id}`, {
               timeout: 60000, // 60 seconds for Instagram (slow due to rate limits)
             });
+            
+            // Check if Instagram returned an error (but with 200 status to prevent logout)
+            if (response.data?.error) {
+              console.log('[instagram] Backend returned error:', response.data.error);
+              // Update platform data with error
+              setPlatformsData((prev) => {
+                const updated = new Map(prev);
+                const data = updated.get('instagram');
+                if (data) {
+                  updated.set('instagram', { 
+                    ...data, 
+                    isLoading: false,
+                    error: response.data.error.message || 'Instagram sync failed'
+                  });
+                }
+                return updated;
+              });
+              return; // Don't continue to load conversations
+            }
           }
-        } catch (err) {
-          console.log('[instagram] Sync error (will still load cached):', err);
+        } catch (err: any) {
+          console.log('[instagram] Sync error:', err);
+          // Don't let Instagram errors affect the whole app
+          setPlatformsData((prev) => {
+            const updated = new Map(prev);
+            const data = updated.get('instagram');
+            if (data) {
+              updated.set('instagram', { 
+                ...data, 
+                isLoading: false,
+                error: 'Instagram is currently unavailable. Server-side login is blocked by Instagram.'
+              });
+            }
+            return updated;
+          });
+          return; // Don't continue
         }
       }
       

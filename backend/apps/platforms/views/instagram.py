@@ -296,47 +296,68 @@ class InstagramConversationsView(APIView):
                 traceback.print_exc()
                 
                 # Check for challenge/verification required
-                if 'challenge' in error_str or 'checkpoint' in error_str or '572' in str(fetch_error):
-                    print(f'[instagram-view] Challenge/checkpoint detected - returning 403')
+                if 'challenge' in error_str or 'checkpoint' in error_str:
+                    print(f'[instagram-view] Challenge/checkpoint detected')
                     return Response({
                         'error': {
                             'code': 'CHALLENGE_REQUIRED',
-                            'message': f'Instagram requires verification. Error: {fetch_error}',
+                            'message': f'Instagram requires verification. Please complete verification on Instagram app, then reconnect.',
                             'retryable': False,
-                        }
-                    }, status=status.HTTP_403_FORBIDDEN)
+                        },
+                        'conversations': [],
+                        'count': 0,
+                    }, status=status.HTTP_200_OK)  # Return 200 to not trigger logout
                 
                 # Check for login required
                 if 'login' in error_str or 'unauthorized' in error_str or 'authenticate' in error_str:
-                    print(f'[instagram-view] Auth error detected - returning 401')
+                    print(f'[instagram-view] Auth error detected')
                     return Response({
                         'error': {
                             'code': 'AUTH_EXPIRED',
-                            'message': f'Instagram session expired. Error: {fetch_error}',
+                            'message': f'Instagram session expired. Please disconnect and reconnect your account.',
                             'retryable': False,
-                        }
-                    }, status=status.HTTP_401_UNAUTHORIZED)
+                        },
+                        'conversations': [],
+                        'count': 0,
+                    }, status=status.HTTP_200_OK)  # Return 200 to not trigger logout
                 
                 # Check for 2FA
                 if '2fa' in error_str or 'two_factor' in error_str:
-                    print(f'[instagram-view] 2FA detected - returning 403')
+                    print(f'[instagram-view] 2FA detected')
                     return Response({
                         'error': {
                             'code': '2FA_REQUIRED',
-                            'message': f'Instagram requires 2FA. Please disable 2FA temporarily. Error: {fetch_error}',
+                            'message': f'Instagram requires 2FA. Please disable 2FA temporarily on Instagram.',
                             'retryable': False,
-                        }
-                    }, status=status.HTTP_403_FORBIDDEN)
+                        },
+                        'conversations': [],
+                        'count': 0,
+                    }, status=status.HTTP_200_OK)  # Return 200 to not trigger logout
                 
-                # Return the actual error for debugging
-                print(f'[instagram-view] Returning generic 500 error')
+                # Check for 572 error (Instagram blocking server login)
+                if '572' in str(fetch_error):
+                    print(f'[instagram-view] Error 572 - Instagram blocking server login')
+                    return Response({
+                        'error': {
+                            'code': 'INSTAGRAM_BLOCKED',
+                            'message': 'Instagram is blocking server-side login. This is a known limitation. Please try again later or use the Desktop App for Instagram.',
+                            'retryable': False,
+                        },
+                        'conversations': [],  # Return empty list instead of error
+                        'count': 0,
+                    }, status=status.HTTP_200_OK)  # Return 200 to not trigger logout
+                
+                # Return the actual error for debugging (but as 200 to not trigger auth refresh)
+                print(f'[instagram-view] Returning error with 200 status to prevent logout')
                 return Response({
                     'error': {
                         'code': 'FETCH_FAILED',
                         'message': f'Instagram error [{error_type}]: {fetch_error}',
                         'retryable': True,
-                    }
-                }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                    },
+                    'conversations': [],
+                    'count': 0,
+                }, status=status.HTTP_200_OK)  # Return 200 to not trigger logout
             
             # Save conversations to database for caching
             from apps.conversations.models import Conversation
