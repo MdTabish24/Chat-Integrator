@@ -253,7 +253,34 @@ class InstagramConversationsView(APIView):
                 }, status=status.HTTP_404_NOT_FOUND)
             
             # Fetch conversations from Instagram API
-            conversations = instagram_session_adapter.get_conversations(str(account_id))
+            try:
+                conversations = instagram_session_adapter.get_conversations(str(account_id))
+            except Exception as fetch_error:
+                error_str = str(fetch_error).lower()
+                print(f'[instagram] Fetch conversations error: {fetch_error}')
+                
+                # Check for challenge/verification required
+                if 'challenge' in error_str or 'checkpoint' in error_str or '572' in str(fetch_error):
+                    return Response({
+                        'error': {
+                            'code': 'CHALLENGE_REQUIRED',
+                            'message': 'Instagram requires verification. Please disconnect and reconnect your account.',
+                            'retryable': False,
+                        }
+                    }, status=status.HTTP_403_FORBIDDEN)
+                
+                # Check for login required
+                if 'login' in error_str or 'unauthorized' in error_str or 'authenticate' in error_str:
+                    return Response({
+                        'error': {
+                            'code': 'AUTH_EXPIRED',
+                            'message': 'Instagram session expired. Please disconnect and reconnect your account.',
+                            'retryable': False,
+                        }
+                    }, status=status.HTTP_401_UNAUTHORIZED)
+                
+                # Re-raise for generic error handling
+                raise fetch_error
             
             # Save conversations to database for caching
             from apps.conversations.models import Conversation
