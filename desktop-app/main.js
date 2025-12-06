@@ -498,7 +498,7 @@ function parseLinkedInResponse(data) {
 // ============ INSTAGRAM ============
 // Track last Instagram fetch time to avoid rate limiting
 let lastInstagramFetch = 0;
-const INSTAGRAM_MIN_INTERVAL = 30000; // 30 seconds between fetches
+const INSTAGRAM_MIN_INTERVAL = 20000; // 20 seconds between fetches (reduced for faster updates)
 
 async function fetchInstagramDMs(cookies, retryCount = 0) {
   // Rate limit check - don't fetch too frequently
@@ -1039,20 +1039,23 @@ ipcMain.handle('close-instagram-login', async () => {
   return { success: true };
 });
 
-// Start auto-sync interval (every 5 minutes)
+// Start auto-sync interval (every 1 minute for near real-time updates)
 function startAutoSync() {
   if (syncInterval) {
     clearInterval(syncInterval);
   }
   
+  // Sync every 1 minute instead of 5 minutes for faster updates
   syncInterval = setInterval(() => {
     syncAllPlatforms();
-  }, 5 * 60 * 1000);
+  }, 1 * 60 * 1000); // 1 minute
   
-  // Initial sync after 10 seconds
+  // Initial sync after 5 seconds
   setTimeout(() => {
     syncAllPlatforms();
-  }, 10000);
+  }, 5000);
+  
+  console.log('[sync] Auto-sync started - syncing every 1 minute');
 }
 
 // ============ INSTAGRAM SEND MESSAGE (via Desktop App) ============
