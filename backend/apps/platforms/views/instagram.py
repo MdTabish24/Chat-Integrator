@@ -574,13 +574,12 @@ class InstagramMessagesView(APIView):
 
 class InstagramSendMessageView(APIView):
     """
-    Send an Instagram DM.
+    Queue an Instagram DM for sending via Desktop App.
     
     POST /api/platforms/instagram/send/:accountId
     
-    NOTE: Instagram blocks server-side message sending.
-    This endpoint returns an error explaining that Instagram DMs
-    can only be sent via the Desktop App (which runs on user's PC).
+    Since Instagram blocks server-side sending, we queue the message
+    and the Desktop App (running on user's PC) will send it.
     
     Request body:
     {
@@ -593,18 +592,6 @@ class InstagramSendMessageView(APIView):
     permission_classes = [AllowAny]
     
     def post(self, request, account_id):
-        # Instagram blocks server-side operations
-        # Return clear error message
-        return Response({
-            'error': {
-                'code': 'INSTAGRAM_SERVER_BLOCKED',
-                'message': 'Instagram blocks server-side message sending. Please use the Desktop App to send Instagram DMs. The Desktop App runs on your PC so Instagram allows it.',
-                'retryable': False,
-                'useDesktopApp': True,
-            }
-        }, status=status.HTTP_403_FORBIDDEN)
-        
-        # Original code below - kept for reference but not used
         try:
             if not hasattr(request, 'user_jwt') or not request.user_jwt:
                 return Response({
@@ -614,6 +601,257 @@ class InstagramSendMessageView(APIView):
                         'retryable': False,
                     }
                 }, status=status.HTTP_401_UNAUTHORIZED)
+            
+            user_id = request.user_jwt['user_id']
+            
+            # Validate request body
+            conversation_id = request.data.get('conversation_id')
+            content = request.data.get('content')
+            
+            if not conversation_id:
+                return Response({
+                    'error': {
+                        'code': 'MISSING_CONVERSATION_ID',
+                        'message': 'conversation_id is required',
+                        'retryable': False,
+                    }
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            if not content or not content.strip():
+                return Response({
+                    'error': {
+                        'code': 'MISSING_CONTENT',
+                        'message': 'Message content is required',
+                        'retryable': False,
+                    }
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Verify account belongs to user
+            from apps.oauth.models import ConnectedAccount
+            try:
+                account = ConnectedAccount.objects.get(
+                    id=account_id,
+                    user_id=user_id,
+                    platform='instagram',
+                    is_active=True
+                )
+            except ConnectedAccount.DoesNotExist:
+                return Response({
+                    'error': {
+                        'code': 'ACCOUNT_NOT_FOUND',
+                        'message': 'Instagram account not found or inactive',
+                        'retryable': False,
+                    }
+                }, status=status.HTTP_404_NOT_FOUND)
+            
+            # Get the conversation
+            from apps.conversations.models import Conversation
+            try:
+                conversation = Conversation.objects.get(
+                    id=conversation_id,
+                    account=account
+                )
+            except Conversation.DoesNotExist:
+                # Try by platform_conversation_id
+                try:
+                    conversation = Conversation.objects.get(
+                        platform_conversation_id=conversation_id,
+                        account=account
+                    )
+                except Conversation.DoesNotExist:
+                    return Response({
+                        'error': {
+                            'code': 'CONVERSATION_NOT_FOUND',
+                            'message': 'Conversation not found',
+                            'retryable': False,
+                        }
+                    }, status=status.HTTP_404_NOT_FOUND)
+            
+            # Create pending message for Desktop App to send
+            from apps.messaging.models import Message, PendingOutgoingMessage
+            import uuid
+            
+            # Create the pending outgoing message
+            pending_msg = PendingOutgoingMessage.objects.create(
+                id=uuid.uuid4(),
+                user_id=user_id,
+                account=account,
+                conversation=conversation,
+                platform='instagram',
+                platform_conversation_id=conversation.platform_conversation_id,
+                recipient_id=conversation.participant_id,
+                content=content.strip(),
+                status='pending'
+            )
+            
+            print(f'[instagram] Queued message {pending_msg.id} for Desktop App to send')
+            
+            return Response({
+                'success': True,
+                'message': {
+                    'id': str(pending_msg.id),
+                    'content': content.strip(),
+                    'status': 'pending',
+                    'sentVia': 'desktop_app_pending',
+                },
+                'pendingId': str(pending_msg.id),
+                'note': 'Message queued for Desktop App. Make sure Desktop App is running to send Instagram messages.',
+            }, status=status.HTTP_202_ACCEPTED)
+            
+        except Exception as e:
+            print(f'[instagram] Failed to queue message: {e}')
+            import traceback
+            traceback.print_exc()
+            return Response({
+                'error': {
+                    'code': 'QUEUE_FAILED',
+                    'message': str(e) or 'Failed to queue message',
+                    'retryable': True,
+                }
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class InstagramPendingMessagesView(APIView):
+    """
+    Get pending Instagram messages for Desktop App to send.
+    
+    GET /api/platforms/instagram/pending
+    
+    Desktop App polls this endpoint to get messages to send.
+    """
+    permission_classes = [AllowAny]
+    
+    def get(self, request):
+        try:
+            if not hasattr(request, 'user_jwt') or not request.user_jwt:
+                return Response({
+                    'error': {'code': 'UNAUTHORIZED', 'message': 'User not authenticated', 'retryable': False}
+                }, status=status.HTTP_401_UNAUTHORIZED)
+            
+            user_id = request.user_jwt['user_id']
+            
+            from apps.messaging.models import PendingOutgoingMessage
+            
+            # Get pending messages for this user's Instagram accounts
+            pending = PendingOutgoingMessage.objects.filter(
+                user_id=user_id,
+                platform='instagram',
+                status='pending'
+            ).order_by('created_at')[:10]  # Max 10 at a time
+            
+            messages = []
+            for msg in pending:
+                messages.append({
+                    'id': str(msg.id),
+                    'accountId': str(msg.account_id),
+                    'conversationId': str(msg.conversation_id),
+                    'platformConversationId': msg.platform_conversation_id,
+                    'recipientId': msg.recipient_id,
+                    'content': msg.content,
+                    'createdAt': msg.created_at.isoformat(),
+                })
+            
+            return Response({
+                'pendingMessages': messages,
+                'count': len(messages),
+            })
+            
+        except Exception as e:
+            print(f'[instagram] Failed to get pending messages: {e}')
+            return Response({
+                'error': {'code': 'FETCH_FAILED', 'message': str(e), 'retryable': True}
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class InstagramMessageSentView(APIView):
+    """
+    Mark a pending message as sent (called by Desktop App after sending).
+    
+    POST /api/platforms/instagram/message-sent
+    
+    Request body:
+    {
+        "pending_id": "uuid",
+        "success": true/false,
+        "platform_message_id": "string",  # If success
+        "error": "string"  # If failed
+    }
+    """
+    permission_classes = [AllowAny]
+    
+    def post(self, request):
+        try:
+            if not hasattr(request, 'user_jwt') or not request.user_jwt:
+                return Response({
+                    'error': {'code': 'UNAUTHORIZED', 'message': 'User not authenticated', 'retryable': False}
+                }, status=status.HTTP_401_UNAUTHORIZED)
+            
+            user_id = request.user_jwt['user_id']
+            pending_id = request.data.get('pending_id')
+            success = request.data.get('success', False)
+            platform_message_id = request.data.get('platform_message_id', '')
+            error_msg = request.data.get('error', '')
+            
+            if not pending_id:
+                return Response({
+                    'error': {'code': 'MISSING_PENDING_ID', 'message': 'pending_id is required', 'retryable': False}
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            from apps.messaging.models import PendingOutgoingMessage, Message
+            from apps.core.utils.crypto import encrypt
+            
+            try:
+                pending = PendingOutgoingMessage.objects.get(id=pending_id, user_id=user_id)
+            except PendingOutgoingMessage.DoesNotExist:
+                return Response({
+                    'error': {'code': 'NOT_FOUND', 'message': 'Pending message not found', 'retryable': False}
+                }, status=status.HTTP_404_NOT_FOUND)
+            
+            if success:
+                # Create the actual message in database
+                message = Message.objects.create(
+                    conversation=pending.conversation,
+                    platform_message_id=platform_message_id or f'desktop_{pending.id}',
+                    content=encrypt(pending.content),
+                    sender_id=str(pending.account.platform_user_id),
+                    sender_name='You',
+                    is_outgoing=True,
+                    is_read=True,
+                    sent_at=timezone.now(),
+                )
+                
+                # Update conversation last message time
+                pending.conversation.last_message_at = timezone.now()
+                pending.conversation.save()
+                
+                # Delete the pending message
+                pending.delete()
+                
+                print(f'[instagram] Message {pending_id} sent successfully via Desktop App')
+                
+                return Response({
+                    'success': True,
+                    'messageId': str(message.id),
+                    'message': 'Message sent successfully',
+                })
+            else:
+                # Mark as failed
+                pending.status = 'failed'
+                pending.error_message = error_msg
+                pending.save()
+                
+                print(f'[instagram] Message {pending_id} failed: {error_msg}')
+                
+                return Response({
+                    'success': False,
+                    'error': error_msg or 'Message sending failed',
+                })
+            
+        except Exception as e:
+            print(f'[instagram] Failed to update message status: {e}')
+            return Response({
+                'error': {'code': 'UPDATE_FAILED', 'message': str(e), 'retryable': True}
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
             
             user_id = request.user_jwt['user_id']
             

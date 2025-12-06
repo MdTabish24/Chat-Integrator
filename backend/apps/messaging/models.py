@@ -7,6 +7,7 @@ Migrated from backend/db/init.sql - messages table
 import uuid
 from django.db import models
 from apps.conversations.models import Conversation
+from apps.oauth.models import ConnectedAccount
 
 
 class Message(models.Model):
@@ -62,3 +63,52 @@ class Message(models.Model):
     def is_unread(self):
         """Check if message is unread"""
         return not self.is_read and not self.is_outgoing
+
+
+class PendingOutgoingMessage(models.Model):
+    """
+    Pending outgoing messages that need to be sent via Desktop App.
+    
+    Used for platforms like Instagram that block server-side sending.
+    The Desktop App polls for these messages and sends them using
+    the user's local IP address.
+    """
+    
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('sending', 'Sending'),
+        ('sent', 'Sent'),
+        ('failed', 'Failed'),
+    ]
+    
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user_id = models.CharField(max_length=36)  # User who owns this message
+    account = models.ForeignKey(
+        ConnectedAccount,
+        on_delete=models.CASCADE,
+        related_name='pending_messages'
+    )
+    conversation = models.ForeignKey(
+        Conversation,
+        on_delete=models.CASCADE,
+        related_name='pending_messages'
+    )
+    platform = models.CharField(max_length=50)  # e.g., 'instagram'
+    platform_conversation_id = models.CharField(max_length=255)  # Thread ID
+    recipient_id = models.CharField(max_length=255)  # Recipient user ID
+    content = models.TextField()
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    error_message = models.TextField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        db_table = 'pending_outgoing_messages'
+        indexes = [
+            models.Index(fields=['user_id', 'platform', 'status']),
+            models.Index(fields=['created_at']),
+        ]
+        ordering = ['created_at']
+    
+    def __str__(self):
+        return f'[{self.status}] {self.platform}: {self.content[:50]}...'

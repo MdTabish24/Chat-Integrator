@@ -33,6 +33,8 @@ from .views.instagram import (
     InstagramSendMessageView,
     InstagramRateLimitStatusView,
     InstagramDesktopSyncView,
+    InstagramPendingMessagesView,
+    InstagramMessageSentView,
 )
 from .views.facebook import (
     FacebookCookieSubmitView,
@@ -141,6 +143,12 @@ urlpatterns = [
     
     # POST /api/platforms/instagram/sync-from-desktop - Receive data from desktop app
     path('instagram/sync-from-desktop', InstagramDesktopSyncView.as_view(), name='instagram-desktop-sync'),
+    
+    # GET /api/platforms/instagram/pending - Get pending messages for Desktop App to send
+    path('instagram/pending', InstagramPendingMessagesView.as_view(), name='instagram-pending'),
+    
+    # POST /api/platforms/instagram/message-sent - Report message sent status from Desktop App
+    path('instagram/message-sent', InstagramMessageSentView.as_view(), name='instagram-message-sent'),
     
     # Facebook Messenger cookie-based endpoints
     # POST /api/platforms/facebook/cookies - Submit cookies for authentication
