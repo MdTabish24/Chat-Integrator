@@ -835,16 +835,16 @@ class InstagramMessageSentView(APIView):
                     'message': 'Message sent successfully',
                 })
             else:
-                # Mark as failed
-                pending.status = 'failed'
-                pending.error_message = error_msg
-                pending.save()
+                # DELETE the failed pending message (don't keep retrying)
+                # This prevents the message from showing as "sent" in frontend
+                pending.delete()
                 
-                print(f'[instagram] Message {pending_id} failed: {error_msg}')
+                print(f'[instagram] Message {pending_id} failed and deleted: {error_msg}')
                 
                 return Response({
                     'success': False,
                     'error': error_msg or 'Message sending failed',
+                    'deleted': True,  # Let frontend know message was deleted
                 })
             
         except Exception as e:
@@ -1140,6 +1140,18 @@ class InstagramDesktopSyncView(APIView):
             saved_messages = 0
             from django.utils.dateparse import parse_datetime
             
+            # Get ds_user_id from cookies - this is the current user's Instagram ID
+            ds_user_id = cookies.get('ds_user_id', '') if cookies else ''
+            
+            # IMPORTANT: Update platform_user_id if we have ds_user_id from cookies
+            # This fixes the is_outgoing detection
+            if ds_user_id and ds_user_id != account.platform_user_id:
+                print(f'[instagram-desktop] Updating platform_user_id from {account.platform_user_id} to {ds_user_id}')
+                account.platform_user_id = ds_user_id
+                account.save()
+            
+            print(f'[instagram-desktop] Using platform_user_id: {account.platform_user_id} for is_outgoing detection')
+            
             for conv_data in conversations_data:
                 conv_id = conv_data.get('id')
                 if not conv_id:
@@ -1184,14 +1196,22 @@ class InstagramDesktopSyncView(APIView):
                         continue
                     
                     sent_at = parse_datetime(msg_data.get('createdAt')) or timezone.now()
-                    is_outgoing = msg_data.get('senderId') == str(account.platform_user_id)
+                    sender_id = msg_data.get('senderId', '')
+                    
+                    # Determine if message is outgoing (sent by current user)
+                    # Compare sender_id with platform_user_id (ds_user_id from cookies)
+                    is_outgoing = sender_id == str(account.platform_user_id)
+                    
+                    # Debug logging for first few messages
+                    if saved_messages < 5:
+                        print(f'[instagram-desktop] Message: sender_id={sender_id}, platform_user_id={account.platform_user_id}, is_outgoing={is_outgoing}')
                     
                     _, created = Message.objects.get_or_create(
                         conversation=conversation,
                         platform_message_id=str(msg_id),
                         defaults={
                             'content': encrypt(msg_data.get('text', '')),
-                            'sender_id': msg_data.get('senderId', ''),
+                            'sender_id': sender_id,
                             'sender_name': participant_name if not is_outgoing else 'You',
                             'sent_at': sent_at,
                             'is_outgoing': is_outgoing,

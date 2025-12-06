@@ -201,14 +201,15 @@ const ChatView: React.FC<ChatViewProps> = ({
       
       // Check if message is pending (Instagram via Desktop App)
       if (response.status === 202 || response.data.pendingId) {
-        // Message queued for Desktop App - show as PENDING (not sent yet)
+        // Message queued for Desktop App - show as PENDING with clear indicator
+        const pendingId = response.data.pendingId || `pending_${Date.now()}`;
         const pendingMessage: Message = {
-          id: response.data.pendingId || `pending_${Date.now()}`,
+          id: pendingId,
           conversationId: conversationId,
           platformMessageId: '',
           senderId: 'me',
-          senderName: 'You (Pending...)',
-          content: `⏳ ${content}`,  // Show pending icon
+          senderName: 'You',
+          content: content,  // Show original content
           messageType: 'text',
           isOutgoing: true,
           isRead: false,  // Not read because not sent yet
@@ -217,7 +218,28 @@ const ChatView: React.FC<ChatViewProps> = ({
         };
         setMessages((prev) => [...prev, pendingMessage]);
         setTimeout(() => scrollToBottom(true), 100);
-        showSuccess('⏳ Message queued - Desktop App will send shortly');
+        showSuccess('📤 Message queued - Desktop App will send it');
+        
+        // Poll to check if message was sent or failed
+        const checkInterval = setInterval(async () => {
+          try {
+            const checkResponse = await apiClient.get(`/api/platforms/instagram/pending`);
+            const pendingMessages = checkResponse.data.pendingMessages || [];
+            const stillPending = pendingMessages.some((m: any) => m.id === pendingId);
+            
+            if (!stillPending) {
+              // Message was either sent or failed - reload messages
+              clearInterval(checkInterval);
+              loadMessages(1, false);
+            }
+          } catch (err) {
+            // Ignore errors
+          }
+        }, 3000); // Check every 3 seconds
+        
+        // Stop checking after 30 seconds
+        setTimeout(() => clearInterval(checkInterval), 30000);
+        
         onMessageSent?.();
         return;
       }
@@ -422,14 +444,15 @@ const ChatView: React.FC<ChatViewProps> = ({
             <div className="flex items-center space-x-2">
               <span className="text-pink-500">📷</span>
               <span className="text-xs text-pink-700">
-                <strong>Instagram:</strong> Messages sent via Desktop App. Keep it running!
+                <strong>Instagram:</strong> Desktop App must be running. If message fails, re-login in Desktop App.
               </span>
             </div>
-            <div className="flex items-center space-x-1">
-              <span className="text-xs text-gray-500">⏳ = Pending</span>
-              <span className="text-xs text-gray-500 mx-1">|</span>
-              <span className="text-xs text-gray-500">✓ = Sent</span>
-            </div>
+            <button 
+              onClick={() => loadMessages(1, false)} 
+              className="text-xs text-pink-600 hover:text-pink-800 underline"
+            >
+              🔄 Refresh
+            </button>
           </div>
         </div>
       )}

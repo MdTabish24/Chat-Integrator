@@ -214,6 +214,7 @@ async function syncPlatform(platform, cookies, token) {
         data = await fetchTwitterDMs(cookies);
         break;
       case 'instagram':
+        console.log(`[instagram] Syncing with ds_user_id: ${cookies.ds_user_id || 'NOT SET'}`);
         data = await fetchInstagramDMs(cookies);
         break;
       case 'facebook':
@@ -943,7 +944,7 @@ ipcMain.handle('login-instagram-browser', async () => {
               if (cookie.name === 'ds_user_id') ds_user_id = cookie.value;
             }
 
-            console.log('[instagram] Checking cookies - sessionid:', !!sessionid, 'csrftoken:', !!csrftoken);
+            console.log('[instagram] Checking cookies - sessionid:', !!sessionid, 'csrftoken:', !!csrftoken, 'ds_user_id:', ds_user_id || 'NOT FOUND');
 
             // If we have the required cookies, login was successful
             if (sessionid && csrftoken) {
@@ -951,6 +952,11 @@ ipcMain.handle('login-instagram-browser', async () => {
               isResolved = true;
 
               console.log('[instagram] Login successful! Extracting cookies...');
+              console.log('[instagram] ds_user_id (your Instagram user ID):', ds_user_id || 'NOT FOUND - THIS IS A PROBLEM!');
+              
+              if (!ds_user_id) {
+                console.log('[instagram] WARNING: ds_user_id not found. Outgoing messages may not be detected correctly!');
+              }
 
               // Save cookies
               const instagramCookies = { sessionid, csrftoken, ds_user_id };
