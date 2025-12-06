@@ -73,17 +73,32 @@ class InstagramSessionAdapter(BasePlatformAdapter):
             
         Requirements: 5.1
         """
+        print(f'[instagram] _get_or_create_client called for account: {account_id}')
+        
         # Check if we have a cached client
         if account_id in self._clients:
+            print(f'[instagram] Using cached client for account: {account_id}')
             return self._clients[account_id]
         
+        print(f'[instagram] No cached client, creating new one...')
+        
         try:
+            print(f'[instagram] Importing instagrapi...')
             from instagrapi import Client
+            from instagrapi.exceptions import (
+                LoginRequired, ChallengeRequired, 
+                TwoFactorRequired, BadPassword,
+                PleaseWaitFewMinutes, ClientError
+            )
+            print(f'[instagram] instagrapi imported successfully')
             
             # Get account and decrypt session
+            print(f'[instagram] Fetching account from DB...')
             account = ConnectedAccount.objects.get(id=account_id, is_active=True)
+            print(f'[instagram] Account found: {account.platform_username}')
             
             if not account.access_token:
+                print(f'[instagram] ERROR: No access_token stored')
                 raise PlatformAPIError(
                     'No session stored for this account',
                     'instagram',
@@ -92,28 +107,51 @@ class InstagramSessionAdapter(BasePlatformAdapter):
                 )
             
             # Session is stored as encrypted JSON in access_token field
+            print(f'[instagram] Decrypting session data...')
             session_json = decrypt(account.access_token)
             session_data = json.loads(session_json)
+            print(f'[instagram] Session data keys: {list(session_data.keys())}')
+            print(f'[instagram] Username in session: {session_data.get("username", "NOT_FOUND")}')
             
             # Create instagrapi client
+            print(f'[instagram] Creating instagrapi Client...')
             client = Client()
+            print(f'[instagram] Client created')
             
             # Check if we have session settings to restore
             if 'settings' in session_data:
-                client.set_settings(session_data['settings'])
-                client.login(
-                    session_data.get('username', ''),
-                    session_data.get('password', '')
-                )
+                print(f'[instagram] Found saved settings, restoring...')
+                try:
+                    client.set_settings(session_data['settings'])
+                    print(f'[instagram] Settings restored, attempting login...')
+                    client.login(
+                        session_data.get('username', ''),
+                        session_data.get('password', '')
+                    )
+                    print(f'[instagram] Login with saved settings successful!')
+                except Exception as settings_err:
+                    print(f'[instagram] Login with settings failed: {settings_err}')
+                    print(f'[instagram] Trying fresh login...')
+                    # Try fresh login
+                    client = Client()
+                    client.login(
+                        session_data.get('username', ''),
+                        session_data.get('password', '')
+                    )
             elif 'sessionid' in session_data:
                 # Login with session ID
+                print(f'[instagram] Using sessionid login...')
                 client.login_by_sessionid(session_data['sessionid'])
+                print(f'[instagram] Sessionid login successful!')
             else:
                 # Login with username/password
                 username = session_data.get('username')
                 password = session_data.get('password')
                 
+                print(f'[instagram] Fresh login with username: {username}')
+                
                 if not username or not password:
+                    print(f'[instagram] ERROR: Missing username or password')
                     raise PlatformAPIError(
                         'Missing credentials (username/password or sessionid)',
                         'instagram',
@@ -121,48 +159,91 @@ class InstagramSessionAdapter(BasePlatformAdapter):
                         retryable=False
                     )
                 
+                print(f'[instagram] Calling client.login()...')
                 client.login(username, password)
+                print(f'[instagram] Login successful!')
                 
                 # Save session settings for future use
+                print(f'[instagram] Saving session settings...')
                 self._save_session_settings(account_id, client, session_data)
             
             # Cache the client
             self._clients[account_id] = client
+            print(f'[instagram] Client cached successfully')
             
             return client
             
         except ConnectedAccount.DoesNotExist:
+            print(f'[instagram] ERROR: Account {account_id} not found in DB')
             raise PlatformAPIError(
                 f'Account {account_id} not found or inactive',
                 'instagram',
                 status_code=404,
                 retryable=False
             )
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as e:
+            print(f'[instagram] ERROR: Failed to parse session JSON: {e}')
             raise PlatformAPIError(
                 'Invalid session format',
                 'instagram',
                 status_code=400,
                 retryable=False
             )
-        except ImportError:
+        except ImportError as e:
+            print(f'[instagram] ERROR: Import failed: {e}')
             raise PlatformAPIError(
-                'instagrapi library not installed. Install with: pip install instagrapi',
+                f'instagrapi import error: {e}',
                 'instagram',
                 status_code=500,
                 retryable=False
             )
         except Exception as e:
             error_str = str(e).lower()
-            if 'challenge' in error_str:
+            error_type = type(e).__name__
+            print(f'[instagram] ERROR during login:')
+            print(f'[instagram]   Type: {error_type}')
+            print(f'[instagram]   Message: {e}')
+            print(f'[instagram]   Full repr: {repr(e)}')
+            
+            import traceback
+            print(f'[instagram]   Traceback:')
+            traceback.print_exc()
+            
+            if 'challenge' in error_str or 'checkpoint' in error_str:
+                print(f'[instagram] Challenge/checkpoint detected!')
                 raise PlatformAPIError(
-                    'Instagram requires challenge verification. Please complete verification in browser.',
+                    f'Instagram requires verification (challenge). Error: {e}',
                     'instagram',
                     status_code=403,
                     retryable=False
                 )
+            if 'two_factor' in error_str or '2fa' in error_str:
+                print(f'[instagram] 2FA required!')
+                raise PlatformAPIError(
+                    f'Instagram requires 2FA. Please disable 2FA temporarily. Error: {e}',
+                    'instagram',
+                    status_code=403,
+                    retryable=False
+                )
+            if 'bad_password' in error_str or 'password' in error_str:
+                print(f'[instagram] Bad password!')
+                raise PlatformAPIError(
+                    f'Invalid Instagram password. Error: {e}',
+                    'instagram',
+                    status_code=401,
+                    retryable=False
+                )
+            if 'please wait' in error_str or 'few minutes' in error_str:
+                print(f'[instagram] Rate limited - please wait!')
+                raise PlatformAPIError(
+                    f'Instagram rate limit. Please wait a few minutes. Error: {e}',
+                    'instagram',
+                    status_code=429,
+                    retryable=True
+                )
+            
             raise PlatformAPIError(
-                f'Failed to authenticate with Instagram: {e}',
+                f'Instagram auth failed [{error_type}]: {e}',
                 'instagram',
                 retryable=False,
                 original_error=e
@@ -356,15 +437,24 @@ class InstagramSessionAdapter(BasePlatformAdapter):
         
         Requirements: 5.2
         """
+        print(f'[instagram] _fetch_conversations called for account: {account_id}')
+        
+        print(f'[instagram] Getting/creating client...')
         client = self._get_or_create_client(account_id)
+        print(f'[instagram] Client obtained successfully')
+        
         account = ConnectedAccount.objects.get(id=account_id)
+        print(f'[instagram] Account: {account.platform_username}')
         
         try:
             # Apply human-like delay before request
+            print(f'[instagram] Applying human-like delay...')
             self.apply_human_delay(account_id)
             
             # Get direct inbox threads
+            print(f'[instagram] Calling client.direct_threads(amount=20)...')
             threads = client.direct_threads(amount=20)
+            print(f'[instagram] Got {len(threads) if threads else 0} threads')
             
             conversations = []
             for thread in threads:

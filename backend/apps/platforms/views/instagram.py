@@ -41,8 +41,11 @@ class InstagramLoginView(APIView):
     permission_classes = [AllowAny]  # JWT checked in middleware
     
     def post(self, request):
+        print(f'[instagram-login] ========== LOGIN REQUEST RECEIVED ==========')
+        
         try:
             if not hasattr(request, 'user_jwt') or not request.user_jwt:
+                print(f'[instagram-login] ERROR: No JWT token')
                 return Response({
                     'error': {
                         'code': 'UNAUTHORIZED',
@@ -52,6 +55,7 @@ class InstagramLoginView(APIView):
                 }, status=status.HTTP_401_UNAUTHORIZED)
 
             user_id = request.user_jwt['user_id']
+            print(f'[instagram-login] User ID: {user_id}')
             
             # Validate required fields
             username = request.data.get('username')
@@ -60,7 +64,12 @@ class InstagramLoginView(APIView):
             platform_user_id = request.data.get('platform_user_id')
             sessionid = request.data.get('sessionid')
             
+            print(f'[instagram-login] Instagram username: {username}')
+            print(f'[instagram-login] Password provided: {"YES" if password else "NO"}')
+            print(f'[instagram-login] SessionID provided: {"YES" if sessionid else "NO"}')
+            
             if not username or not password:
+                print(f'[instagram-login] ERROR: Missing credentials')
                 return Response({
                     'error': {
                         'code': 'MISSING_CREDENTIALS',
@@ -75,6 +84,7 @@ class InstagramLoginView(APIView):
                 platform_user_id = username
             
             # Store session securely
+            print(f'[instagram-login] Storing session...')
             account_id = instagram_session_adapter.store_session(
                 user_id=user_id,
                 platform_user_id=platform_user_id,
@@ -83,22 +93,34 @@ class InstagramLoginView(APIView):
                 password=password,
                 sessionid=sessionid
             )
+            print(f'[instagram-login] Session stored, account_id: {account_id}')
             
             # Try to verify the session and get actual user ID
+            print(f'[instagram-login] Attempting to verify session...')
             try:
                 if instagram_session_adapter.verify_session(account_id):
+                    print(f'[instagram-login] Session verified! Getting client...')
                     # Update with actual user ID if we can get it
                     client = instagram_session_adapter._get_or_create_client(account_id)
+                    print(f'[instagram-login] Getting account_info...')
                     user_info = client.account_info()
                     if user_info:
+                        print(f'[instagram-login] Got user info: pk={user_info.pk}, username={user_info.username}')
                         account = ConnectedAccount.objects.get(id=account_id)
                         account.platform_user_id = str(user_info.pk)
                         account.platform_username = user_info.username
                         account.save()
+                        print(f'[instagram-login] Account updated with real user info')
+                else:
+                    print(f'[instagram-login] Session verification returned False')
             except Exception as verify_error:
-                print(f'[instagram] Session verification during login: {verify_error}')
+                print(f'[instagram-login] Session verification failed:')
+                print(f'[instagram-login]   Type: {type(verify_error).__name__}')
+                print(f'[instagram-login]   Error: {verify_error}')
+                import traceback
+                traceback.print_exc()
             
-            print(f'[instagram] Session stored for user {user_id}, account {account_id}')
+            print(f'[instagram-login] SUCCESS! Session stored for user {user_id}, account {account_id}')
             
             return Response({
                 'success': True,
@@ -253,34 +275,68 @@ class InstagramConversationsView(APIView):
                 }, status=status.HTTP_404_NOT_FOUND)
             
             # Fetch conversations from Instagram API
+            print(f'[instagram-view] Starting conversation fetch for account: {account_id}')
+            print(f'[instagram-view] Account username: {account.platform_username}')
+            
             try:
+                print(f'[instagram-view] Calling instagram_session_adapter.get_conversations()...')
                 conversations = instagram_session_adapter.get_conversations(str(account_id))
+                print(f'[instagram-view] SUCCESS! Got {len(conversations) if conversations else 0} conversations')
             except Exception as fetch_error:
                 error_str = str(fetch_error).lower()
-                print(f'[instagram] Fetch conversations error: {fetch_error}')
+                error_type = type(fetch_error).__name__
+                
+                print(f'[instagram-view] ERROR fetching conversations:')
+                print(f'[instagram-view]   Type: {error_type}')
+                print(f'[instagram-view]   Message: {fetch_error}')
+                print(f'[instagram-view]   Full repr: {repr(fetch_error)}')
+                
+                import traceback
+                print(f'[instagram-view]   Traceback:')
+                traceback.print_exc()
                 
                 # Check for challenge/verification required
                 if 'challenge' in error_str or 'checkpoint' in error_str or '572' in str(fetch_error):
+                    print(f'[instagram-view] Challenge/checkpoint detected - returning 403')
                     return Response({
                         'error': {
                             'code': 'CHALLENGE_REQUIRED',
-                            'message': 'Instagram requires verification. Please disconnect and reconnect your account.',
+                            'message': f'Instagram requires verification. Error: {fetch_error}',
                             'retryable': False,
                         }
                     }, status=status.HTTP_403_FORBIDDEN)
                 
                 # Check for login required
                 if 'login' in error_str or 'unauthorized' in error_str or 'authenticate' in error_str:
+                    print(f'[instagram-view] Auth error detected - returning 401')
                     return Response({
                         'error': {
                             'code': 'AUTH_EXPIRED',
-                            'message': 'Instagram session expired. Please disconnect and reconnect your account.',
+                            'message': f'Instagram session expired. Error: {fetch_error}',
                             'retryable': False,
                         }
                     }, status=status.HTTP_401_UNAUTHORIZED)
                 
-                # Re-raise for generic error handling
-                raise fetch_error
+                # Check for 2FA
+                if '2fa' in error_str or 'two_factor' in error_str:
+                    print(f'[instagram-view] 2FA detected - returning 403')
+                    return Response({
+                        'error': {
+                            'code': '2FA_REQUIRED',
+                            'message': f'Instagram requires 2FA. Please disable 2FA temporarily. Error: {fetch_error}',
+                            'retryable': False,
+                        }
+                    }, status=status.HTTP_403_FORBIDDEN)
+                
+                # Return the actual error for debugging
+                print(f'[instagram-view] Returning generic 500 error')
+                return Response({
+                    'error': {
+                        'code': 'FETCH_FAILED',
+                        'message': f'Instagram error [{error_type}]: {fetch_error}',
+                        'retryable': True,
+                    }
+                }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
             
             # Save conversations to database for caching
             from apps.conversations.models import Conversation
