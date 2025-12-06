@@ -270,52 +270,13 @@ const Dashboard: React.FC = () => {
         }
       }
       
-      // For Instagram, trigger backend sync first (backend fetches DMs via instagrapi)
+      // For Instagram, DON'T call backend sync (server IP is blocked by Instagram)
+      // Instagram data is synced via Desktop App which runs on user's PC
+      // Just load conversations from database
       if (platform === 'instagram') {
-        try {
-          const account = connectedAccounts.find(acc => acc.platform === 'instagram');
-          if (account) {
-            console.log('[instagram] Triggering backend sync...');
-            const response = await apiClient.get(`/api/platforms/instagram/conversations/${account.id}`, {
-              timeout: 60000, // 60 seconds for Instagram (slow due to rate limits)
-            });
-            
-            // Check if Instagram returned an error (but with 200 status to prevent logout)
-            if (response.data?.error) {
-              console.log('[instagram] Backend returned error:', response.data.error);
-              // Update platform data with error
-              setPlatformsData((prev) => {
-                const updated = new Map(prev);
-                const data = updated.get('instagram');
-                if (data) {
-                  updated.set('instagram', { 
-                    ...data, 
-                    isLoading: false,
-                    error: response.data.error.message || 'Instagram sync failed'
-                  });
-                }
-                return updated;
-              });
-              return; // Don't continue to load conversations
-            }
-          }
-        } catch (err: any) {
-          console.log('[instagram] Sync error:', err);
-          // Don't let Instagram errors affect the whole app
-          setPlatformsData((prev) => {
-            const updated = new Map(prev);
-            const data = updated.get('instagram');
-            if (data) {
-              updated.set('instagram', { 
-                ...data, 
-                isLoading: false,
-                error: 'Instagram is currently unavailable. Server-side login is blocked by Instagram.'
-              });
-            }
-            return updated;
-          });
-          return; // Don't continue
-        }
+        console.log('[instagram] Loading from database (use Desktop App to sync Instagram DMs)');
+        // Skip backend sync - instagrapi fails on server due to IP blocking
+        // Data is synced via Desktop App directly to database
       }
       
       loadConversationsForPlatform(platform);
