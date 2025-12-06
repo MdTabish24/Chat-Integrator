@@ -939,11 +939,183 @@ function startAutoSync() {
   }, 10000);
 }
 
+// ============ INSTAGRAM SEND MESSAGE (via Desktop App) ============
+let pendingMessageInterval = null;
+
+// Start polling for pending Instagram messages
+function startPendingMessagePoll() {
+  if (pendingMessageInterval) {
+    clearInterval(pendingMessageInterval);
+  }
+  
+  // Poll every 5 seconds for pending messages
+  pendingMessageInterval = setInterval(async () => {
+    await checkAndSendPendingMessages();
+  }, 5000);
+  
+  // Also check immediately
+  setTimeout(async () => {
+    await checkAndSendPendingMessages();
+  }, 2000);
+}
+
+// Check for pending messages and send them
+async function checkAndSendPendingMessages() {
+  const token = store.get('chatorbitor_token');
+  const instagramCookies = store.get('instagram_cookies');
+  
+  if (!token || !instagramCookies || !instagramCookies.sessionid) {
+    return; // No token or no Instagram session
+  }
+  
+  const apiUrl = store.get('apiUrl') || API_BASE_URL;
+  
+  try {
+    // Fetch pending messages from backend
+    const response = await axios.get(
+      `${apiUrl}/api/platforms/instagram/pending`,
+      {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        timeout: 30000
+      }
+    );
+    
+    const pendingMessages = response.data.pendingMessages || [];
+    
+    if (pendingMessages.length > 0) {
+      console.log(`[instagram] Found ${pendingMessages.length} pending messages to send`);
+      
+      // Send each message
+      for (const msg of pendingMessages) {
+        await sendInstagramMessage(msg, instagramCookies, token, apiUrl);
+        // Wait a bit between messages to avoid rate limiting
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      }
+    }
+  } catch (error) {
+    // Only log if it's not a 401 (which is expected if not logged in)
+    if (error.response?.status !== 401) {
+      console.error('[instagram] Error checking pending messages:', error.message);
+    }
+  }
+}
+
+// Send a single Instagram message
+async function sendInstagramMessage(msg, cookies, token, apiUrl) {
+  console.log(`[instagram] Sending message ${msg.id} to conversation ${msg.platformConversationId}`);
+  
+  try {
+    // Send message via Instagram Direct API
+    const headers = {
+      'cookie': `sessionid=${cookies.sessionid}; csrftoken=${cookies.csrftoken}; ds_user_id=${cookies.ds_user_id || ''}`,
+      'x-csrftoken': cookies.csrftoken,
+      'x-ig-app-id': '936619743392459',
+      'x-requested-with': 'XMLHttpRequest',
+      'x-ig-www-claim': '0',
+      'content-type': 'application/x-www-form-urlencoded',
+      'origin': 'https://www.instagram.com',
+      'referer': `https://www.instagram.com/direct/t/${msg.platformConversationId}/`,
+      'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    };
+    
+    // Instagram Direct API for sending messages
+    const formData = new URLSearchParams();
+    formData.append('action', 'send_item');
+    formData.append('thread_ids', `[${msg.platformConversationId}]`);
+    formData.append('client_context', `${Date.now()}`);
+    formData.append('text', msg.content);
+    
+    const sendResponse = await axios.post(
+      'https://www.instagram.com/api/v1/direct_v2/threads/broadcast/text/',
+      formData.toString(),
+      { 
+        headers, 
+        timeout: 30000,
+        maxRedirects: 5
+      }
+    );
+    
+    console.log('[instagram] Send response:', sendResponse.status);
+    
+    // Check if successful
+    if (sendResponse.data && (sendResponse.data.status === 'ok' || sendResponse.status === 200)) {
+      // Report success to backend
+      const messageId = sendResponse.data.payload?.item_id || sendResponse.data.message_id || '';
+      
+      await axios.post(
+        `${apiUrl}/api/platforms/instagram/message-sent`,
+        {
+          pending_id: msg.id,
+          success: true,
+          platform_message_id: messageId
+        },
+        {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          },
+          timeout: 30000
+        }
+      );
+      
+      console.log(`[instagram] Message ${msg.id} sent successfully!`);
+      
+      // Notify UI
+      if (mainWindow) {
+        mainWindow.webContents.send('instagram-message-sent', {
+          success: true,
+          pendingId: msg.id,
+          message: 'Message sent!'
+        });
+      }
+    } else {
+      throw new Error('Instagram returned unexpected response');
+    }
+    
+  } catch (error) {
+    console.error(`[instagram] Failed to send message ${msg.id}:`, error.message);
+    
+    // Report failure to backend
+    try {
+      await axios.post(
+        `${apiUrl}/api/platforms/instagram/message-sent`,
+        {
+          pending_id: msg.id,
+          success: false,
+          error: error.message || 'Failed to send message'
+        },
+        {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          },
+          timeout: 30000
+        }
+      );
+    } catch (reportErr) {
+      console.error('[instagram] Failed to report error:', reportErr.message);
+    }
+    
+    // Notify UI
+    if (mainWindow) {
+      mainWindow.webContents.send('instagram-message-sent', {
+        success: false,
+        pendingId: msg.id,
+        error: error.message
+      });
+    }
+  }
+}
+
 // App lifecycle
 app.whenReady().then(() => {
   createWindow();
   createTray();
   startAutoSync();
+  startPendingMessagePoll(); // Start polling for pending Instagram messages
 });
 
 app.on('window-all-closed', () => {
