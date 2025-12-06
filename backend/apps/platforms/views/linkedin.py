@@ -10,6 +10,7 @@ Requirements: 4.1, 4.2, 4.3
 """
 
 import json
+import re
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
@@ -19,6 +20,30 @@ from django.utils import timezone
 from apps.platforms.adapters.linkedin_cookie import linkedin_cookie_adapter
 from apps.oauth.models import ConnectedAccount
 from apps.core.utils.crypto import encrypt
+
+
+def strip_emojis(text):
+    """Remove emojis and other non-BMP characters from text."""
+    if not text:
+        return text
+    emoji_pattern = re.compile(
+        "["
+        "\U0001F600-\U0001F64F"
+        "\U0001F300-\U0001F5FF"
+        "\U0001F680-\U0001F6FF"
+        "\U0001F1E0-\U0001F1FF"
+        "\U00002702-\U000027B0"
+        "\U000024C2-\U0001F251"
+        "\U0001F900-\U0001F9FF"
+        "\U0001FA00-\U0001FA6F"
+        "\U0001FA70-\U0001FAFF"
+        "\U00002600-\U000026FF"
+        "\U00002700-\U000027BF"
+        "\U0001F004-\U0001F0CF"
+        "]+", 
+        flags=re.UNICODE
+    )
+    return emoji_pattern.sub('', text).strip() or 'User'
 
 
 class LinkedInCookieSubmitView(APIView):
@@ -826,7 +851,8 @@ class LinkedInDesktopSyncView(APIView):
                     continue
                 
                 participants = conv_data.get('participants', [])
-                participant_name = participants[0].get('name', 'LinkedIn User') if participants else 'LinkedIn User'
+                raw_name = participants[0].get('name', 'LinkedIn User') if participants else 'LinkedIn User'
+                participant_name = strip_emojis(raw_name) or 'LinkedIn User'
                 participant_id = participants[0].get('id', '') if participants else ''
                 participant_avatar = participants[0].get('avatar', '') if participants else ''
                 

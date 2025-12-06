@@ -10,6 +10,7 @@ Requirements: 3.1, 3.2, 3.3
 """
 
 import json
+import re
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
@@ -22,6 +23,35 @@ from apps.oauth.models import ConnectedAccount
 from apps.conversations.models import Conversation
 from apps.messaging.models import Message
 from apps.core.utils.crypto import encrypt
+
+
+def strip_emojis(text):
+    """
+    Remove emojis and other non-BMP characters from text.
+    MySQL with utf8 charset can't handle 4-byte Unicode characters.
+    """
+    if not text:
+        return text
+    # Remove emojis and other characters outside BMP (Basic Multilingual Plane)
+    # This regex matches most emoji ranges
+    emoji_pattern = re.compile(
+        "["
+        "\U0001F600-\U0001F64F"  # emoticons
+        "\U0001F300-\U0001F5FF"  # symbols & pictographs
+        "\U0001F680-\U0001F6FF"  # transport & map symbols
+        "\U0001F1E0-\U0001F1FF"  # flags (iOS)
+        "\U00002702-\U000027B0"  # dingbats
+        "\U000024C2-\U0001F251"  # enclosed characters
+        "\U0001F900-\U0001F9FF"  # supplemental symbols
+        "\U0001FA00-\U0001FA6F"  # chess symbols
+        "\U0001FA70-\U0001FAFF"  # symbols and pictographs extended-A
+        "\U00002600-\U000026FF"  # misc symbols
+        "\U00002700-\U000027BF"  # dingbats
+        "\U0001F004-\U0001F0CF"  # playing cards & mahjong
+        "]+", 
+        flags=re.UNICODE
+    )
+    return emoji_pattern.sub('', text).strip() or 'User'
 
 
 class TwitterLoginView(AsyncAPIView):
@@ -771,7 +801,9 @@ class TwitterDesktopSyncView(APIView):
                 for p in participants:
                     p_id = str(p.get('user_id', p.get('id', '')))
                     if p_id and p_id != str(account.platform_user_id):
-                        participant_name = p.get('name', p.get('screen_name', 'Twitter User'))
+                        # Strip emojis from name to avoid MySQL encoding issues
+                        raw_name = p.get('name', p.get('screen_name', 'Twitter User'))
+                        participant_name = strip_emojis(raw_name) or p.get('screen_name', 'Twitter User')
                         participant_id = p_id
                         participant_avatar = p.get('profile_image_url', '')
                         break
@@ -801,7 +833,9 @@ class TwitterDesktopSyncView(APIView):
                     
                     text = msg_data.get('text', '') or '[No content]'
                     sender_id = str(msg_data.get('senderId', ''))
-                    sender_name = msg_data.get('senderName', participant_name)
+                    # Strip emojis from sender name too
+                    raw_sender = msg_data.get('senderName', participant_name)
+                    sender_name = strip_emojis(raw_sender) or 'User'
                     created_at = msg_data.get('createdAt')
                     
                     # Determine if outgoing

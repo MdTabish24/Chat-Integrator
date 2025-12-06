@@ -455,20 +455,54 @@ function parseLinkedInResponse(data) {
 
 // ============ INSTAGRAM ============
 async function fetchInstagramDMs(cookies) {
+  console.log('[instagram] Fetching DMs with cookies...');
+  console.log('[instagram] sessionid:', cookies.sessionid ? 'present' : 'missing');
+  console.log('[instagram] csrftoken:', cookies.csrftoken ? 'present' : 'missing');
+  
   const headers = {
-    'cookie': `sessionid=${cookies.sessionid}; csrftoken=${cookies.csrftoken}`,
+    'cookie': `sessionid=${cookies.sessionid}; csrftoken=${cookies.csrftoken}; ds_user_id=${cookies.ds_user_id || ''}`,
     'x-csrftoken': cookies.csrftoken,
     'x-ig-app-id': '936619743392459',
     'x-requested-with': 'XMLHttpRequest',
+    'x-ig-www-claim': '0',
+    'origin': 'https://www.instagram.com',
+    'referer': 'https://www.instagram.com/direct/inbox/',
     'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
   };
 
-  const response = await axios.get(
-    'https://www.instagram.com/api/v1/direct_v2/inbox/',
-    { headers, timeout: 60000 }
-  );
+  try {
+    const response = await axios.get(
+      'https://www.instagram.com/api/v1/direct_v2/inbox/',
+      { 
+        headers, 
+        timeout: 60000,
+        maxRedirects: 5,
+        validateStatus: function (status) {
+          return status < 500; // Accept any status < 500
+        }
+      }
+    );
+    
+    console.log('[instagram] Response status:', response.status);
+    
+    if (response.status === 401 || response.status === 403) {
+      throw new Error('Instagram session expired. Please login again.');
+    }
+    
+    if (!response.data || !response.data.inbox) {
+      console.log('[instagram] Response data:', JSON.stringify(response.data).substring(0, 500));
+      throw new Error('Invalid response from Instagram. Please try logging in again.');
+    }
 
-  return parseInstagramResponse(response.data);
+    return parseInstagramResponse(response.data);
+  } catch (error) {
+    console.error('[instagram] Fetch error:', error.message);
+    if (error.response) {
+      console.error('[instagram] Response status:', error.response.status);
+      console.error('[instagram] Response data:', JSON.stringify(error.response.data).substring(0, 500));
+    }
+    throw error;
+  }
 }
 
 function parseInstagramResponse(data) {

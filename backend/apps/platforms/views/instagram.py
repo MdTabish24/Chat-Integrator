@@ -10,6 +10,7 @@ Requirements: 5.1, 5.2, 5.3
 """
 
 import json
+import re
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
@@ -19,6 +20,33 @@ from django.utils import timezone
 from apps.platforms.adapters.instagram_session import instagram_session_adapter
 from apps.oauth.models import ConnectedAccount
 from apps.core.utils.crypto import encrypt
+
+
+def strip_emojis(text):
+    """
+    Remove emojis and other non-BMP characters from text.
+    MySQL with utf8 charset can't handle 4-byte Unicode characters.
+    """
+    if not text:
+        return text
+    emoji_pattern = re.compile(
+        "["
+        "\U0001F600-\U0001F64F"
+        "\U0001F300-\U0001F5FF"
+        "\U0001F680-\U0001F6FF"
+        "\U0001F1E0-\U0001F1FF"
+        "\U00002702-\U000027B0"
+        "\U000024C2-\U0001F251"
+        "\U0001F900-\U0001F9FF"
+        "\U0001FA00-\U0001FA6F"
+        "\U0001FA70-\U0001FAFF"
+        "\U00002600-\U000026FF"
+        "\U00002700-\U000027BF"
+        "\U0001F004-\U0001F0CF"
+        "]+", 
+        flags=re.UNICODE
+    )
+    return emoji_pattern.sub('', text).strip() or 'User'
 
 
 class InstagramLoginView(APIView):
@@ -376,14 +404,18 @@ class InstagramConversationsView(APIView):
                 if not last_message_at:
                     last_message_at = timezone.now()
                 
+                # Strip emojis from participant name to avoid MySQL encoding issues
+                raw_name = conv_data.get('participantName', 'Instagram User')
+                participant_name = strip_emojis(raw_name) or 'Instagram User'
+                
                 # Create or update conversation in database
                 conversation, created = Conversation.objects.update_or_create(
                     account=account,
                     platform_conversation_id=conv_id,
                     defaults={
-                        'participant_name': conv_data.get('participantName', 'Instagram User'),
+                        'participant_name': participant_name,
                         'participant_id': conv_data.get('participantId', ''),
-                        'participant_avatar_url': conv_data.get('participantAvatarUrl') or f'https://ui-avatars.com/api/?name={conv_data.get("participantName", "U")}&background=E1306C&color=fff',
+                        'participant_avatar_url': conv_data.get('participantAvatarUrl') or f'https://ui-avatars.com/api/?name={participant_name}&background=E1306C&color=fff',
                         'last_message_at': last_message_at,
                         'unread_count': conv_data.get('unreadCount', 0),
                     }
@@ -859,7 +891,8 @@ class InstagramDesktopSyncView(APIView):
                     continue
                 
                 participants = conv_data.get('participants', [])
-                participant_name = participants[0].get('name', 'Instagram User') if participants else 'Instagram User'
+                raw_name = participants[0].get('name', 'Instagram User') if participants else 'Instagram User'
+                participant_name = strip_emojis(raw_name) or 'Instagram User'
                 participant_id = participants[0].get('id', '') if participants else ''
                 
                 conversation, _ = Conversation.objects.update_or_create(
