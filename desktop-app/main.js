@@ -502,21 +502,39 @@ async function fetchInstagramDMs(cookies, retryCount = 0) {
   console.log('[instagram] sessionid:', cookies.sessionid ? 'present' : 'missing');
   console.log('[instagram] csrftoken:', cookies.csrftoken ? 'present' : 'missing');
   
+  // Check if cookies exist
+  if (!cookies.sessionid || !cookies.csrftoken) {
+    throw new Error('Instagram session not found. Please login via "Open Instagram Login" button.');
+  }
+  
+  // Build cookie string with all cookies
+  const cookieString = [
+    `sessionid=${cookies.sessionid}`,
+    `csrftoken=${cookies.csrftoken}`,
+    cookies.ds_user_id ? `ds_user_id=${cookies.ds_user_id}` : '',
+    'ig_nrcb=1',
+  ].filter(Boolean).join('; ');
+  
   const headers = {
-    'cookie': `sessionid=${cookies.sessionid}; csrftoken=${cookies.csrftoken}; ds_user_id=${cookies.ds_user_id || ''}`,
-    'x-csrftoken': cookies.csrftoken,
-    'x-ig-app-id': '936619743392459',
-    'x-requested-with': 'XMLHttpRequest',
-    'x-ig-www-claim': '0',
-    'x-asbd-id': '198387',
-    'origin': 'https://www.instagram.com',
-    'referer': 'https://www.instagram.com/direct/inbox/',
+    'authority': 'www.instagram.com',
     'accept': '*/*',
     'accept-language': 'en-US,en;q=0.9',
+    'cookie': cookieString,
+    'origin': 'https://www.instagram.com',
+    'referer': 'https://www.instagram.com/direct/inbox/',
+    'sec-ch-prefers-color-scheme': 'dark',
+    'sec-ch-ua': '"Not_A Brand";v="8", "Chromium";v="120"',
+    'sec-ch-ua-mobile': '?0',
+    'sec-ch-ua-platform': '"Windows"',
     'sec-fetch-dest': 'empty',
     'sec-fetch-mode': 'cors',
     'sec-fetch-site': 'same-origin',
-    'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'x-asbd-id': '129477',
+    'x-csrftoken': cookies.csrftoken,
+    'x-ig-app-id': '936619743392459',
+    'x-ig-www-claim': 'hmac.AR3W0DThY2Mu5Fag4sW5u3RhaR3qhFD_5wvYbOJOD9qaPjM',
+    'x-requested-with': 'XMLHttpRequest',
   };
 
   try {
@@ -525,28 +543,38 @@ async function fetchInstagramDMs(cookies, retryCount = 0) {
       { 
         headers, 
         timeout: 60000,
-        maxRedirects: 5,
+        maxRedirects: 0, // Don't follow redirects - if redirected, session is invalid
         validateStatus: function (status) {
-          return status < 500;
-        },
-        // Better SSL handling
-        httpsAgent: new (require('https').Agent)({
-          rejectUnauthorized: true,
-          keepAlive: true,
-          timeout: 60000
-        })
+          return status < 400 || status === 302 || status === 301;
+        }
       }
     );
+    
+    // Check for redirect (means session expired)
+    if (response.status === 301 || response.status === 302) {
+      const location = response.headers.location || '';
+      console.log('[instagram] Redirected to:', location);
+      if (location.includes('login') || location.includes('accounts')) {
+        throw new Error('Instagram session expired. Please click "Open Instagram Login" to re-login.');
+      }
+    }
     
     lastInstagramFetch = Date.now();
     console.log('[instagram] Response status:', response.status);
     
     if (response.status === 401 || response.status === 403) {
-      throw new Error('Instagram session expired. Please login again.');
+      throw new Error('Instagram session expired. Please login again via "Open Instagram Login".');
     }
     
     if (!response.data || !response.data.inbox) {
-      console.log('[instagram] Response data:', JSON.stringify(response.data).substring(0, 500));
+      // Check if it's a login redirect response
+      const dataStr = JSON.stringify(response.data || {}).substring(0, 500);
+      console.log('[instagram] Response data:', dataStr);
+      
+      if (dataStr.includes('login') || dataStr.includes('Login') || dataStr.includes('<!DOCTYPE')) {
+        throw new Error('Instagram session expired. Please click "Open Instagram Login" to re-login.');
+      }
+      
       throw new Error('Invalid response from Instagram. Please try logging in again.');
     }
 
@@ -554,11 +582,19 @@ async function fetchInstagramDMs(cookies, retryCount = 0) {
   } catch (error) {
     console.error('[instagram] Fetch error:', error.message);
     
+    // Check if it's a redirect error (session expired)
+    if (error.message.includes('redirect') || error.message.includes('Maximum')) {
+      // Clear cookies and ask for re-login
+      console.log('[instagram] Session appears to be expired. Please re-login.');
+      throw new Error('Instagram session expired. Please click "Open Instagram Login" to re-login.');
+    }
+    
     // Retry on SSL/connection errors (max 3 retries with exponential backoff)
     const isRetryableError = error.message.includes('SSL') || 
                             error.message.includes('ECONNRESET') || 
                             error.message.includes('ETIMEDOUT') ||
-                            error.message.includes('CLOSE_NOTIFY');
+                            error.message.includes('CLOSE_NOTIFY') ||
+                            error.message.includes('socket hang up');
     
     if (isRetryableError && retryCount < 3) {
       const waitTime = Math.pow(2, retryCount) * 5000; // 5s, 10s, 20s
