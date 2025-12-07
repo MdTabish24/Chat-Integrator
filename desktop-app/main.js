@@ -864,13 +864,15 @@ function parseInstagramResponse(data) {
   const conversations = [];
   const threads = data.inbox?.threads || [];
   
-  for (const thread of threads) {
+  // Limit to 8 conversations for faster sync
+  for (const thread of threads.slice(0, 8)) {
     const participants = (thread.users || []).map(u => ({
       id: u.pk?.toString() || '',
       name: u.full_name || u.username || ''
     }));
 
-    const messages = (thread.items || []).map(item => {
+    // Limit to last 10 messages per conversation for faster sync
+    const messages = (thread.items || []).slice(0, 10).map(item => {
       // Extract text from various Instagram message types
       let text = '';
       
@@ -1181,66 +1183,73 @@ async function syncWhatsAppMessages() {
     
     const conversations = [];
     
-    // Process each chat (limit to first 50 for performance)
-    for (const chat of chats.slice(0, 50)) {
+    // Process only last 9 chats for faster sync
+    for (const chat of chats.slice(0, 9)) {
       try {
-        // Get last 20 messages from each chat
-        const messages = await chat.fetchMessages({ limit: 20 });
+        // Get last 8 messages from each chat
+        const messages = await chat.fetchMessages({ limit: 8 });
         
-        const participants = [];
+        // Use chat properties directly (don't call getContact - it causes errors)
+        const chatName = chat.name || chat.pushname || chat.id?.user || 'Unknown';
+        const chatId = chat.id?._serialized || '';
         
-        // Get contact info
-        if (chat.isGroup) {
-          // Group chat - get participant info
-          const groupParticipants = chat.participants || [];
-          for (const p of groupParticipants.slice(0, 10)) {  // Limit participants
-            participants.push({
-              id: p.id?._serialized || p.id || '',
-              name: p.id?._serialized?.split('@')[0] || 'Group Member'
-            });
-          }
-        } else {
-          // Individual chat
-          const contact = await chat.getContact();
-          participants.push({
-            id: contact.id?._serialized || chat.id?._serialized || '',
-            name: contact.pushname || contact.name || contact.number || 'Unknown'
-          });
-        }
+        const participants = [{
+          id: chatId,
+          name: chatName
+        }];
         
         const parsedMessages = messages.map(msg => ({
-          id: msg.id?._serialized || msg.id?.id || '',
+          id: msg.id?._serialized || msg.id?.id || `msg_${Date.now()}`,
           text: msg.body || (msg.hasMedia ? '[Media]' : ''),
           senderId: msg.from || '',
-          senderName: msg.fromMe ? 'You' : (msg._data?.notifyName || 'Contact'),
-          isFromMe: msg.fromMe,
-          createdAt: new Date(msg.timestamp * 1000).toISOString(),
+          senderName: msg.fromMe ? 'You' : (msg._data?.notifyName || chatName),
+          isFromMe: msg.fromMe || false,
+          createdAt: msg.timestamp ? new Date(msg.timestamp * 1000).toISOString() : new Date().toISOString(),
           type: msg.type || 'chat'
         }));
         
         conversations.push({
-          id: chat.id?._serialized || '',
-          name: chat.name || 'Unknown Chat',
-          isGroup: chat.isGroup,
+          id: chatId,
+          name: chatName,
+          isGroup: chat.isGroup || false,
           participants,
           messages: parsedMessages,
           unreadCount: chat.unreadCount || 0,
-          lastMessageAt: messages.length > 0 
+          lastMessageAt: messages.length > 0 && messages[0].timestamp
             ? new Date(messages[0].timestamp * 1000).toISOString() 
-            : null
+            : new Date().toISOString()
         });
+        
+        console.log(`[whatsapp] Processed chat: ${chatName} (${parsedMessages.length} messages)`);
         
       } catch (chatErr) {
         console.error(`[whatsapp] Error processing chat: ${chatErr.message}`);
+        // Continue with next chat instead of failing completely
+        continue;
       }
     }
     
     console.log(`[whatsapp] Processed ${conversations.length} conversations`);
     
+    if (conversations.length === 0) {
+      console.log('[whatsapp] No conversations to sync');
+      if (mainWindow) {
+        mainWindow.webContents.send('sync-status', { 
+          platform: 'whatsapp', 
+          success: true,
+          message: 'No new messages to sync',
+          lastSync: new Date().toISOString()
+        });
+      }
+      return [];
+    }
+    
     // Send to backend
     const apiUrl = store.get('apiUrl') || API_BASE_URL;
     
-    await axios.post(
+    console.log(`[whatsapp] Sending ${conversations.length} conversations to backend...`);
+    
+    const response = await axios.post(
       `${apiUrl}/api/platforms/whatsapp/sync-from-desktop`,
       { conversations },
       {
@@ -1248,18 +1257,18 @@ async function syncWhatsAppMessages() {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
         },
-        timeout: 120000
+        timeout: 60000
       }
     );
     
-    console.log('[whatsapp] Sync completed successfully');
+    console.log('[whatsapp] Sync completed successfully:', response.data);
     store.set('whatsapp_lastSync', new Date().toISOString());
     
     if (mainWindow) {
       mainWindow.webContents.send('sync-status', { 
         platform: 'whatsapp', 
         success: true,
-        message: `Synced ${conversations.length} conversations`,
+        message: `Synced ${conversations.length} chats`,
         lastSync: new Date().toISOString()
       });
     }
@@ -1268,12 +1277,15 @@ async function syncWhatsAppMessages() {
     
   } catch (error) {
     console.error('[whatsapp] Sync error:', error.message);
+    if (error.response) {
+      console.error('[whatsapp] Server response:', error.response.status, error.response.data);
+    }
     
     if (mainWindow) {
       mainWindow.webContents.send('sync-status', { 
         platform: 'whatsapp', 
         success: false,
-        message: error.message
+        message: `Sync failed: ${error.message}`
       });
     }
     

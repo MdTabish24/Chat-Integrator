@@ -24,29 +24,45 @@
     "whatsapp-web.js": "^1.34.2"
   },
   "build": {
-    "appId": "com.chatorbitor.twitter-sync",
-    "productName": "ChatOrbitor Twitter Sync",
+    "appId": "com.chatorbitor.sync",
+    "productName": "Chat Orbitor Sync",
     "directories": {
       "output": "dist"
     },
     "win": {
-      "target": "nsis",
-      "icon": "assets/icon.ico"
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "publisherName": "Chat Orbitor"
     },
     "mac": {
       "target": "dmg",
-      "icon": "assets/icon.icns"
+      "category": "public.app-category.social-networking"
     },
     "linux": {
       "target": "AppImage",
-      "icon": "assets/icon.png"
+      "category": "Network"
     },
     "nsis": {
-      "oneClick": true,
-      "allowToChangeInstallationDirectory": false
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Chat Orbitor Sync"
     },
     "portable": {
-      "artifactName": "ChatOrbitor-Sync-Portable.exe"
+      "artifactName": "ChatOrbitor-Sync-Portable-${version}.exe"
     }
   }
 }

@@ -463,7 +463,8 @@ class WhatsAppSyncFromDesktopView(APIView):
                 print(f'[whatsapp] Created new account for user {user_id}')
             
             # Import models for storing conversations and messages
-            from apps.platforms.models import Conversation, Message
+            from apps.conversations.models import Conversation
+            from apps.messaging.models import Message
             
             total_messages = 0
             new_messages = 0
@@ -511,29 +512,37 @@ class WhatsAppSyncFromDesktopView(APIView):
                         ).exists():
                             continue
                         
+                        # Map message type to valid choices
+                        msg_type = msg_data.get('type', 'text')
+                        if msg_type not in ['text', 'image', 'video', 'file']:
+                            msg_type = 'text'  # Default to text for unknown types
+                        
                         # Create new message
                         Message.objects.create(
                             conversation=conversation,
                             platform_message_id=msg_id,
-                            sender_id=msg_data.get('senderId', ''),
-                            sender_name=msg_data.get('senderName', ''),
-                            content=msg_data.get('text', ''),
-                            message_type=msg_data.get('type', 'text'),
+                            sender_id=msg_data.get('senderId', '') or '',
+                            sender_name=msg_data.get('senderName', '') or '',
+                            content=msg_data.get('text', '') or '',
+                            message_type=msg_type,
                             is_outgoing=msg_data.get('isFromMe', False),
                             is_read=True,
                             sent_at=msg_data.get('createdAt') or timezone.now(),
                         )
                         new_messages += 1
                     
-                    # Update last message info
+                    # Update last message timestamp
                     if messages:
                         last_msg = messages[0]  # Assuming messages are ordered newest first
-                        conversation.last_message = last_msg.get('text', '')[:200]
-                        conversation.last_message_at = last_msg.get('createdAt')
-                        conversation.save()
+                        last_msg_time = last_msg.get('createdAt')
+                        if last_msg_time:
+                            conversation.last_message_at = last_msg_time
+                            conversation.save(update_fields=['last_message_at', 'updated_at'])
                         
                 except Exception as conv_err:
-                    print(f'[whatsapp] Error processing conversation: {conv_err}')
+                    import traceback
+                    print(f'[whatsapp] Error processing conversation {conv_data.get("name", "unknown")}: {conv_err}')
+                    print(f'[whatsapp] Conv traceback: {traceback.format_exc()}')
                     continue
             
             print(f'[whatsapp] Sync complete: {new_messages} new messages out of {total_messages} total')
@@ -547,7 +556,9 @@ class WhatsAppSyncFromDesktopView(APIView):
             })
             
         except Exception as e:
+            import traceback
             print(f'[whatsapp] Sync from desktop failed: {e}')
+            print(f'[whatsapp] Traceback: {traceback.format_exc()}')
             return Response({
                 'error': {
                     'code': 'SYNC_FAILED',
