@@ -628,6 +628,54 @@ body {
     0 0 40px rgba(14, 165, 233, 0.1);
 }
 
+/* Hide scrollbar but keep functionality */
+.scrollbar-hide {
+  -ms-overflow-style: none;  /* IE and Edge */
+  scrollbar-width: none;  /* Firefox */
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;  /* Chrome, Safari and Opera */
+}
+
+/* Tab bar styles */
+.tab-bar {
+  display: flex;
+  overflow-x: auto;
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.tab-bar::-webkit-scrollbar {
+  display: none;
+}
+
+.tab-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  cursor: pointer;
+  border-right: 1px solid var(--border-color);
+  min-width: 0;
+  max-width: 200px;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+}
+
+.tab-item:hover .tab-close {
+  opacity: 1;
+}
+
+.tab-close {
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.tab-item.active {
+  background: var(--bg-card);
+}
+
 /* Responsive */
 @media (max-width: 768px) {
   .card-3d {

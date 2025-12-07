@@ -11,7 +11,7 @@ import LoadingSpinner from '../components/LoadingSpinner';
 import EmptyState from '../components/EmptyState';
 import ErrorDisplay from '../components/ErrorDisplay';
 import apiClient from '../config/api';
-import { Platform, Conversation, ConnectedAccount } from '../types';
+import { Platform, Conversation, ConnectedAccount, ChatTab } from '../types';
 
 interface PlatformData {
   platform: Platform;
@@ -59,6 +59,7 @@ const Dashboard: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
   const [selectedPlatform, setSelectedPlatform] = useState<Platform | null>(null);
+  const [openTabs, setOpenTabs] = useState<ChatTab[]>([]);
 
 
   // WebSocket callbacks
@@ -321,8 +322,58 @@ const Dashboard: React.FC = () => {
   };
 
   const handleConversationClick = (conversationId: string, platform: Platform) => {
+    // Find conversation details from platformsData
+    const platformData = platformsData.get(platform);
+    const conversation = platformData?.conversations.find(c => c.id === conversationId);
+    
+    // Check if tab already exists
+    const existingTab = openTabs.find(tab => tab.conversationId === conversationId);
+    
+    if (!existingTab && conversation) {
+      // Add new tab
+      const newTab: ChatTab = {
+        id: `tab_${conversationId}`,
+        conversationId,
+        platform,
+        participantName: conversation.participantName,
+        participantAvatarUrl: conversation.participantAvatarUrl,
+      };
+      setOpenTabs(prev => [...prev, newTab]);
+    }
+    
+    // Select the conversation
     setSelectedConversationId(conversationId);
     setSelectedPlatform(platform);
+  };
+
+  const handleTabClick = (tab: ChatTab) => {
+    setSelectedConversationId(tab.conversationId);
+    setSelectedPlatform(tab.platform);
+  };
+
+  const handleTabClose = (tabId: string, e: React.MouseEvent) => {
+    e.stopPropagation(); // Prevent tab click when closing
+    
+    setOpenTabs(prev => {
+      const newTabs = prev.filter(t => t.id !== tabId);
+      
+      // If closing the currently selected tab, switch to another tab or clear selection
+      const closedTab = prev.find(t => t.id === tabId);
+      if (closedTab && closedTab.conversationId === selectedConversationId) {
+        if (newTabs.length > 0) {
+          // Switch to the last tab
+          const lastTab = newTabs[newTabs.length - 1];
+          setSelectedConversationId(lastTab.conversationId);
+          setSelectedPlatform(lastTab.platform);
+        } else {
+          // No tabs left, clear selection
+          setSelectedConversationId(null);
+          setSelectedPlatform(null);
+        }
+      }
+      
+      return newTabs;
+    });
   };
 
   const handleMessageSent = () => {
@@ -419,6 +470,9 @@ const Dashboard: React.FC = () => {
           conversationId={selectedConversationId}
           platform={selectedPlatform}
           onMessageSent={handleMessageSent}
+          openTabs={openTabs}
+          onTabClick={handleTabClick}
+          onTabClose={handleTabClose}
         />
       </div>
     </div>

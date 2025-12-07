@@ -62,3 +62,11 @@ export interface PlatformConfig {
   icon: string;
   color: string;
 }
+
+export interface ChatTab {
+  id: string;
+  conversationId: string;
+  platform: Platform;
+  participantName: string;
+  participantAvatarUrl?: string;
+}

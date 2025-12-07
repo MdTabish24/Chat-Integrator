@@ -325,9 +325,18 @@ class LinkedInCookieAdapter(BasePlatformAdapter):
                     retryable=False
                 )
             
+            # Clean JSESSIONID - remove quotes and ensure proper format
+            jsessionid = jsessionid.strip().replace('"', '').replace("'", '')
+            
+            # JSESSIONID should start with "ajax:" - if not, add it
+            if jsessionid and not jsessionid.startswith('ajax:'):
+                jsessionid = f'ajax:{jsessionid}'
+            
+            print(f'[linkedin-debug] Cleaned JSESSIONID: {jsessionid}')
+            
             return {
-                'li_at': li_at,
-                'JSESSIONID': jsessionid.replace('"', ''),  # Remove quotes if present
+                'li_at': li_at.strip(),
+                'JSESSIONID': jsessionid,
             }
             
         except ConnectedAccount.DoesNotExist:
@@ -478,17 +487,26 @@ class LinkedInCookieAdapter(BasePlatformAdapter):
             self.apply_human_delay(account_id)
             
             # Direct HTTP request to LinkedIn API with proper headers
+            # IMPORTANT: CSRF token must be in quotes in cookie but raw in header
+            csrf_token = cookies['JSESSIONID']
+            
             headers = {
-                'cookie': f'li_at={cookies["li_at"]}; JSESSIONID="{cookies["JSESSIONID"]}"',
-                'csrf-token': cookies['JSESSIONID'],
+                'cookie': f'li_at={cookies["li_at"]}; JSESSIONID="{csrf_token}"',
+                'csrf-token': csrf_token,
                 'x-restli-protocol-version': '2.0.0',
                 'x-li-lang': 'en_US',
                 'x-li-track': '{"clientVersion":"1.13.8857","mpVersion":"1.13.8857","osName":"web","timezoneOffset":5.5,"timezone":"Asia/Kolkata","deviceFormFactor":"DESKTOP","mpName":"voyager-web"}',
                 'accept': 'application/vnd.linkedin.normalized+json+2.1',
-                'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'origin': 'https://www.linkedin.com',
+                'referer': 'https://www.linkedin.com/messaging/',
+                'sec-fetch-dest': 'empty',
+                'sec-fetch-mode': 'cors',
+                'sec-fetch-site': 'same-origin',
             }
             
             print(f'[linkedin-debug] Making request to LinkedIn conversations API...')
+            print(f'[linkedin-debug] csrf-token header: {csrf_token}')
             
             response = requests.get(
                 'https://www.linkedin.com/voyager/api/messaging/conversations',
@@ -676,14 +694,20 @@ class LinkedInCookieAdapter(BasePlatformAdapter):
             # Apply human-like delay
             self.apply_human_delay(account_id)
             
+            csrf_token = cookies['JSESSIONID']
             headers = {
-                'cookie': f'li_at={cookies["li_at"]}; JSESSIONID="{cookies["JSESSIONID"]}"',
-                'csrf-token': cookies['JSESSIONID'],
+                'cookie': f'li_at={cookies["li_at"]}; JSESSIONID="{csrf_token}"',
+                'csrf-token': csrf_token,
                 'x-restli-protocol-version': '2.0.0',
                 'x-li-lang': 'en_US',
                 'x-li-track': '{"clientVersion":"1.13.8857","mpVersion":"1.13.8857","osName":"web","timezoneOffset":5.5,"timezone":"Asia/Kolkata","deviceFormFactor":"DESKTOP","mpName":"voyager-web"}',
                 'accept': 'application/vnd.linkedin.normalized+json+2.1',
-                'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'origin': 'https://www.linkedin.com',
+                'referer': 'https://www.linkedin.com/messaging/',
+                'sec-fetch-dest': 'empty',
+                'sec-fetch-mode': 'cors',
+                'sec-fetch-site': 'same-origin',
             }
             
             # Get conversations first
@@ -879,13 +903,19 @@ class LinkedInCookieAdapter(BasePlatformAdapter):
             # Apply human-like delay
             self.apply_human_delay(account_id)
             
+            csrf_token = cookies['JSESSIONID']
             # Direct HTTP request to send message
             headers = {
-                'cookie': f'li_at={cookies["li_at"]}; JSESSIONID="{cookies["JSESSIONID"]}"',
-                'csrf-token': cookies['JSESSIONID'],
+                'cookie': f'li_at={cookies["li_at"]}; JSESSIONID="{csrf_token}"',
+                'csrf-token': csrf_token,
                 'x-restli-protocol-version': '2.0.0',
                 'content-type': 'application/json',
-                'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'origin': 'https://www.linkedin.com',
+                'referer': f'https://www.linkedin.com/messaging/thread/{conversation_id}/',
+                'sec-fetch-dest': 'empty',
+                'sec-fetch-mode': 'cors',
+                'sec-fetch-site': 'same-origin',
             }
             
             # LinkedIn message send payload
@@ -968,11 +998,17 @@ class LinkedInCookieAdapter(BasePlatformAdapter):
         try:
             cookies = self._get_cookies(account_id)
             
+            csrf_token = cookies['JSESSIONID']
             headers = {
-                'cookie': f'li_at={cookies["li_at"]}; JSESSIONID="{cookies["JSESSIONID"]}"',
-                'csrf-token': cookies['JSESSIONID'],
+                'cookie': f'li_at={cookies["li_at"]}; JSESSIONID="{csrf_token}"',
+                'csrf-token': csrf_token,
                 'x-restli-protocol-version': '2.0.0',
-                'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'origin': 'https://www.linkedin.com',
+                'referer': 'https://www.linkedin.com/messaging/',
+                'sec-fetch-dest': 'empty',
+                'sec-fetch-mode': 'cors',
+                'sec-fetch-site': 'same-origin',
             }
             
             # Try to get conversations to verify cookies
@@ -982,6 +1018,7 @@ class LinkedInCookieAdapter(BasePlatformAdapter):
                 timeout=15
             )
             
+            print(f'[linkedin-debug] verify_cookies status: {response.status_code}')
             return response.status_code == 200
         except Exception as e:
             print(f'[linkedin] Cookie verification failed: {e}')
@@ -1021,14 +1058,24 @@ class LinkedInCookieAdapter(BasePlatformAdapter):
         try:
             self.apply_human_delay(account_id)
             
+            csrf_token = cookies['JSESSIONID']
+            
+            print(f'[linkedin-debug] CSRF token being used: {csrf_token}')
+            print(f'[linkedin-debug] li_at being used: {cookies["li_at"][:30]}...')
+            
             headers = {
-                'cookie': f'li_at={cookies["li_at"]}; JSESSIONID="{cookies["JSESSIONID"]}"',
-                'csrf-token': cookies['JSESSIONID'],
+                'cookie': f'li_at={cookies["li_at"]}; JSESSIONID="{csrf_token}"',
+                'csrf-token': csrf_token,
                 'x-restli-protocol-version': '2.0.0',
                 'x-li-lang': 'en_US',
                 'x-li-track': '{"clientVersion":"1.13.8857","mpVersion":"1.13.8857","osName":"web","timezoneOffset":5.5,"timezone":"Asia/Kolkata","deviceFormFactor":"DESKTOP","mpName":"voyager-web"}',
                 'accept': 'application/vnd.linkedin.normalized+json+2.1',
-                'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'origin': 'https://www.linkedin.com',
+                'referer': f'https://www.linkedin.com/messaging/thread/{conversation_id}/',
+                'sec-fetch-dest': 'empty',
+                'sec-fetch-mode': 'cors',
+                'sec-fetch-site': 'same-origin',
             }
             
             url = f'https://www.linkedin.com/voyager/api/messaging/conversations/{conversation_id}/events'

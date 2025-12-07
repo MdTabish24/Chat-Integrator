@@ -83,6 +83,23 @@ class LinkedInCookieSubmitView(APIView):
             li_at = request.data.get('li_at') or cookies.get('li_at')
             jsessionid = request.data.get('JSESSIONID') or cookies.get('JSESSIONID')
             
+            print(f'[linkedin-cookies] ========== COOKIE SUBMISSION ==========')
+            print(f'[linkedin-cookies] Raw li_at received (first 30 chars): {li_at[:30] if li_at else "NONE"}...')
+            print(f'[linkedin-cookies] Raw JSESSIONID received: {jsessionid}')
+            
+            # Clean up JSESSIONID - users often copy it in different formats
+            if jsessionid:
+                original_jsessionid = jsessionid
+                jsessionid = jsessionid.strip().replace('"', '').replace("'", '')
+                # LinkedIn JSESSIONID should be in format "ajax:XXXXXXX"
+                if jsessionid and not jsessionid.startswith('ajax:'):
+                    jsessionid = f'ajax:{jsessionid}'
+                print(f'[linkedin-cookies] Cleaned JSESSIONID: {original_jsessionid} -> {jsessionid}')
+            
+            # Clean up li_at
+            if li_at:
+                li_at = li_at.strip().replace('"', '').replace("'", '')
+            
             # Platform user info is optional - will use defaults
             platform_user_id = request.data.get('platform_user_id') or f'linkedin_user_{user_id[:8]}'
             platform_username = request.data.get('platform_username') or 'LinkedIn User'

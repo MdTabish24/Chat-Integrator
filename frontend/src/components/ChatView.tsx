@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Message, Conversation, Platform } from '../types';
+import { Message, Conversation, Platform, ChatTab } from '../types';
 import MessageBubble from './MessageBubble';
 import MessageInput from './MessageInput';
 import LoadingSpinner from './LoadingSpinner';
@@ -13,12 +13,18 @@ interface ChatViewProps {
   conversationId: string | null;
   platform: Platform | null;
   onMessageSent?: () => void;
+  openTabs?: ChatTab[];
+  onTabClick?: (tab: ChatTab) => void;
+  onTabClose?: (tabId: string, e: React.MouseEvent) => void;
 }
 
 const ChatView: React.FC<ChatViewProps> = ({
   conversationId,
   platform,
   onMessageSent,
+  openTabs = [],
+  onTabClick,
+  onTabClose,
 }) => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [conversation, setConversation] = useState<Conversation | null>(null);
@@ -479,26 +485,99 @@ const ChatView: React.FC<ChatViewProps> = ({
   }, [isLoadingMore]);
 
 
+  // Platform colors for tab styling
+  const getPlatformColor = (plat: Platform) => {
+    const colors: Record<string, string> = {
+      telegram: 'bg-blue-500',
+      twitter: 'bg-sky-500',
+      linkedin: 'bg-blue-700',
+      instagram: 'bg-gradient-to-r from-purple-500 to-pink-500',
+      whatsapp: 'bg-green-500',
+      facebook: 'bg-blue-600',
+      discord: 'bg-indigo-600',
+      teams: 'bg-purple-600',
+      gmail: 'bg-red-500',
+    };
+    return colors[plat] || 'bg-gray-500';
+  };
+
+  // Tab Bar Component
+  const TabBar = () => {
+    if (openTabs.length === 0) return null;
+    
+    return (
+      <div className={`flex items-center border-b overflow-x-auto scrollbar-hide ${isDark ? 'bg-slate-800 border-gray-700' : 'bg-gray-50 border-gray-200'}`}>
+        {openTabs.map((tab) => (
+          <div
+            key={tab.id}
+            onClick={() => onTabClick?.(tab)}
+            className={`group flex items-center gap-2 px-4 py-2.5 cursor-pointer border-r min-w-0 max-w-[200px] transition-all duration-150 ${
+              isDark ? 'border-gray-700' : 'border-gray-200'
+            } ${
+              tab.conversationId === conversationId
+                ? isDark 
+                  ? 'bg-slate-900 text-white' 
+                  : 'bg-white text-gray-900 shadow-sm'
+                : isDark 
+                  ? 'bg-slate-800 text-gray-400 hover:bg-slate-700 hover:text-gray-200' 
+                  : 'bg-gray-50 text-gray-600 hover:bg-gray-100 hover:text-gray-800'
+            }`}
+          >
+            {/* Platform indicator dot */}
+            <div className={`w-2 h-2 rounded-full flex-shrink-0 ${getPlatformColor(tab.platform)}`} />
+            
+            {/* Tab name */}
+            <span className="truncate text-sm font-medium">
+              {tab.participantName}
+            </span>
+            
+            {/* Close button */}
+            <button
+              onClick={(e) => onTabClose?.(tab.id, e)}
+              className={`flex-shrink-0 p-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity ${
+                isDark 
+                  ? 'hover:bg-gray-600 text-gray-400 hover:text-white' 
+                  : 'hover:bg-gray-200 text-gray-400 hover:text-gray-700'
+              }`}
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        ))}
+      </div>
+    );
+  };
+
   // Empty state when no conversation selected
   if (!conversationId) {
     return (
-      <div className={`flex-1 flex items-center justify-center chat-area-professional`}>
-        <EmptyState
-          icon={
-            <svg className={`w-16 h-16 ${isDark ? 'text-gray-600' : 'text-gray-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-            </svg>
-          }
-          title="Select a conversation"
-          description="Choose a conversation from the sidebar to start messaging"
-        />
+      <div className={`flex-1 flex flex-col ${isDark ? 'bg-slate-900' : 'bg-white'}`}>
+        {/* Show tab bar even when no conversation is selected */}
+        <TabBar />
+        
+        <div className={`flex-1 flex items-center justify-center chat-area-professional`}>
+          <EmptyState
+            icon={
+              <svg className={`w-16 h-16 ${isDark ? 'text-gray-600' : 'text-gray-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                  d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+              </svg>
+            }
+            title="Select a chat"
+            description="Choose a conversation from the sidebar to start messaging"
+          />
+        </div>
       </div>
     );
   }
 
   return (
     <div className={`flex-1 flex flex-col ${isDark ? 'bg-slate-900' : 'bg-white'}`}>
+      {/* Tab Bar - VS Code style tabs */}
+      <TabBar />
+      
       {/* Chat Header */}
       <div className={`px-5 py-4 border-b flex items-center justify-between ${isDark ? 'border-gray-700 bg-slate-800' : 'border-gray-200 bg-white'}`}>
         <div className="flex items-center space-x-3">
