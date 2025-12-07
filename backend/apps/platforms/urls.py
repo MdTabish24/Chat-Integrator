@@ -24,6 +24,8 @@ from .views.linkedin import (
     LinkedInSendMessageView,
     LinkedInRateLimitStatusView,
     LinkedInDesktopSyncView,
+    LinkedInPendingMessagesView,
+    LinkedInMessageSentView,
 )
 from .views.instagram import (
     InstagramLoginView,
@@ -129,6 +131,12 @@ urlpatterns = [
     
     # POST /api/platforms/linkedin/sync-from-desktop - Receive data from desktop app
     path('linkedin/sync-from-desktop', LinkedInDesktopSyncView.as_view(), name='linkedin-desktop-sync'),
+    
+    # GET /api/platforms/linkedin/pending - Get pending messages for Desktop App to send
+    path('linkedin/pending', LinkedInPendingMessagesView.as_view(), name='linkedin-pending'),
+    
+    # POST /api/platforms/linkedin/message-sent - Report message sent status from Desktop App
+    path('linkedin/message-sent', LinkedInMessageSentView.as_view(), name='linkedin-message-sent'),
     
     # Instagram session-based endpoints
     # POST /api/platforms/instagram/login - Submit credentials for authentication

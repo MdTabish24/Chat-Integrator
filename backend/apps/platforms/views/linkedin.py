@@ -945,3 +945,139 @@ class LinkedInDesktopSyncView(APIView):
         except Exception as e:
             print(f'[linkedin-desktop] Sync failed: {e}')
             return Response({'error': {'code': 'SYNC_FAILED', 'message': str(e), 'retryable': True}}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class LinkedInPendingMessagesView(APIView):
+    """
+    Get pending LinkedIn messages for Desktop App to send.
+    
+    GET /api/platforms/linkedin/pending
+    
+    Returns messages that user has sent via web UI but need to be
+    actually delivered via Desktop App's browser automation.
+    """
+    permission_classes = [AllowAny]
+    
+    def get(self, request):
+        try:
+            if not hasattr(request, 'user_jwt') or not request.user_jwt:
+                return Response({
+                    'error': {'code': 'UNAUTHORIZED', 'message': 'User not authenticated', 'retryable': False}
+                }, status=status.HTTP_401_UNAUTHORIZED)
+            
+            user_id = request.user_jwt['user_id']
+            
+            # Get user's LinkedIn account
+            try:
+                account = ConnectedAccount.objects.get(user_id=user_id, platform='linkedin', is_active=True)
+            except ConnectedAccount.DoesNotExist:
+                return Response({'pendingMessages': []})
+            
+            # Get pending messages from the database
+            from apps.messaging.models import PendingOutgoingMessage
+            
+            # Get messages marked as pending for this account
+            pending = PendingOutgoingMessage.objects.filter(
+                account=account,
+                status='pending'
+            ).order_by('created_at')[:5]  # Limit to 5 at a time
+            
+            pending_list = []
+            for msg in pending:
+                pending_list.append({
+                    'id': str(msg.id),
+                    'conversationId': str(msg.conversation.id) if msg.conversation else '',
+                    'platformConversationId': msg.conversation.platform_conversation_id if msg.conversation else '',
+                    'content': msg.content,  # Already decrypted by property
+                    'createdAt': msg.created_at.isoformat(),
+                })
+            
+            return Response({'pendingMessages': pending_list})
+            
+        except Exception as e:
+            print(f'[linkedin] Failed to get pending messages: {e}')
+            return Response({'pendingMessages': [], 'error': str(e)})
+
+
+class LinkedInMessageSentView(APIView):
+    """
+    Report LinkedIn message sent status from Desktop App.
+    
+    POST /api/platforms/linkedin/message-sent
+    
+    Request body:
+    {
+        "pending_id": "uuid",        # ID of the pending message
+        "success": true/false,       # Whether send was successful
+        "platform_message_id": "string",  # Optional: LinkedIn message ID
+        "error": "string"            # Error message if failed
+    }
+    """
+    permission_classes = [AllowAny]
+    
+    def post(self, request):
+        try:
+            if not hasattr(request, 'user_jwt') or not request.user_jwt:
+                return Response({
+                    'error': {'code': 'UNAUTHORIZED', 'message': 'User not authenticated', 'retryable': False}
+                }, status=status.HTTP_401_UNAUTHORIZED)
+            
+            user_id = request.user_jwt['user_id']
+            
+            pending_id = request.data.get('pending_id')
+            success = request.data.get('success', False)
+            platform_message_id = request.data.get('platform_message_id', '')
+            error_msg = request.data.get('error', '')
+            
+            if not pending_id:
+                return Response({
+                    'error': {'code': 'MISSING_PENDING_ID', 'message': 'pending_id is required', 'retryable': False}
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            from apps.messaging.models import PendingOutgoingMessage, Message
+            from apps.core.utils.crypto import encrypt
+            
+            try:
+                pending = PendingOutgoingMessage.objects.get(id=pending_id, account__user_id=user_id)
+            except PendingOutgoingMessage.DoesNotExist:
+                return Response({
+                    'error': {'code': 'PENDING_NOT_FOUND', 'message': 'Pending message not found', 'retryable': False}
+                }, status=status.HTTP_404_NOT_FOUND)
+            
+            if success:
+                # Create actual message in database
+                if pending.conversation:
+                    Message.objects.create(
+                        conversation=pending.conversation,
+                        platform_message_id=platform_message_id or f'li_sent_{pending.id}',
+                        content=encrypt(pending.content),
+                        sender_id=str(pending.account.platform_user_id),
+                        sender_name='You',
+                        sent_at=timezone.now(),
+                        is_outgoing=True,
+                        is_read=True,
+                    )
+                
+                # Mark pending as sent
+                pending.status = 'sent'
+                pending.platform_message_id = platform_message_id
+                pending.save()
+                
+                print(f'[linkedin] Message {pending_id} sent successfully via Desktop App')
+                
+                return Response({'success': True, 'message': 'Message marked as sent'})
+            else:
+                # Mark as failed
+                pending.status = 'failed'
+                pending.error_message = error_msg
+                pending.save()
+                
+                print(f'[linkedin] Message {pending_id} failed: {error_msg}')
+                
+                return Response({'success': False, 'message': 'Message marked as failed'})
+            
+        except Exception as e:
+            print(f'[linkedin] Failed to update message status: {e}')
+            return Response({
+                'error': {'code': 'UPDATE_FAILED', 'message': str(e), 'retryable': True}
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
