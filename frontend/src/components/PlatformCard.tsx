@@ -1,5 +1,6 @@
 import React from 'react';
 import { PlatformConfig } from '../types';
+import { useTheme } from '../contexts/ThemeContext';
 
 interface PlatformCardProps {
   platform: PlatformConfig;
@@ -71,22 +72,44 @@ const PlatformCard: React.FC<PlatformCardProps> = ({
   isConnecting,
   onConnect,
 }) => {
+  const { isDark } = useTheme();
+  
   return (
-    <div className="card-3d p-6 hover:shadow-hard transition-all duration-300 animate-fade-in">
+    <div className={`p-6 rounded-2xl transition-all duration-300 animate-fade-in ${
+      isDark 
+        ? 'bg-slate-800 border border-slate-700 hover:border-sky-500/50 hover:shadow-lg hover:shadow-sky-500/10' 
+        : 'bg-white border border-gray-200 hover:border-sky-300 hover:shadow-xl hover:shadow-sky-500/10'
+    }`}>
       <div className="flex flex-col items-center">
         {/* Platform Icon */}
-        <div className={`w-16 h-16 ${platform.color} rounded-2xl flex items-center justify-center mb-4 shadow-lg`}>
+        <div 
+          className={`w-16 h-16 ${platform.color} rounded-2xl flex items-center justify-center mb-4`}
+          style={{
+            boxShadow: `0 8px 24px -4px ${
+              platform.color.includes('blue') ? 'rgba(59, 130, 246, 0.4)' :
+              platform.color.includes('sky') ? 'rgba(14, 165, 233, 0.4)' :
+              platform.color.includes('green') ? 'rgba(34, 197, 94, 0.4)' :
+              platform.color.includes('pink') ? 'rgba(236, 72, 153, 0.4)' :
+              platform.color.includes('purple') ? 'rgba(168, 85, 247, 0.4)' :
+              platform.color.includes('indigo') ? 'rgba(99, 102, 241, 0.4)' :
+              platform.color.includes('red') ? 'rgba(239, 68, 68, 0.4)' :
+              'rgba(0, 0, 0, 0.2)'
+            }`
+          }}
+        >
           <PlatformIcon platform={platform.id} className="w-8 h-8 text-white" />
         </div>
 
         {/* Platform Name */}
-        <h3 className="text-lg font-semibold text-gray-900 mb-3 text-center">
+        <h3 className={`text-lg font-semibold mb-3 text-center ${isDark ? 'text-white' : 'text-gray-900'}`}>
           {platform.name}
         </h3>
 
         {/* Connection Status */}
         {isConnected ? (
-          <div className="status-badge status-connected mb-4">
+          <div className={`flex items-center gap-2 px-4 py-2 rounded-xl font-medium text-sm ${
+            isDark ? 'bg-emerald-900/30 text-emerald-400 border border-emerald-800' : 'bg-emerald-50 text-emerald-600 border border-emerald-200'
+          }`}>
             <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
               <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
             </svg>
@@ -96,24 +119,29 @@ const PlatformCard: React.FC<PlatformCardProps> = ({
           <button
             onClick={onConnect}
             disabled={isConnecting}
-            className={`w-full btn-professional ${
+            className={`w-full py-2.5 px-4 rounded-xl font-medium transition-all duration-200 flex items-center justify-center gap-2 ${
               isConnecting
-                ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                : 'btn-primary-3d'
+                ? isDark 
+                  ? 'bg-slate-700 text-gray-400 cursor-not-allowed' 
+                  : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                : 'bg-gradient-to-r from-sky-500 to-blue-600 text-white hover:from-sky-600 hover:to-blue-700 shadow-lg shadow-sky-500/25'
             }`}
           >
             {isConnecting ? (
-              <span className="flex items-center justify-center gap-2">
-                <div className="w-4 h-4 border-2 border-gray-300 border-t-gray-500 rounded-full animate-spin"></div>
-                Connecting...
-              </span>
+              <>
+                <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                </svg>
+                <span>Connecting...</span>
+              </>
             ) : (
-              <span className="flex items-center justify-center gap-2">
+              <>
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
                 </svg>
-                Connect
-              </span>
+                <span>Connect</span>
+              </>
             )}
           </button>
         )}

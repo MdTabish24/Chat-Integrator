@@ -7,6 +7,7 @@ import EmptyState from './EmptyState';
 import apiClient from '../config/api';
 import { useWebSocket } from '../hooks/useWebSocket';
 import { useToast } from '../contexts/ToastContext';
+import { useTheme } from '../contexts/ThemeContext';
 
 interface ChatViewProps {
   conversationId: string | null;
@@ -35,6 +36,7 @@ const ChatView: React.FC<ChatViewProps> = ({
   const shouldAutoScrollRef = useRef(true);
 
   const { showError: showToastError, showSuccess } = useToast();
+  const { isDark } = useTheme();
 
   // WebSocket callbacks
   const handleNewMessage = useCallback((data: any) => {
@@ -416,10 +418,10 @@ const ChatView: React.FC<ChatViewProps> = ({
   // Empty state when no conversation selected
   if (!conversationId) {
     return (
-      <div className="flex-1 flex items-center justify-center bg-gray-50">
+      <div className={`flex-1 flex items-center justify-center chat-area-professional`}>
         <EmptyState
           icon={
-            <svg className="w-16 h-16 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className={`w-16 h-16 ${isDark ? 'text-gray-600' : 'text-gray-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
                 d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
             </svg>
@@ -432,37 +434,37 @@ const ChatView: React.FC<ChatViewProps> = ({
   }
 
   return (
-    <div className="flex-1 flex flex-col bg-white">
+    <div className={`flex-1 flex flex-col ${isDark ? 'bg-slate-900' : 'bg-white'}`}>
       {/* Chat Header */}
-      <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
+      <div className={`px-5 py-4 border-b flex items-center justify-between ${isDark ? 'border-gray-700 bg-slate-800' : 'border-gray-200 bg-white'}`}>
         <div className="flex items-center space-x-3">
           {conversation?.participantAvatarUrl ? (
             <img
               src={conversation.participantAvatarUrl}
               alt={conversation.participantName}
-              className="w-10 h-10 rounded-full"
+              className="w-11 h-11 rounded-xl shadow-md"
             />
           ) : (
-            <div className="w-10 h-10 bg-gray-300 rounded-full flex items-center justify-center">
-              <span className="text-gray-600 font-medium">
+            <div className={`w-11 h-11 rounded-xl flex items-center justify-center shadow-md ${isDark ? 'bg-gradient-to-br from-gray-700 to-gray-800' : 'bg-gradient-to-br from-gray-200 to-gray-300'}`}>
+              <span className={`font-semibold ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>
                 {conversation?.participantName?.charAt(0).toUpperCase() || '?'}
               </span>
             </div>
           )}
           <div>
-            <h3 className="font-semibold text-gray-900">
+            <h3 className={`font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>
               {conversation?.participantName || 'Loading...'}
             </h3>
             {isAuthenticated && (
               <div className="flex items-center space-x-1">
-                <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
-                <span className="text-xs text-green-600">Live</span>
+                <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
+                <span className={`text-xs ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>Live</span>
               </div>
             )}
           </div>
         </div>
         {/* Character count display area */}
-        <div className="text-sm text-gray-500">
+        <div className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
           {messages.length} messages
         </div>
       </div>
@@ -471,7 +473,7 @@ const ChatView: React.FC<ChatViewProps> = ({
       <div
         ref={messagesContainerRef}
         onScroll={handleScroll}
-        className="flex-1 overflow-y-auto p-4 bg-gray-50"
+        className={`flex-1 overflow-y-auto p-4 chat-area-professional`}
       >
         {isLoading ? (
           <div className="flex items-center justify-center h-full">
@@ -480,10 +482,10 @@ const ChatView: React.FC<ChatViewProps> = ({
         ) : error ? (
           <div className="flex items-center justify-center h-full">
             <div className="text-center">
-              <p className="text-red-600 mb-2">{error}</p>
+              <p className={`mb-2 ${isDark ? 'text-red-400' : 'text-red-600'}`}>{error}</p>
               <button
                 onClick={() => loadMessages(1, false)}
-                className="text-blue-600 hover:underline"
+                className={`hover:underline ${isDark ? 'text-sky-400' : 'text-sky-600'}`}
               >
                 Try again
               </button>
@@ -500,7 +502,7 @@ const ChatView: React.FC<ChatViewProps> = ({
               <div className="flex items-center justify-center h-full">
                 <EmptyState
                   icon={
-                    <svg className="w-12 h-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg className={`w-12 h-12 ${isDark ? 'text-gray-600' : 'text-gray-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
                         d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
                     </svg>
@@ -521,10 +523,10 @@ const ChatView: React.FC<ChatViewProps> = ({
 
       {/* Send Error */}
       {sendError && (
-        <div className="px-4 py-2 bg-red-50 border-t border-red-200">
+        <div className={`px-4 py-2 border-t ${isDark ? 'bg-red-900/30 border-red-800' : 'bg-red-50 border-red-200'}`}>
           <div className="flex items-center justify-between">
-            <span className="text-sm text-red-600">{sendError}</span>
-            <button onClick={() => setSendError(null)} className="text-red-500 hover:text-red-700">
+            <span className={`text-sm ${isDark ? 'text-red-400' : 'text-red-600'}`}>{sendError}</span>
+            <button onClick={() => setSendError(null)} className={isDark ? 'text-red-400 hover:text-red-300' : 'text-red-500 hover:text-red-700'}>
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
               </svg>
@@ -535,19 +537,21 @@ const ChatView: React.FC<ChatViewProps> = ({
 
       {/* Instagram Info */}
       {platform === 'instagram' && (
-        <div className="px-4 py-2 bg-gradient-to-r from-pink-50 to-purple-50 border-t border-pink-200">
+        <div className={`px-4 py-2 border-t ${isDark ? 'bg-pink-900/20 border-pink-800' : 'bg-gradient-to-r from-pink-50 to-purple-50 border-pink-200'}`}>
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-2">
-              <span className="text-pink-500">📷</span>
-              <span className="text-xs text-pink-700">
+              <svg className={`w-4 h-4 ${isDark ? 'text-pink-400' : 'text-pink-500'}`} fill="currentColor" viewBox="0 0 24 24">
+                <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zM12 0C8.741 0 8.333.014 7.053.072 2.695.272.273 2.69.073 7.052.014 8.333 0 8.741 0 12c0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98C8.333 23.986 8.741 24 12 24c3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98C15.668.014 15.259 0 12 0z"/>
+              </svg>
+              <span className={`text-xs ${isDark ? 'text-pink-300' : 'text-pink-700'}`}>
                 <strong>Instagram:</strong> Desktop App must be running. If message fails, re-login in Desktop App.
               </span>
             </div>
             <button 
               onClick={() => loadMessages(1, false)} 
-              className="text-xs text-pink-600 hover:text-pink-800 underline"
+              className={`text-xs underline ${isDark ? 'text-pink-400 hover:text-pink-300' : 'text-pink-600 hover:text-pink-800'}`}
             >
-              🔄 Refresh
+              Refresh
             </button>
           </div>
         </div>
@@ -555,19 +559,21 @@ const ChatView: React.FC<ChatViewProps> = ({
 
       {/* Discord Info */}
       {platform === 'discord' && (
-        <div className="px-4 py-2 bg-gradient-to-r from-indigo-50 to-purple-50 border-t border-indigo-200">
+        <div className={`px-4 py-2 border-t ${isDark ? 'bg-indigo-900/20 border-indigo-800' : 'bg-gradient-to-r from-indigo-50 to-purple-50 border-indigo-200'}`}>
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-2">
-              <span className="text-indigo-500">🎮</span>
-              <span className="text-xs text-indigo-700">
+              <svg className={`w-4 h-4 ${isDark ? 'text-indigo-400' : 'text-indigo-500'}`} fill="currentColor" viewBox="0 0 24 24">
+                <path d="M20.317 4.3698a19.7913 19.7913 0 00-4.8851-1.5152.0741.0741 0 00-.0785.0371c-.211.3753-.4447.8648-.6083 1.2495-1.8447-.2762-3.68-.2762-5.4868 0-.1636-.3933-.4058-.8742-.6177-1.2495a.077.077 0 00-.0785-.037 19.7363 19.7363 0 00-4.8852 1.515.0699.0699 0 00-.0321.0277C.5334 9.0458-.319 13.5799.0992 18.0578a.0824.0824 0 00.0312.0561c2.0528 1.5076 4.0413 2.4228 5.9929 3.0294a.0777.0777 0 00.0842-.0276c.4616-.6304.8731-1.2952 1.226-1.9942a.076.076 0 00-.0416-.1057c-.6528-.2476-1.2743-.5495-1.8722-.8923a.077.077 0 01-.0076-.1277c.1258-.0943.2517-.1923.3718-.2914a.0743.0743 0 01.0776-.0105c3.9278 1.7933 8.18 1.7933 12.0614 0a.0739.0739 0 01.0785.0095c.1202.099.246.1981.3728.2924a.077.077 0 01-.0066.1276 12.2986 12.2986 0 01-1.873.8914.0766.0766 0 00-.0407.1067c.3604.698.7719 1.3628 1.225 1.9932a.076.076 0 00.0842.0286c1.961-.6067 3.9495-1.5219 6.0023-3.0294a.077.077 0 00.0313-.0552c.5004-5.177-.8382-9.6739-3.5485-13.6604a.061.061 0 00-.0312-.0286z"/>
+              </svg>
+              <span className={`text-xs ${isDark ? 'text-indigo-300' : 'text-indigo-700'}`}>
                 <strong>Discord:</strong> Messages sent directly via Discord API. Token must be valid.
               </span>
             </div>
             <button 
               onClick={() => loadMessages(1, false)} 
-              className="text-xs text-indigo-600 hover:text-indigo-800 underline"
+              className={`text-xs underline ${isDark ? 'text-indigo-400 hover:text-indigo-300' : 'text-indigo-600 hover:text-indigo-800'}`}
             >
-              🔄 Refresh
+              Refresh
             </button>
           </div>
         </div>

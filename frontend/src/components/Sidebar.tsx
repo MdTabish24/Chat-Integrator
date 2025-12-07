@@ -1,6 +1,7 @@
 import React from 'react';
 import { Platform, Conversation, ConnectedAccount } from '../types';
 import { ConversationSkeleton } from './SkeletonLoader';
+import { useTheme } from '../contexts/ThemeContext';
 
 interface PlatformData {
   platform: Platform;
@@ -86,6 +87,8 @@ const Sidebar: React.FC<SidebarProps> = ({
   onPlatformExpand,
   onConversationClick,
 }) => {
+  const { isDark } = useTheme();
+  
   const formatTimestamp = (timestamp: string) => {
     const date = new Date(timestamp);
     const now = new Date();
@@ -104,16 +107,16 @@ const Sidebar: React.FC<SidebarProps> = ({
   return (
     <aside className="w-80 sidebar-professional flex flex-col h-full overflow-hidden">
       {/* Sidebar Header */}
-      <div className="p-5 border-b border-gray-100">
+      <div className={`p-5 border-b ${isDark ? 'border-gray-700' : 'border-gray-200'}`}>
         <div className="flex items-center justify-between">
           <div>
-            <h2 className="text-lg font-semibold text-gray-900">Messages</h2>
-            <p className="text-sm text-gray-500 mt-0.5">
+            <h2 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>Messages</h2>
+            <p className={`text-sm mt-0.5 ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
               {connectedAccounts.length} platform{connectedAccounts.length !== 1 ? 's' : ''} connected
             </p>
           </div>
-          <div className="w-8 h-8 bg-indigo-50 rounded-lg flex items-center justify-center">
-            <svg className="w-4 h-4 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${isDark ? 'bg-sky-900/40' : 'bg-sky-50'}`}>
+            <svg className={`w-4 h-4 ${isDark ? 'text-sky-400' : 'text-sky-600'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
             </svg>
           </div>
@@ -123,31 +126,31 @@ const Sidebar: React.FC<SidebarProps> = ({
       {/* Platform List */}
       <div className="flex-1 overflow-y-auto">
         {Array.from(platformsData.values()).map((platformData) => (
-          <div key={platformData.platform} className="border-b border-gray-50 last:border-b-0">
+          <div key={platformData.platform} className={`border-b last:border-b-0 ${isDark ? 'border-gray-800' : 'border-gray-100'}`}>
             {/* Platform Header */}
             <button
               onClick={() => onPlatformExpand(platformData.platform)}
-              className="w-full px-5 py-4 flex items-center justify-between hover:bg-gray-50 transition-all duration-150"
+              className={`w-full px-5 py-4 flex items-center justify-between transition-all duration-150 ${isDark ? 'hover:bg-gray-800' : 'hover:bg-sky-50/50'}`}
             >
               <div className="flex items-center space-x-3">
                 {/* Platform Icon */}
                 <div className={`platform-icon ${platformData.color}`}>
                   <PlatformIcon platform={platformData.platform} className="w-5 h-5 text-white" />
                 </div>
-                <span className="font-semibold text-gray-800">{platformData.name}</span>
+                <span className={`font-semibold ${isDark ? 'text-gray-200' : 'text-gray-800'}`}>{platformData.name}</span>
               </div>
               <div className="flex items-center space-x-2">
                 {/* Unread Badge */}
                 {platformData.unreadCount > 0 && (
-                  <span className="inline-flex items-center justify-center min-w-[22px] h-[22px] px-1.5 text-xs font-bold text-white bg-gradient-to-r from-red-500 to-rose-500 rounded-full shadow-sm">
+                  <span className="inline-flex items-center justify-center min-w-[22px] h-[22px] px-1.5 text-xs font-bold text-white bg-gradient-to-r from-rose-500 to-red-500 rounded-full shadow-md">
                     {platformData.unreadCount > 99 ? '99+' : platformData.unreadCount}
                   </span>
                 )}
                 {/* Expand/Collapse Icon */}
                 <svg
-                  className={`w-5 h-5 text-gray-400 transition-transform duration-200 ${
+                  className={`w-5 h-5 transition-transform duration-200 ${
                     platformData.isExpanded ? 'rotate-180' : ''
-                  }`}
+                  } ${isDark ? 'text-gray-500' : 'text-gray-400'}`}
                   fill="none"
                   stroke="currentColor"
                   viewBox="0 0 24 24"
@@ -159,23 +162,23 @@ const Sidebar: React.FC<SidebarProps> = ({
 
             {/* Expanded Conversation List */}
             {platformData.isExpanded && (
-              <div className="bg-gray-50/50">
+              <div className={isDark ? 'bg-gray-900/50' : 'bg-sky-50/30'}>
                 {platformData.isLoading ? (
                   <ConversationSkeleton />
                 ) : platformData.error ? (
                   <div className="px-5 py-4">
-                    <div className="p-3 bg-red-50 border border-red-100 rounded-xl">
-                      <p className="text-sm text-red-600">{platformData.error}</p>
+                    <div className={`p-3 rounded-xl ${isDark ? 'bg-red-900/30 border border-red-800' : 'bg-red-50 border border-red-100'}`}>
+                      <p className={`text-sm ${isDark ? 'text-red-400' : 'text-red-600'}`}>{platformData.error}</p>
                     </div>
                   </div>
                 ) : platformData.conversations.length === 0 ? (
                   <div className="px-5 py-8 text-center">
-                    <div className="w-12 h-12 mx-auto mb-3 bg-gray-100 rounded-full flex items-center justify-center">
-                      <svg className="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <div className={`w-12 h-12 mx-auto mb-3 rounded-full flex items-center justify-center ${isDark ? 'bg-gray-800' : 'bg-gray-100'}`}>
+                      <svg className={`w-6 h-6 ${isDark ? 'text-gray-600' : 'text-gray-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
                       </svg>
                     </div>
-                    <p className="text-sm text-gray-500">No conversations yet</p>
+                    <p className={`text-sm ${isDark ? 'text-gray-500' : 'text-gray-500'}`}>No conversations yet</p>
                   </div>
                 ) : (
                   <div className="max-h-80 overflow-y-auto">
@@ -195,8 +198,8 @@ const Sidebar: React.FC<SidebarProps> = ({
                             className="w-10 h-10 rounded-xl object-cover flex-shrink-0 shadow-sm"
                           />
                         ) : (
-                          <div className="w-10 h-10 bg-gradient-to-br from-gray-200 to-gray-300 rounded-xl flex items-center justify-center flex-shrink-0 shadow-sm">
-                            <span className="text-gray-600 text-sm font-semibold">
+                          <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 shadow-sm ${isDark ? 'bg-gradient-to-br from-gray-700 to-gray-800' : 'bg-gradient-to-br from-gray-200 to-gray-300'}`}>
+                            <span className={`text-sm font-semibold ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>
                               {conversation.participantName?.charAt(0).toUpperCase() || '?'}
                             </span>
                           </div>
@@ -205,18 +208,20 @@ const Sidebar: React.FC<SidebarProps> = ({
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center justify-between">
                             <span className={`text-sm truncate ${
-                              conversation.unreadCount > 0 ? 'font-semibold text-gray-900' : 'font-medium text-gray-700'
+                              conversation.unreadCount > 0 
+                                ? isDark ? 'font-semibold text-white' : 'font-semibold text-gray-900'
+                                : isDark ? 'font-medium text-gray-300' : 'font-medium text-gray-700'
                             }`}>
                               {conversation.participantName}
                             </span>
-                            <span className="text-xs text-gray-400 ml-2 flex-shrink-0">
+                            <span className={`text-xs ml-2 flex-shrink-0 ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>
                               {formatTimestamp(conversation.lastMessageAt)}
                             </span>
                           </div>
                           {conversation.unreadCount > 0 && (
                             <div className="flex items-center gap-1.5 mt-0.5">
-                              <span className="w-1.5 h-1.5 bg-indigo-500 rounded-full"></span>
-                              <span className="text-xs font-medium text-indigo-600">
+                              <span className="w-1.5 h-1.5 bg-sky-500 rounded-full"></span>
+                              <span className={`text-xs font-medium ${isDark ? 'text-sky-400' : 'text-sky-600'}`}>
                                 {conversation.unreadCount} new
                               </span>
                             </div>

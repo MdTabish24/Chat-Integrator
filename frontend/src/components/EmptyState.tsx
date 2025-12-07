@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTheme } from '../contexts/ThemeContext';
 
 interface EmptyStateProps {
   icon?: React.ReactNode;
@@ -16,9 +17,11 @@ const EmptyState: React.FC<EmptyStateProps> = ({
   description,
   action,
 }) => {
+  const { isDark } = useTheme();
+  
   const defaultIcon = (
     <svg
-      className="w-16 h-16 text-gray-300"
+      className={`w-16 h-16 ${isDark ? 'text-gray-600' : 'text-gray-300'}`}
       fill="none"
       stroke="currentColor"
       viewBox="0 0 24 24"
@@ -35,16 +38,16 @@ const EmptyState: React.FC<EmptyStateProps> = ({
   return (
     <div className="flex flex-col items-center justify-center py-16 px-6 text-center animate-fade-in">
       {/* Icon Container */}
-      <div className="w-24 h-24 mb-6 bg-gradient-to-br from-gray-50 to-gray-100 rounded-3xl flex items-center justify-center shadow-inner">
+      <div className={`w-24 h-24 mb-6 rounded-3xl flex items-center justify-center shadow-inner ${isDark ? 'bg-gradient-to-br from-gray-800 to-gray-900' : 'bg-gradient-to-br from-gray-50 to-gray-100'}`}>
         {icon || defaultIcon}
       </div>
       
       {/* Title */}
-      <h3 className="text-xl font-semibold text-gray-900 mb-2">{title}</h3>
+      <h3 className={`text-xl font-semibold mb-2 ${isDark ? 'text-white' : 'text-gray-900'}`}>{title}</h3>
       
       {/* Description */}
       {description && (
-        <p className="text-gray-500 mb-8 max-w-md leading-relaxed">{description}</p>
+        <p className={`mb-8 max-w-md leading-relaxed ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>{description}</p>
       )}
       
       {/* Action Button */}

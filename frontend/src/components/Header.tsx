@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { User } from '../types';
+import { useTheme } from '../contexts/ThemeContext';
 import GmailInboxModal from './GmailInboxModal';
 
 interface HeaderProps {
@@ -24,6 +25,7 @@ const Header: React.FC<HeaderProps> = ({
 }) => {
   const navigate = useNavigate();
   const [showGmailModal, setShowGmailModal] = useState(false);
+  const { theme, toggleTheme, isDark } = useTheme();
 
   const handleGmailClick = () => {
     if (gmailAccountId) {
@@ -40,18 +42,18 @@ const Header: React.FC<HeaderProps> = ({
           {/* Left: Logo and Title */}
           <div className="flex items-center space-x-4">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-xl flex items-center justify-center shadow-lg shadow-indigo-500/20">
-                <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <div className="w-11 h-11 bg-gradient-to-br from-sky-400 to-sky-600 rounded-xl flex items-center justify-center shadow-lg shadow-sky-500/25">
+                <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
                 </svg>
               </div>
               <div>
-                <h1 className="text-lg font-bold text-gray-900">Chat Orbitor</h1>
-                <p className="text-xs text-gray-500">Multi-Platform Sync</p>
+                <h1 className={`text-lg font-bold ${isDark ? 'text-white' : 'text-gray-900'}`}>Chat Orbitor</h1>
+                <p className={`text-xs ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>Multi-Platform Sync</p>
               </div>
             </div>
             {totalUnread > 0 && (
-              <span className="inline-flex items-center justify-center min-w-[24px] h-6 px-2 text-xs font-bold text-white bg-gradient-to-r from-red-500 to-rose-500 rounded-full shadow-sm">
+              <span className="inline-flex items-center justify-center min-w-[24px] h-6 px-2 text-xs font-bold text-white bg-gradient-to-r from-rose-500 to-red-500 rounded-full shadow-md shadow-red-500/25">
                 {totalUnread > 99 ? '99+' : totalUnread}
               </span>
             )}
@@ -59,12 +61,29 @@ const Header: React.FC<HeaderProps> = ({
 
           {/* Right: Actions */}
           <div className="flex items-center space-x-3">
+            {/* Theme Toggle */}
+            <button
+              onClick={toggleTheme}
+              className="theme-toggle"
+              title={isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+            >
+              {isDark ? (
+                <svg className="sun-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
+                </svg>
+              ) : (
+                <svg className="moon-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
+                </svg>
+              )}
+            </button>
+
             {/* WebSocket Status */}
-            <div className="flex items-center gap-2 px-3 py-1.5 bg-gray-50 rounded-lg border border-gray-100">
+            <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-gray-50 border-gray-100'}`}>
               <div className={`w-2 h-2 rounded-full ${
                 isAuthenticated ? 'bg-emerald-500' : isConnected ? 'bg-amber-500 animate-pulse' : 'bg-gray-400'
               }`} />
-              <span className="text-xs font-medium text-gray-600">
+              <span className={`text-xs font-medium ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>
                 {isAuthenticated ? 'Live' : isConnected ? 'Connecting' : 'Offline'}
               </span>
             </div>
@@ -74,8 +93,8 @@ const Header: React.FC<HeaderProps> = ({
               onClick={handleGmailClick}
               className={`relative p-2.5 rounded-xl transition-all duration-200 ${
                 gmailAccountId 
-                  ? 'bg-red-50 text-red-500 hover:bg-red-100 hover:shadow-md' 
-                  : 'bg-gray-50 text-gray-400 hover:bg-gray-100 hover:text-gray-500'
+                  ? isDark ? 'bg-red-900/30 text-red-400 hover:bg-red-900/50 hover:shadow-md' : 'bg-red-50 text-red-500 hover:bg-red-100 hover:shadow-md'
+                  : isDark ? 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-gray-300' : 'bg-gray-50 text-gray-400 hover:bg-gray-100 hover:text-gray-500'
               }`}
               title={gmailAccountId ? 'Open Gmail Inbox' : 'Connect Gmail'}
             >
@@ -109,7 +128,7 @@ const Header: React.FC<HeaderProps> = ({
             {/* Settings Button */}
             <button
               onClick={() => navigate('/settings')}
-              className="p-2.5 rounded-xl bg-gray-50 text-gray-500 hover:bg-gray-100 hover:text-gray-700 transition-all duration-200"
+              className={`p-2.5 rounded-xl transition-all duration-200 ${isDark ? 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-gray-200' : 'bg-gray-50 text-gray-500 hover:bg-gray-100 hover:text-gray-700'}`}
               title="Settings"
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -120,13 +139,13 @@ const Header: React.FC<HeaderProps> = ({
 
             {/* User Info */}
             {user?.email && (
-              <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-gray-50 rounded-lg border border-gray-100">
-                <div className="w-6 h-6 bg-gradient-to-br from-indigo-400 to-purple-500 rounded-full flex items-center justify-center">
+              <div className={`hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-lg border ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-gray-50 border-gray-100'}`}>
+                <div className="w-6 h-6 bg-gradient-to-br from-sky-400 to-sky-600 rounded-full flex items-center justify-center">
                   <span className="text-[10px] font-bold text-white">
                     {user.email.charAt(0).toUpperCase()}
                   </span>
                 </div>
-                <span className="text-sm font-medium text-gray-600 max-w-[120px] truncate">
+                <span className={`text-sm font-medium max-w-[120px] truncate ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>
                   {user.email}
                 </span>
               </div>

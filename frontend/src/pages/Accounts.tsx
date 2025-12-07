@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useToast } from '../contexts/ToastContext';
+import { useTheme } from '../contexts/ThemeContext';
 import apiClient from '../config/api';
 import { ConnectedAccount, PlatformConfig, Platform } from '../types';
 import PlatformCard from '../components/PlatformCard';
@@ -71,6 +72,7 @@ const Accounts: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { showSuccess, showError: showToastError } = useToast();
+  const { isDark } = useTheme();
   const [connectedAccounts, setConnectedAccounts] = useState<ConnectedAccount[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -86,6 +88,7 @@ const Accounts: React.FC = () => {
   const [isSubmittingInstagram, setIsSubmittingInstagram] = useState(false);
   const [showDiscordTokenModal, setShowDiscordTokenModal] = useState(false);
   const [isSubmittingDiscord, setIsSubmittingDiscord] = useState(false);
+  const [isDisconnecting, setIsDisconnecting] = useState(false);
 
   useEffect(() => {
     fetchConnectedAccounts();
@@ -352,6 +355,7 @@ const Accounts: React.FC = () => {
 
     try {
       setError(null);
+      setIsDisconnecting(true);
       await apiClient.delete(`/api/oauth/disconnect/${disconnectingAccount.id}`);
       
       // Remove from local state
@@ -366,6 +370,8 @@ const Accounts: React.FC = () => {
       const errorMessage = err.response?.data?.error?.message || 'Failed to disconnect account';
       setError(errorMessage);
       showToastError(errorMessage);
+    } finally {
+      setIsDisconnecting(false);
       setShowConfirmDialog(false);
       setDisconnectingAccount(null);
     }
@@ -381,18 +387,25 @@ const Accounts: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className={`min-h-screen ${isDark ? 'bg-slate-900' : 'bg-gradient-to-br from-sky-50 to-slate-100'}`}>
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Header */}
         <div className="mb-8">
           <button
             onClick={() => navigate('/dashboard')}
-            className="text-blue-600 hover:text-blue-800 mb-4 flex items-center"
+            className={`mb-4 flex items-center gap-2 font-medium transition-colors ${
+              isDark ? 'text-sky-400 hover:text-sky-300' : 'text-sky-600 hover:text-sky-700'
+            }`}
           >
-            ← Back to Dashboard
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+            </svg>
+            Back to Dashboard
           </button>
-          <h1 className="text-3xl font-bold text-gray-900">Connect Accounts</h1>
-          <p className="mt-2 text-gray-600">
+          <h1 className={`text-3xl font-bold ${isDark ? 'text-white' : 'text-gray-900'}`}>
+            Connect Accounts
+          </h1>
+          <p className={`mt-2 ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
             Connect your social media and messaging accounts to manage all your messages in one place.
           </p>
         </div>
@@ -412,7 +425,9 @@ const Accounts: React.FC = () => {
           <>
             {/* Platform Cards Grid */}
             <div className="mb-12">
-              <h2 className="text-xl font-semibold text-gray-900 mb-4">Available Platforms</h2>
+              <h2 className={`text-xl font-bold mb-4 ${isDark ? 'text-white' : 'text-gray-900'}`}>
+                Available Platforms
+              </h2>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                 {platformConfigs.map(platform => (
                   <PlatformCard
@@ -449,6 +464,7 @@ const Accounts: React.FC = () => {
             onConfirm={handleDisconnectConfirm}
             onCancel={handleDisconnectCancel}
             variant="danger"
+            isLoading={isDisconnecting}
           />
         )}
 

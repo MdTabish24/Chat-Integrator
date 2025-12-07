@@ -3,6 +3,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { useWebSocket } from '../hooks/useWebSocket';
 import { useToast } from '../contexts/ToastContext';
+import { useTheme } from '../contexts/ThemeContext';
 import Sidebar from '../components/Sidebar';
 import Header from '../components/Header';
 import ChatView from '../components/ChatView';
@@ -42,6 +43,7 @@ const Dashboard: React.FC = () => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const { showError } = useToast();
+  const { isDark } = useTheme();
   const [platformsData, setPlatformsData] = useState<Map<Platform, PlatformData>>(new Map());
   const [connectedAccounts, setConnectedAccounts] = useState<ConnectedAccount[]>([]);
   const [isLoadingAccounts, setIsLoadingAccounts] = useState(true);
@@ -328,7 +330,7 @@ const Dashboard: React.FC = () => {
   // Error state
   if (error) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-gray-100 flex items-center justify-center p-4">
+      <div className={`min-h-screen flex items-center justify-center p-4 ${isDark ? 'bg-slate-900' : 'bg-gradient-to-br from-sky-50 to-slate-100'}`}>
         <ErrorDisplay message={error} title="Failed to load accounts" onRetry={loadConnectedAccounts} />
       </div>
     );
@@ -344,7 +346,7 @@ const Dashboard: React.FC = () => {
   // No connected accounts at all
   if (connectedAccounts.length === 0) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-gray-100 flex flex-col">
+      <div className={`min-h-screen flex flex-col dashboard-bg`}>
         <Header
           user={user}
           totalUnread={0}
@@ -357,7 +359,7 @@ const Dashboard: React.FC = () => {
         <div className="flex-1 flex items-center justify-center p-4">
           <EmptyState
             icon={
-              <svg className="w-16 h-16 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg className={`w-16 h-16 ${isDark ? 'text-gray-600' : 'text-gray-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
               </svg>
             }
@@ -372,7 +374,7 @@ const Dashboard: React.FC = () => {
 
   // Main dashboard layout with sidebar
   return (
-    <div className="h-screen flex flex-col bg-gradient-to-br from-slate-50 to-gray-100">
+    <div className="h-screen flex flex-col dashboard-bg">
       {/* Header */}
       <Header
         user={user}

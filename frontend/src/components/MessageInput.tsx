@@ -1,4 +1,5 @@
 import React, { useState, useRef, KeyboardEvent } from 'react';
+import { useTheme } from '../contexts/ThemeContext';
 
 interface MessageInputProps {
   onSendMessage: (content: string) => Promise<void>;
@@ -14,6 +15,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
   const [message, setMessage] = useState('');
   const [isSending, setIsSending] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const { isDark } = useTheme();
 
   const handleSend = async () => {
     const trimmedMessage = message.trim();
@@ -54,8 +56,8 @@ const MessageInput: React.FC<MessageInputProps> = ({
   };
 
   return (
-    <div className="border-t border-gray-200 bg-white p-4">
-      <div className="flex items-end space-x-2">
+    <div className={`border-t p-4 ${isDark ? 'border-gray-700 bg-slate-800' : 'border-gray-200 bg-white'}`}>
+      <div className="flex items-end space-x-3">
         <div className="flex-1 relative">
           <textarea
             ref={textareaRef}
@@ -65,7 +67,11 @@ const MessageInput: React.FC<MessageInputProps> = ({
             placeholder={placeholder}
             disabled={disabled || isSending}
             rows={1}
-            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none disabled:bg-gray-100 disabled:cursor-not-allowed"
+            className={`w-full px-4 py-3 rounded-xl resize-none transition-all duration-200 ${
+              isDark 
+                ? 'bg-slate-700 border-slate-600 text-white placeholder-gray-400 focus:ring-sky-500 focus:border-sky-500 disabled:bg-slate-800' 
+                : 'bg-gray-50 border-gray-200 text-gray-900 placeholder-gray-400 focus:ring-sky-500 focus:border-sky-500 disabled:bg-gray-100'
+            } border-2 focus:outline-none focus:ring-2 disabled:cursor-not-allowed`}
             style={{ maxHeight: '120px' }}
           />
         </div>
@@ -73,7 +79,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
         <button
           onClick={handleSend}
           disabled={!message.trim() || isSending || disabled}
-          className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors flex items-center justify-center min-w-[80px]"
+          className="btn-professional btn-primary-3d px-6 py-3 min-w-[90px]"
         >
           {isSending ? (
             <svg
@@ -96,12 +102,14 @@ const MessageInput: React.FC<MessageInputProps> = ({
               />
             </svg>
           ) : (
-            <span>Send</span>
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+            </svg>
           )}
         </button>
       </div>
       
-      <p className="text-xs text-gray-500 mt-2">
+      <p className={`text-xs mt-2 ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>
         Press Enter to send, Shift+Enter for new line
       </p>
     </div>
