@@ -187,6 +187,9 @@ class GmailAdapter(BasePlatformAdapter):
             list_url = f'{self.BASE_URL}/users/me/messages'
             
             try:
+                print(f'[gmail] Fetching emails with query: {query}')
+                print(f'[gmail] Using token (first 20 chars): {token[:20]}...')
+                
                 list_response = requests.get(
                     list_url,
                     headers={'Authorization': f'Bearer {token}'},
@@ -198,10 +201,22 @@ class GmailAdapter(BasePlatformAdapter):
                 )
                 list_response.raise_for_status()
             except requests.HTTPError as e:
+                error_detail = ""
+                if e.response is not None:
+                    try:
+                        error_data = e.response.json()
+                        error_detail = str(error_data)
+                    except:
+                        error_detail = e.response.text
+                
+                print(f'[gmail] API error {e.response.status_code if e.response else "N/A"}: {error_detail}')
+                
                 if e.response and e.response.status_code == 401:
                     print('[gmail] Access token expired or invalid. Token refresh may be needed.')
-                    raise
-                raise
+                elif e.response and e.response.status_code == 403:
+                    print('[gmail] 403 Forbidden - Check if Gmail API is enabled and scopes are granted.')
+                    print('[gmail] User may need to disconnect and reconnect Gmail, granting all permissions.')
+                raise Exception(f'gmail API error: {e}')
             
             messages_list = list_response.json().get('messages', [])
             emails = []

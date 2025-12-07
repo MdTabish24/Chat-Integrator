@@ -7,6 +7,7 @@ Requirements:
 - 10.4: Email reply endpoint (no compose)
 """
 
+import requests
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
@@ -14,6 +15,88 @@ from rest_framework.permissions import AllowAny
 
 from apps.oauth.models import ConnectedAccount
 from apps.platforms.adapters.gmail import gmail_adapter
+from apps.core.utils.crypto import decrypt
+
+
+class GmailDebugView(APIView):
+    """
+    Debug endpoint to check Gmail token and permissions.
+    
+    GET /api/platforms/gmail/debug/<account_id>
+    """
+    permission_classes = [AllowAny]
+    
+    def get(self, request, account_id):
+        try:
+            if not hasattr(request, 'user_jwt') or not request.user_jwt:
+                return Response({
+                    'error': 'User not authenticated',
+                }, status=status.HTTP_401_UNAUTHORIZED)
+            
+            user_id = request.user_jwt['user_id']
+            
+            # Get account
+            try:
+                account = ConnectedAccount.objects.get(
+                    id=account_id,
+                    user_id=user_id,
+                    platform='gmail',
+                    is_active=True
+                )
+            except ConnectedAccount.DoesNotExist:
+                return Response({
+                    'error': 'Gmail account not found',
+                }, status=status.HTTP_404_NOT_FOUND)
+            
+            # Get token
+            token = decrypt(account.access_token)
+            
+            # Check token info
+            token_info_response = requests.get(
+                'https://www.googleapis.com/oauth2/v1/tokeninfo',
+                params={'access_token': token},
+                timeout=10
+            )
+            
+            token_info = {}
+            if token_info_response.status_code == 200:
+                token_info = token_info_response.json()
+            else:
+                token_info = {'error': token_info_response.text}
+            
+            # Try a simple Gmail API call (get profile)
+            profile_response = requests.get(
+                'https://gmail.googleapis.com/gmail/v1/users/me/profile',
+                headers={'Authorization': f'Bearer {token}'},
+                timeout=10
+            )
+            
+            profile_info = {}
+            if profile_response.status_code == 200:
+                profile_info = profile_response.json()
+            else:
+                profile_info = {
+                    'error': profile_response.status_code,
+                    'message': profile_response.text
+                }
+            
+            return Response({
+                'account_id': str(account.id),
+                'platform_user_id': account.platform_user_id,
+                'platform_username': account.platform_username,
+                'token_expires_at': account.token_expires_at.isoformat() if account.token_expires_at else None,
+                'has_refresh_token': bool(account.refresh_token),
+                'token_info': token_info,
+                'gmail_profile': profile_info,
+                'scopes_granted': token_info.get('scope', '').split(' ') if token_info.get('scope') else [],
+            })
+            
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return Response({
+                'error': str(e),
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 class GmailThreadsView(APIView):

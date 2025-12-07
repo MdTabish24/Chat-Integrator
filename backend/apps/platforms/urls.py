@@ -68,6 +68,7 @@ from .views.discord import (
     DiscordRateLimitStatusView,
 )
 from .views.gmail import (
+    GmailDebugView,
     GmailThreadsView,
     GmailEmailsView,
     GmailReplyView,
@@ -235,6 +236,9 @@ urlpatterns = [
     
     # Gmail OAuth-based endpoints
     # Note: OAuth flow is handled by /api/oauth/connect/gmail and /api/oauth/callback/gmail
+    
+    # GET /api/platforms/gmail/debug/<account_id> - Debug token and permissions
+    path('gmail/debug/<uuid:account_id>', GmailDebugView.as_view(), name='gmail-debug'),
     
     # GET /api/platforms/gmail/threads/<account_id> - Get email threads (conversations)
     path('gmail/threads/<uuid:account_id>', GmailThreadsView.as_view(), name='gmail-threads'),
