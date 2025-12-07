@@ -510,6 +510,170 @@ function parseLinkedInResponse(data) {
 let lastInstagramFetch = 0;
 const INSTAGRAM_MIN_INTERVAL = 20000; // 20 seconds between fetches (reduced for faster updates)
 
+// Track auto-relogin attempts to prevent spam
+let lastAutoReloginAttempt = 0;
+const AUTO_RELOGIN_COOLDOWN = 60000; // 1 minute between auto-relogin attempts
+
+// Auto-relogin function - opens login window automatically when session expires
+async function triggerInstagramAutoRelogin() {
+  const now = Date.now();
+  
+  // Prevent spam - only allow one auto-relogin per minute
+  if (now - lastAutoReloginAttempt < AUTO_RELOGIN_COOLDOWN) {
+    console.log('[instagram] Auto-relogin skipped - cooldown active');
+    return;
+  }
+  
+  lastAutoReloginAttempt = now;
+  
+  // Check if login window is already open
+  if (instagramLoginWindow && !instagramLoginWindow.isDestroyed()) {
+    console.log('[instagram] Login window already open');
+    instagramLoginWindow.focus();
+    return;
+  }
+  
+  console.log('[instagram] Opening auto-relogin window...');
+  
+  // Show notification to user
+  if (mainWindow) {
+    mainWindow.webContents.send('sync-status', { 
+      platform: 'instagram', 
+      success: false, 
+      message: 'Session expired - login window opening...'
+    });
+  }
+  
+  // Trigger the browser login (same as clicking the button)
+  // This will open the login window
+  const instagramSession = session.fromPartition('instagram-login');
+  
+  // Create login window
+  instagramLoginWindow = new BrowserWindow({
+    width: 450,
+    height: 700,
+    resizable: true,
+    title: 'Instagram Auto-Relogin',
+    parent: mainWindow,
+    modal: false,
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      session: instagramSession
+    }
+  });
+
+  // Load Instagram - it should auto-login if session is partially valid
+  // or show login page if fully expired
+  instagramLoginWindow.loadURL('https://www.instagram.com/');
+  
+  console.log('[instagram] Auto-relogin window opened - waiting for user to login...');
+  
+  // Check for successful login
+  let isResolved = false;
+  
+  const checkForLogin = async () => {
+    if (isResolved) return;
+    
+    try {
+      if (!instagramLoginWindow || instagramLoginWindow.isDestroyed()) {
+        return;
+      }
+
+      const currentURL = instagramLoginWindow.webContents.getURL();
+      
+      // Check if user is logged in (URL not on login page)
+      if (currentURL.includes('instagram.com') && 
+          !currentURL.includes('/accounts/login') && 
+          !currentURL.includes('/challenge') &&
+          !currentURL.includes('/two_factor')) {
+        
+        // Get cookies
+        const cookies = await instagramSession.cookies.get({ domain: '.instagram.com' });
+        
+        let sessionid = '';
+        let csrftoken = '';
+        let ds_user_id = '';
+        let mid = '';
+        let ig_did = '';
+        let rur = '';
+
+        for (const cookie of cookies) {
+          if (cookie.name === 'sessionid') sessionid = cookie.value;
+          if (cookie.name === 'csrftoken') csrftoken = cookie.value;
+          if (cookie.name === 'ds_user_id') ds_user_id = cookie.value;
+          if (cookie.name === 'mid') mid = cookie.value;
+          if (cookie.name === 'ig_did') ig_did = cookie.value;
+          if (cookie.name === 'rur') rur = cookie.value;
+        }
+
+        if (sessionid && csrftoken) {
+          isResolved = true;
+          
+          console.log('[instagram] Auto-relogin successful!');
+          
+          // Save cookies
+          const instagramCookies = { sessionid, csrftoken, ds_user_id, mid, ig_did, rur };
+          store.set('instagram_cookies', instagramCookies);
+
+          // Close login window
+          if (!instagramLoginWindow.isDestroyed()) {
+            instagramLoginWindow.close();
+          }
+
+          // Notify UI
+          if (mainWindow) {
+            mainWindow.webContents.send('sync-status', { 
+              platform: 'instagram', 
+              success: true,
+              message: 'Auto-relogin successful! Syncing...'
+            });
+            mainWindow.webContents.send('instagram-login-status', { 
+              status: 'success',
+              message: 'Auto-relogin successful!'
+            });
+          }
+          
+          // Trigger sync after successful login
+          const chatToken = store.get('chatorbitor_token');
+          if (chatToken) {
+            setTimeout(() => {
+              syncPlatform('instagram', instagramCookies, chatToken);
+            }, 2000);
+          }
+          
+          return;
+        }
+      }
+      
+      // Keep checking every 2 seconds
+      setTimeout(checkForLogin, 2000);
+      
+    } catch (err) {
+      console.error('[instagram] Auto-relogin check error:', err.message);
+    }
+  };
+
+  // Start checking
+  instagramLoginWindow.webContents.on('did-finish-load', () => {
+    setTimeout(checkForLogin, 1000);
+  });
+
+  // Handle window close
+  instagramLoginWindow.on('closed', () => {
+    instagramLoginWindow = null;
+    isResolved = true;
+  });
+  
+  // Timeout after 3 minutes
+  setTimeout(() => {
+    if (!isResolved && instagramLoginWindow && !instagramLoginWindow.isDestroyed()) {
+      console.log('[instagram] Auto-relogin timeout - closing window');
+      instagramLoginWindow.close();
+    }
+  }, 3 * 60 * 1000);
+}
+
 async function fetchInstagramDMs(cookies, retryCount = 0) {
   // Rate limit check - don't fetch too frequently
   const now = Date.now();
@@ -517,6 +681,39 @@ async function fetchInstagramDMs(cookies, retryCount = 0) {
   if (timeSinceLastFetch < INSTAGRAM_MIN_INTERVAL && retryCount === 0) {
     console.log(`[instagram] Rate limit: waiting ${Math.ceil((INSTAGRAM_MIN_INTERVAL - timeSinceLastFetch) / 1000)}s before next fetch`);
     await new Promise(resolve => setTimeout(resolve, INSTAGRAM_MIN_INTERVAL - timeSinceLastFetch));
+  }
+  
+  // Try to get fresh cookies from the browser session if available
+  try {
+    const instagramSession = session.fromPartition('instagram-login');
+    const browserCookies = await instagramSession.cookies.get({ domain: '.instagram.com' });
+    
+    if (browserCookies && browserCookies.length > 0) {
+      let freshSessionId = '';
+      let freshCsrfToken = '';
+      let freshDsUserId = '';
+      
+      for (const cookie of browserCookies) {
+        if (cookie.name === 'sessionid') freshSessionId = cookie.value;
+        if (cookie.name === 'csrftoken') freshCsrfToken = cookie.value;
+        if (cookie.name === 'ds_user_id') freshDsUserId = cookie.value;
+      }
+      
+      // If browser session has valid cookies, use them (they're more up-to-date)
+      if (freshSessionId && freshCsrfToken) {
+        if (freshSessionId !== cookies.sessionid) {
+          console.log('[instagram] Using fresh cookies from browser session');
+          cookies.sessionid = freshSessionId;
+          cookies.csrftoken = freshCsrfToken;
+          if (freshDsUserId) cookies.ds_user_id = freshDsUserId;
+          
+          // Save the fresh cookies
+          store.set('instagram_cookies', cookies);
+        }
+      }
+    }
+  } catch (e) {
+    // Browser session not available, use stored cookies
   }
   
   console.log('[instagram] Fetching DMs with cookies...');
@@ -576,7 +773,13 @@ async function fetchInstagramDMs(cookies, retryCount = 0) {
       const location = response.headers.location || '';
       console.log('[instagram] Redirected to:', location);
       if (location.includes('login') || location.includes('accounts')) {
-        throw new Error('Instagram session expired. Please click "Open Instagram Login" to re-login.');
+        // AUTO-RELOGIN: Automatically open login window instead of throwing error
+        console.log('[instagram] Session expired - attempting auto-relogin...');
+        
+        // Trigger auto-relogin (don't wait for it)
+        triggerInstagramAutoRelogin();
+        
+        throw new Error('Instagram session expired. Auto-relogin triggered - please complete login in popup.');
       }
     }
     
@@ -1422,6 +1625,48 @@ function sendMessageViaBrowser(msg, cookies) {
           await new Promise(r => setTimeout(r, 2000));
           
           isResolved = true;
+          
+          // IMPORTANT: Extract updated cookies BEFORE closing window
+          // Instagram updates cookies after actions - we need to save them
+          try {
+            const updatedCookies = await instagramSession.cookies.get({ domain: '.instagram.com' });
+            let newSessionId = '';
+            let newCsrfToken = '';
+            let newDsUserId = '';
+            let newMid = '';
+            let newIgDid = '';
+            let newRur = '';
+            
+            for (const cookie of updatedCookies) {
+              if (cookie.name === 'sessionid') newSessionId = cookie.value;
+              if (cookie.name === 'csrftoken') newCsrfToken = cookie.value;
+              if (cookie.name === 'ds_user_id') newDsUserId = cookie.value;
+              if (cookie.name === 'mid') newMid = cookie.value;
+              if (cookie.name === 'ig_did') newIgDid = cookie.value;
+              if (cookie.name === 'rur') newRur = cookie.value;
+            }
+            
+            // Save updated cookies if they changed
+            if (newSessionId && newCsrfToken) {
+              const currentCookies = store.get('instagram_cookies') || {};
+              const updatedStoredCookies = {
+                sessionid: newSessionId,
+                csrftoken: newCsrfToken,
+                ds_user_id: newDsUserId || currentCookies.ds_user_id || '',
+                mid: newMid || currentCookies.mid || '',
+                ig_did: newIgDid || currentCookies.ig_did || '',
+                rur: newRur || currentCookies.rur || ''
+              };
+              
+              // Check if cookies actually changed
+              if (newSessionId !== currentCookies.sessionid || newCsrfToken !== currentCookies.csrftoken) {
+                console.log('[instagram] Cookies updated after send - saving new session');
+                store.set('instagram_cookies', updatedStoredCookies);
+              }
+            }
+          } catch (cookieErr) {
+            console.log('[instagram] Could not extract updated cookies:', cookieErr.message);
+          }
           
           // Close the window
           if (instagramSendWindow && !instagramSendWindow.isDestroyed()) {
