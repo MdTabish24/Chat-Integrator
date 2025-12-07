@@ -220,7 +220,7 @@ body {
 
   /* Text Gradient */
   .text-gradient {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    background: linear-gradient(135deg, #0ea5e9 0%, #0284c7 100%);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
@@ -284,9 +284,22 @@ body {
 
   /* Animated Background */
   .bg-animated {
-    background: linear-gradient(-45deg, #f0f4ff, #e8ecf1, #f5f7fa, #e4e8eb);
+    background: linear-gradient(-45deg, #e0f2fe, #f0f9ff, #f8fafc, #e2e8f0);
     background-size: 400% 400%;
     animation: gradientBG 15s ease infinite;
+  }
+  
+  /* Section Backgrounds */
+  .bg-navbar {
+    background: var(--bg-navbar);
+  }
+  
+  .bg-sidebar {
+    background: var(--bg-sidebar);
+  }
+  
+  .bg-chat {
+    background: var(--bg-chat);
   }
 }
 
@@ -300,26 +313,31 @@ body {
 
 /* Header */
 .header-professional {
-  background: rgba(255, 255, 255, 0.95);
+  background: var(--bg-navbar);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
-  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+  border-bottom: 1px solid #e2e8f0;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
 }
 
 /* Sidebar */
 .sidebar-professional {
-  background: #ffffff;
-  border-right: 1px solid #e5e7eb;
+  background: var(--bg-sidebar);
+  border-right: 1px solid #e2e8f0;
   box-shadow: 2px 0 8px rgba(0, 0, 0, 0.02);
+}
+
+/* Chat Area */
+.chat-area-professional {
+  background: var(--bg-chat);
 }
 
 /* Message Bubble */
 .message-bubble-outgoing {
-  background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
+  background: linear-gradient(135deg, #0ea5e9 0%, #0284c7 100%);
   color: white;
   border-radius: 18px 18px 4px 18px;
-  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.25);
+  box-shadow: 0 2px 8px rgba(14, 165, 233, 0.25);
 }
 
 .message-bubble-incoming {
@@ -371,7 +389,7 @@ body {
 /* Focus Ring */
 .focus-ring:focus {
   outline: none;
-  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2);
+  box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.2);
 }
 
 /* Conversation Item */
@@ -385,8 +403,8 @@ body {
 }
 
 .conversation-item.active {
-  background: linear-gradient(90deg, #eef2ff 0%, #f8fafc 100%);
-  border-left-color: #6366f1;
+  background: linear-gradient(90deg, #e0f2fe 0%, #f8fafc 100%);
+  border-left-color: #0ea5e9;
 }
 
 /* Avatar */

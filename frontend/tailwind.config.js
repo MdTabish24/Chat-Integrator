@@ -8,16 +8,16 @@ export default {
     extend: {
       colors: {
         primary: {
-          50: '#f0f4ff',
-          100: '#e0e9ff',
-          200: '#c7d6fe',
-          300: '#a4b8fc',
-          400: '#8093f8',
-          500: '#5a67d8',
-          600: '#4c51bf',
-          700: '#434190',
-          800: '#3c366b',
-          900: '#1a1a2e',
+          50: '#f0f9ff',
+          100: '#e0f2fe',
+          200: '#bae6fd',
+          300: '#7dd3fc',
+          400: '#38bdf8',
+          500: '#0ea5e9',
+          600: '#0284c7',
+          700: '#0369a1',
+          800: '#075985',
+          900: '#0c4a6e',
         },
         surface: {
           50: '#fafbfc',
@@ -43,11 +43,11 @@ export default {
         'elevated-hover': '0 14px 28px rgba(0,0,0,0.12), 0 10px 10px rgba(0,0,0,0.11)',
       },
       backgroundImage: {
-        'gradient-primary': 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-        'gradient-dark': 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)',
-        'gradient-subtle': 'linear-gradient(135deg, #f5f7fa 0%, #e4e8eb 100%)',
+        'gradient-primary': 'linear-gradient(135deg, #0ea5e9 0%, #0284c7 100%)',
+        'gradient-dark': 'linear-gradient(135deg, #0c4a6e 0%, #075985 50%, #0369a1 100%)',
+        'gradient-subtle': 'linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%)',
         'gradient-glass': 'linear-gradient(135deg, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0.05) 100%)',
-        'mesh-gradient': 'radial-gradient(at 40% 20%, hsla(228,100%,74%,0.1) 0px, transparent 50%), radial-gradient(at 80% 0%, hsla(189,100%,56%,0.1) 0px, transparent 50%), radial-gradient(at 0% 50%, hsla(355,100%,93%,0.1) 0px, transparent 50%)',
+        'mesh-gradient': 'radial-gradient(at 40% 20%, hsla(199,89%,48%,0.1) 0px, transparent 50%), radial-gradient(at 80% 0%, hsla(189,100%,56%,0.1) 0px, transparent 50%), radial-gradient(at 0% 50%, hsla(199,100%,93%,0.1) 0px, transparent 50%)',
       },
       animation: {
         'fade-in': 'fadeIn 0.3s ease-out',

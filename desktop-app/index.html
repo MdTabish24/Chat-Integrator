@@ -8,9 +8,9 @@
     * { margin: 0; padding: 0; box-sizing: border-box; }
     
     :root {
-      --primary: #6366f1;
-      --primary-dark: #4f46e5;
-      --primary-light: #818cf8;
+      --primary: #0ea5e9;
+      --primary-dark: #0284c7;
+      --primary-light: #38bdf8;
       --surface: #f8fafc;
       --surface-dark: #f1f5f9;
       --text-primary: #1e293b;
@@ -23,7 +23,7 @@
     
     body {
       font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
+      background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 50%, #f1f5f9 100%);
       min-height: 100vh;
       color: var(--text-primary);
       line-height: 1.5;
@@ -92,7 +92,7 @@
     .form-group input:focus {
       outline: none;
       border-color: var(--primary);
-      box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+      box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.1);
     }
     .form-group input::placeholder { color: var(--text-muted); }
     .form-group small {
@@ -119,11 +119,11 @@
       background: linear-gradient(180deg, var(--primary-light) 0%, var(--primary) 100%);
       color: white;
       width: 100%;
-      box-shadow: 0 2px 8px rgba(99, 102, 241, 0.25);
+      box-shadow: 0 2px 8px rgba(14, 165, 233, 0.25);
     }
     .btn-primary:hover { 
       transform: translateY(-1px); 
-      box-shadow: 0 4px 16px rgba(99, 102, 241, 0.35);
+      box-shadow: 0 4px 16px rgba(14, 165, 233, 0.35);
     }
     .btn-sm { padding: 8px 12px; font-size: 12px; }
     .btn-secondary { 
@@ -402,7 +402,7 @@
             ${lastSync ? `<div style="font-size:10px;color:#888;margin-bottom:8px;">Last sync: ${new Date(lastSync).toLocaleString()}</div>` : ''}
             
             <div style="display:flex;gap:8px;margin-bottom:10px;">
-              <button class="toggle-btn" onclick="showTwitterLogin()" id="twitter-login-tab" style="font-weight:600;color:#667eea;">
+              <button class="toggle-btn" onclick="showTwitterLogin()" id="twitter-login-tab" style="font-weight:600;color:#0ea5e9;">
                 🔐 Login
               </button>
               <button class="toggle-btn" onclick="showTwitterCookies()" id="twitter-cookies-tab">
@@ -464,7 +464,7 @@
             ${lastSync ? `<div style="font-size:10px;color:#888;margin-bottom:8px;">Last sync: ${new Date(lastSync).toLocaleString()}</div>` : ''}
             
             <div style="display:flex;gap:8px;margin-bottom:10px;">
-              <button class="toggle-btn" onclick="showInstagramLogin()" id="instagram-login-tab" style="font-weight:600;color:#667eea;">
+              <button class="toggle-btn" onclick="showInstagramLogin()" id="instagram-login-tab" style="font-weight:600;color:#0ea5e9;">
                 🔐 Login (Recommended)
               </button>
               <button class="toggle-btn" onclick="showInstagramCookies()" id="instagram-cookies-tab">
@@ -529,7 +529,7 @@
             ${lastSync ? `<div style="font-size:10px;color:#888;margin-bottom:8px;">Last sync: ${new Date(lastSync).toLocaleString()}</div>` : ''}
             
             <div style="display:flex;gap:8px;margin-bottom:10px;">
-              <button class="toggle-btn" onclick="showFacebookLogin()" id="facebook-login-tab" style="font-weight:600;color:#667eea;">
+              <button class="toggle-btn" onclick="showFacebookLogin()" id="facebook-login-tab" style="font-weight:600;color:#0ea5e9;">
                 🔐 Login (Recommended)
               </button>
               <button class="toggle-btn" onclick="showFacebookCookies()" id="facebook-cookies-tab">
@@ -672,7 +672,7 @@
       document.getElementById('twitter-login-form').classList.add('show');
       document.getElementById('twitter-cookies-form').classList.remove('show');
       document.getElementById('twitter-login-tab').style.fontWeight = '600';
-      document.getElementById('twitter-login-tab').style.color = '#667eea';
+      document.getElementById('twitter-login-tab').style.color = '#0ea5e9';
       document.getElementById('twitter-cookies-tab').style.fontWeight = 'normal';
       document.getElementById('twitter-cookies-tab').style.color = '#888';
     }
@@ -683,7 +683,7 @@
       document.getElementById('twitter-login-tab').style.fontWeight = 'normal';
       document.getElementById('twitter-login-tab').style.color = '#888';
       document.getElementById('twitter-cookies-tab').style.fontWeight = '600';
-      document.getElementById('twitter-cookies-tab').style.color = '#667eea';
+      document.getElementById('twitter-cookies-tab').style.color = '#0ea5e9';
     }
     
     // Instagram tab switching
@@ -691,7 +691,7 @@
       document.getElementById('instagram-login-form').classList.add('show');
       document.getElementById('instagram-cookies-form').classList.remove('show');
       document.getElementById('instagram-login-tab').style.fontWeight = '600';
-      document.getElementById('instagram-login-tab').style.color = '#667eea';
+      document.getElementById('instagram-login-tab').style.color = '#0ea5e9';
       document.getElementById('instagram-cookies-tab').style.fontWeight = 'normal';
       document.getElementById('instagram-cookies-tab').style.color = '#888';
     }
@@ -702,7 +702,7 @@
       document.getElementById('instagram-login-tab').style.fontWeight = 'normal';
       document.getElementById('instagram-login-tab').style.color = '#888';
       document.getElementById('instagram-cookies-tab').style.fontWeight = '600';
-      document.getElementById('instagram-cookies-tab').style.color = '#667eea';
+      document.getElementById('instagram-cookies-tab').style.color = '#0ea5e9';
     }
     
     // Facebook tab switching
@@ -710,7 +710,7 @@
       document.getElementById('facebook-login-form').classList.add('show');
       document.getElementById('facebook-cookies-form').classList.remove('show');
       document.getElementById('facebook-login-tab').style.fontWeight = '600';
-      document.getElementById('facebook-login-tab').style.color = '#667eea';
+      document.getElementById('facebook-login-tab').style.color = '#0ea5e9';
       document.getElementById('facebook-cookies-tab').style.fontWeight = 'normal';
       document.getElementById('facebook-cookies-tab').style.color = '#888';
     }
@@ -721,7 +721,7 @@
       document.getElementById('facebook-login-tab').style.fontWeight = 'normal';
       document.getElementById('facebook-login-tab').style.color = '#888';
       document.getElementById('facebook-cookies-tab').style.fontWeight = '600';
-      document.getElementById('facebook-cookies-tab').style.color = '#667eea';
+      document.getElementById('facebook-cookies-tab').style.color = '#0ea5e9';
     }
     
     // Facebook browser login - opens Facebook in a popup window
