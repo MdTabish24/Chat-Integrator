@@ -462,8 +462,16 @@ class LinkedInCookieAdapter(BasePlatformAdapter):
         """
         import requests
         
+        print(f'[linkedin-debug] ========== FETCH CONVERSATIONS ==========')
+        print(f'[linkedin-debug] account_id: {account_id}')
+        
         cookies = self._get_cookies(account_id)
+        print(f'[linkedin-debug] Cookies retrieved successfully')
+        print(f'[linkedin-debug] li_at length: {len(cookies["li_at"])}')
+        print(f'[linkedin-debug] JSESSIONID length: {len(cookies["JSESSIONID"])}')
+        
         account = ConnectedAccount.objects.get(id=account_id)
+        print(f'[linkedin-debug] Account: {account.platform_username} (user_id: {account.platform_user_id})')
         
         try:
             # Apply human-like delay before request
@@ -480,6 +488,8 @@ class LinkedInCookieAdapter(BasePlatformAdapter):
                 'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
             }
             
+            print(f'[linkedin-debug] Making request to LinkedIn conversations API...')
+            
             response = requests.get(
                 'https://www.linkedin.com/voyager/api/messaging/conversations',
                 headers=headers,
@@ -487,7 +497,13 @@ class LinkedInCookieAdapter(BasePlatformAdapter):
                 timeout=30
             )
             
+            print(f'[linkedin-debug] Response received!')
+            print(f'[linkedin-debug] Status code: {response.status_code}')
+            print(f'[linkedin-debug] Response headers: {dict(response.headers)}')
+            print(f'[linkedin-debug] Response body (first 1000 chars): {response.text[:1000]}')
+            
             if response.status_code != 200:
+                print(f'[linkedin-debug] ERROR: Non-200 status code!')
                 raise PlatformAPIError(
                     f'LinkedIn API returned {response.status_code}',
                     'linkedin',
@@ -559,8 +575,18 @@ class LinkedInCookieAdapter(BasePlatformAdapter):
         """Handle LinkedIn API errors."""
         error_str = str(e).lower()
         
+        print(f'[linkedin-debug] ========== ERROR HANDLER ==========')
+        print(f'[linkedin-debug] Error type: {type(e).__name__}')
+        print(f'[linkedin-debug] Error message: {e}')
+        print(f'[linkedin-debug] Error string (lower): {error_str[:500]}')
+        
+        # Import traceback for full stack trace
+        import traceback
+        print(f'[linkedin-debug] Full traceback:\n{traceback.format_exc()}')
+        
         # Check for rate limit
         if 'rate limit' in error_str or '429' in error_str or 'too many' in error_str:
+            print(f'[linkedin-debug] Detected: RATE LIMIT')
             self.rate_limiter.pause_requests(
                 account_id,
                 self.RATE_LIMIT_PAUSE_SECONDS,
@@ -572,8 +598,20 @@ class LinkedInCookieAdapter(BasePlatformAdapter):
                 self.RATE_LIMIT_PAUSE_SECONDS
             )
         
-        # Check for auth errors
-        if 'unauthorized' in error_str or '401' in error_str or 'forbidden' in error_str or '403' in error_str:
+        # Check for auth errors - but be more specific
+        # Only treat as cookie expiry if it's clearly an auth error
+        is_auth_error = False
+        if hasattr(e, 'status_code'):
+            print(f'[linkedin-debug] Exception has status_code: {e.status_code}')
+            if e.status_code in [401, 403]:
+                is_auth_error = True
+        elif 'linkedin api returned 401' in error_str or 'linkedin api returned 403' in error_str:
+            is_auth_error = True
+        elif 'unauthorized' in error_str and 'linkedin' in error_str:
+            is_auth_error = True
+            
+        if is_auth_error:
+            print(f'[linkedin-debug] Detected: AUTH ERROR (cookies expired)')
             self._invalidate_client(account_id)
             raise PlatformAPIError(
                 'LinkedIn cookies expired or invalid',
@@ -584,6 +622,7 @@ class LinkedInCookieAdapter(BasePlatformAdapter):
         
         # Check for challenge/verification required
         if 'challenge' in error_str or 'verification' in error_str:
+            print(f'[linkedin-debug] Detected: CHALLENGE/VERIFICATION REQUIRED')
             self._invalidate_client(account_id)
             raise PlatformAPIError(
                 'LinkedIn requires verification. Please complete verification in browser and update cookies.',
@@ -592,6 +631,7 @@ class LinkedInCookieAdapter(BasePlatformAdapter):
                 retryable=False
             )
         
+        print(f'[linkedin-debug] Detected: GENERIC ERROR')
         raise PlatformAPIError(
             f'Failed to fetch LinkedIn data: {e}',
             'linkedin',
