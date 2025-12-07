@@ -44,6 +44,8 @@ from .views.facebook import (
     FacebookSendMessageView,
     FacebookRateLimitStatusView,
     FacebookDesktopSyncView,
+    FacebookPendingMessagesView,
+    FacebookMessageSentView,
 )
 from .views.whatsapp import (
     WhatsAppQRCodeView,
@@ -177,6 +179,12 @@ urlpatterns = [
     
     # POST /api/platforms/facebook/sync-from-desktop - Receive data from desktop app
     path('facebook/sync-from-desktop', FacebookDesktopSyncView.as_view(), name='facebook-desktop-sync'),
+    
+    # GET /api/platforms/facebook/pending - Get pending messages for Desktop App to send
+    path('facebook/pending', FacebookPendingMessagesView.as_view(), name='facebook-pending'),
+    
+    # POST /api/platforms/facebook/message-sent - Report message sent status from Desktop App
+    path('facebook/message-sent', FacebookMessageSentView.as_view(), name='facebook-message-sent'),
     
     # WhatsApp Web browser-based endpoints
     # POST /api/platforms/whatsapp/qr - Start QR code session for authentication

@@ -1010,37 +1010,20 @@ async function fetchFacebookMessages(cookies, retryCount = 0) {
       // Use the same session as the login window
       const facebookSession = session.fromPartition('facebook-login');
       
-      // Set cookies in the session
-      const cookiesToSet = [
-        { url: 'https://www.facebook.com', name: 'c_user', value: cookies.c_user, domain: '.facebook.com' },
-        { url: 'https://www.facebook.com', name: 'xs', value: cookies.xs, domain: '.facebook.com' },
-      ];
-      
-      if (cookies.datr) {
-        cookiesToSet.push({ url: 'https://www.facebook.com', name: 'datr', value: cookies.datr, domain: '.facebook.com' });
-      }
-      if (cookies.fr) {
-        cookiesToSet.push({ url: 'https://www.facebook.com', name: 'fr', value: cookies.fr, domain: '.facebook.com' });
-      }
-      
-      for (const cookie of cookiesToSet) {
-        try {
-          await facebookSession.cookies.set(cookie);
-        } catch (e) {
-          console.log('[facebook] Cookie set warning:', e.message);
-        }
-      }
-      
       // Close existing fetch window
       if (facebookFetchWindow && !facebookFetchWindow.isDestroyed()) {
         facebookFetchWindow.close();
+        facebookFetchWindow = null;
       }
       
-      // Create hidden browser window to fetch messages
+      // Create browser window to fetch messages
+      // Set to true to debug what Facebook shows
+      const DEBUG_SHOW_WINDOW = false;  // Disabled - conversations working!
+      
       facebookFetchWindow = new BrowserWindow({
         width: 1200,
         height: 800,
-        show: false,  // Hidden window
+        show: DEBUG_SHOW_WINDOW,
         webPreferences: {
           nodeIntegration: false,
           contextIsolation: true,
@@ -1049,14 +1032,27 @@ async function fetchFacebookMessages(cookies, retryCount = 0) {
       });
       
       console.log('[facebook] Loading Messenger...');
-      facebookFetchWindow.loadURL('https://www.facebook.com/messages/t/');
+      // Load the main messages page
+      facebookFetchWindow.loadURL('https://www.facebook.com/messages/');
       
       let isResolved = false;
+      let extractAttempts = 0;
+      const maxAttempts = 3;
       
       const extractConversations = async () => {
         if (isResolved) return;
+        extractAttempts++;
         
         try {
+          if (!facebookFetchWindow || facebookFetchWindow.isDestroyed()) {
+            console.log('[facebook] Window destroyed, returning empty');
+            if (!isResolved) {
+              isResolved = true;
+              resolve([]);
+            }
+            return;
+          }
+          
           const currentURL = facebookFetchWindow.webContents.getURL();
           console.log('[facebook] Current URL:', currentURL);
           
@@ -1070,45 +1066,72 @@ async function fetchFacebookMessages(cookies, retryCount = 0) {
             return;
           }
           
-          // Wait for page to fully load, then extract conversations
+          // Extract conversations using multiple methods
           const result = await facebookFetchWindow.webContents.executeJavaScript(`
             (function() {
               try {
                 const conversations = [];
+                const seenIds = new Set();
                 
-                // Find conversation list items - Facebook uses various selectors
-                const chatItems = document.querySelectorAll('[role="row"], [data-testid="mwthreadlist-item"], a[href*="/messages/t/"]');
+                // Method 1: Find all links to messages
+                const allLinks = document.querySelectorAll('a[href*="/messages/"]');
+                console.log('[FB Debug] Found', allLinks.length, 'message links');
                 
-                console.log('Found', chatItems.length, 'potential chat items');
-                
-                chatItems.forEach((item, index) => {
-                  if (index >= 10) return; // Limit to 10 conversations
+                allLinks.forEach((link, index) => {
+                  if (conversations.length >= 15) return;
                   
                   try {
-                    // Try to extract conversation info
-                    const link = item.querySelector('a[href*="/messages/t/"]') || item.closest('a[href*="/messages/t/"]') || item;
-                    const href = link?.getAttribute('href') || '';
+                    const href = link.getAttribute('href') || '';
                     
-                    // Extract thread ID from URL
-                    const threadMatch = href.match(/\\/messages\\/t\\/([0-9]+)/);
-                    const threadId = threadMatch ? threadMatch[1] : '';
+                    // Extract thread ID - handle both regular and e2ee URLs
+                    let threadId = '';
+                    const regularMatch = href.match(/\\/messages\\/t\\/([0-9]+)/);
+                    const e2eeMatch = href.match(/\\/messages\\/e2ee\\/t\\/([0-9]+)/);
                     
-                    if (!threadId) return;
+                    if (regularMatch) threadId = regularMatch[1];
+                    else if (e2eeMatch) threadId = 'e2ee_' + e2eeMatch[1];
                     
-                    // Try to get participant name
-                    const nameEl = item.querySelector('span[dir="auto"]') || 
-                                  item.querySelector('[data-testid="mwthreadlist-item-name"]') ||
-                                  item.querySelector('span');
-                    const participantName = nameEl?.textContent?.trim() || 'Facebook User';
+                    if (!threadId || seenIds.has(threadId)) return;
+                    seenIds.add(threadId);
                     
-                    // Try to get last message preview
-                    const previewEl = item.querySelector('[data-testid="mwthreadlist-item-snippet"]') ||
-                                     item.querySelectorAll('span')[1];
-                    const lastMessage = previewEl?.textContent?.trim() || '';
+                    // Find the conversation item container
+                    const container = link.closest('[role="listitem"]') || 
+                                     link.closest('[role="row"]') || 
+                                     link.closest('[data-virtualized]')?.parentElement ||
+                                     link.parentElement?.parentElement?.parentElement;
                     
-                    // Try to get avatar
-                    const avatarEl = item.querySelector('img[src*="scontent"]');
-                    const avatarUrl = avatarEl?.src || '';
+                    // Get participant name - try multiple selectors
+                    let participantName = 'Facebook User';
+                    const nameSelectors = [
+                      'span[dir="auto"]',
+                      '[data-testid*="name"]',
+                      'span > span',
+                      'strong',
+                    ];
+                    
+                    for (const selector of nameSelectors) {
+                      const el = container?.querySelector(selector) || link.querySelector(selector);
+                      if (el && el.textContent && el.textContent.trim().length > 0 && el.textContent.trim().length < 50) {
+                        participantName = el.textContent.trim();
+                        break;
+                      }
+                    }
+                    
+                    // Get last message preview
+                    let lastMessage = '';
+                    const spans = container?.querySelectorAll('span') || [];
+                    for (const span of spans) {
+                      const text = span.textContent?.trim() || '';
+                      if (text.length > 10 && text.length < 200 && text !== participantName) {
+                        lastMessage = text;
+                        break;
+                      }
+                    }
+                    
+                    // Get avatar URL
+                    const avatarImg = container?.querySelector('img[src*="scontent"]') || 
+                                     container?.querySelector('img[src*="fbcdn"]');
+                    const avatarUrl = avatarImg?.src || '';
                     
                     conversations.push({
                       id: threadId,
@@ -1117,26 +1140,94 @@ async function fetchFacebookMessages(cookies, retryCount = 0) {
                         name: participantName
                       }],
                       messages: lastMessage ? [{
-                        id: 'preview_' + threadId,
+                        id: 'preview_' + threadId + '_' + Date.now(),
                         text: lastMessage,
                         senderId: '',
                         createdAt: new Date().toISOString()
                       }] : [],
                       avatarUrl: avatarUrl
                     });
+                    
+                    console.log('[FB Debug] Found conversation:', threadId, participantName);
                   } catch (itemErr) {
-                    console.error('Error processing chat item:', itemErr);
+                    console.error('[FB Debug] Item error:', itemErr.message);
                   }
                 });
                 
-                return { success: true, conversations: conversations };
+                // Method 2: Find list items with role
+                if (conversations.length === 0) {
+                  const listItems = document.querySelectorAll('[role="listitem"], [role="row"], [role="gridcell"]');
+                  console.log('[FB Debug] Method 2: Found', listItems.length, 'list items');
+                  
+                  listItems.forEach((item, index) => {
+                    if (conversations.length >= 15) return;
+                    
+                    const link = item.querySelector('a[href*="/messages/"]');
+                    if (!link) return;
+                    
+                    const href = link.getAttribute('href') || '';
+                    let threadId = '';
+                    const match = href.match(/\\/messages\\/(?:e2ee\\/)?t\\/([0-9]+)/);
+                    if (match) threadId = match[1];
+                    
+                    if (!threadId || seenIds.has(threadId)) return;
+                    seenIds.add(threadId);
+                    
+                    const spans = item.querySelectorAll('span');
+                    let name = 'Facebook User';
+                    let preview = '';
+                    
+                    spans.forEach((span, i) => {
+                      const text = span.textContent?.trim();
+                      if (text && text.length > 1 && text.length < 40 && i === 0) {
+                        name = text;
+                      } else if (text && text.length > 5 && text.length < 150 && !preview) {
+                        preview = text;
+                      }
+                    });
+                    
+                    conversations.push({
+                      id: threadId,
+                      participants: [{ id: threadId, name: name }],
+                      messages: preview ? [{
+                        id: 'preview_' + threadId,
+                        text: preview,
+                        senderId: '',
+                        createdAt: new Date().toISOString()
+                      }] : []
+                    });
+                  });
+                }
+                
+                // Debug: Log page structure
+                console.log('[FB Debug] Total conversations found:', conversations.length);
+                console.log('[FB Debug] Page title:', document.title);
+                console.log('[FB Debug] Body children:', document.body.children.length);
+                
+                return { 
+                  success: true, 
+                  conversations: conversations,
+                  debug: {
+                    title: document.title,
+                    url: window.location.href,
+                    linksFound: allLinks.length
+                  }
+                };
               } catch (e) {
+                console.error('[FB Debug] Error:', e);
                 return { success: false, error: e.message, conversations: [] };
               }
             })();
           `);
           
-          console.log('[facebook] Extraction result:', result);
+          console.log('[facebook] Extraction result:', JSON.stringify(result, null, 2));
+          
+          // If no conversations found and we haven't tried max times, wait and retry
+          if (result.conversations.length === 0 && extractAttempts < maxAttempts) {
+            console.log(`[facebook] No conversations yet, retrying (${extractAttempts}/${maxAttempts})...`);
+            setTimeout(extractConversations, 3000);
+            return;
+          }
           
           lastFacebookFetch = Date.now();
           isResolved = true;
@@ -1156,24 +1247,27 @@ async function fetchFacebookMessages(cookies, retryCount = 0) {
           
         } catch (err) {
           console.error('[facebook] Extraction error:', err.message);
-          if (!isResolved) {
+          if (extractAttempts < maxAttempts) {
+            console.log(`[facebook] Error, retrying (${extractAttempts}/${maxAttempts})...`);
+            setTimeout(extractConversations, 3000);
+          } else if (!isResolved) {
             isResolved = true;
             if (facebookFetchWindow && !facebookFetchWindow.isDestroyed()) {
               facebookFetchWindow.close();
             }
-            resolve([]); // Return empty rather than failing
+            resolve([]);
           }
         }
       };
       
       // Wait for page to load, then extract
       facebookFetchWindow.webContents.on('did-finish-load', () => {
-        console.log('[facebook] Page loaded, waiting for content...');
-        // Wait for React/JS to render conversations
-        setTimeout(extractConversations, 5000);
+        console.log('[facebook] Page loaded, waiting for React to render...');
+        // Wait longer for React/JS to render conversations
+        setTimeout(extractConversations, 6000);
       });
       
-      // Timeout after 30 seconds
+      // Timeout after 45 seconds
       setTimeout(() => {
         if (!isResolved) {
           console.log('[facebook] Timeout - returning empty');
@@ -1183,7 +1277,7 @@ async function fetchFacebookMessages(cookies, retryCount = 0) {
           }
           resolve([]);
         }
-      }, 30000);
+      }, 45000);
       
     } catch (error) {
       console.error('[facebook] Fetch error:', error.message);
@@ -2322,7 +2416,7 @@ function startPendingMessagePoll() {
   }, 2000);
 }
 
-// Check for pending messages and send them (Instagram + WhatsApp)
+// Check for pending messages and send them (Instagram + WhatsApp + Facebook)
 async function checkAndSendPendingMessages() {
   const token = store.get('chatorbitor_token');
   if (!token) {
@@ -2358,6 +2452,38 @@ async function checkAndSendPendingMessages() {
     } catch (waError) {
       if (waError.response?.status !== 401) {
         console.error('[whatsapp] Error checking pending messages:', waError.message);
+      }
+    }
+  }
+  
+  // Check Facebook pending messages
+  const facebookCookies = store.get('facebook_cookies');
+  if (facebookCookies && facebookCookies.c_user && facebookCookies.xs) {
+    try {
+      const fbResponse = await axios.get(
+        `${apiUrl}/api/platforms/facebook/pending`,
+        {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          },
+          timeout: 30000
+        }
+      );
+      
+      const fbPendingMessages = fbResponse.data.pendingMessages || [];
+      
+      if (fbPendingMessages.length > 0) {
+        console.log(`[facebook] Found ${fbPendingMessages.length} pending messages to send`);
+        
+        for (const msg of fbPendingMessages) {
+          await sendFacebookPendingMessage(msg, facebookCookies, token, apiUrl);
+          await new Promise(resolve => setTimeout(resolve, 3000)); // Longer delay for Facebook
+        }
+      }
+    } catch (fbError) {
+      if (fbError.response?.status !== 401) {
+        console.error('[facebook] Error checking pending messages:', fbError.message);
       }
     }
   }
@@ -2408,6 +2534,308 @@ const sendingMessages = new Set();
 
 // Instagram Send Window (hidden browser window for sending)
 let instagramSendWindow = null;
+
+// Facebook Send Window (hidden browser window for sending)
+let facebookSendWindow = null;
+
+// Send pending Facebook message using browser automation
+async function sendFacebookPendingMessage(msg, cookies, token, apiUrl) {
+  // Prevent duplicate sends
+  if (sendingMessages.has(msg.id)) {
+    console.log(`[facebook] Message ${msg.id} already being sent, skipping...`);
+    return;
+  }
+  sendingMessages.add(msg.id);
+  
+  console.log(`[facebook] Sending message ${msg.id} to thread ${msg.platformConversationId}`);
+  console.log(`[facebook] Content: "${msg.content.substring(0, 50)}..."`);
+  
+  try {
+    const result = await sendFacebookMessageViaBrowser(msg, cookies);
+    
+    if (result.success) {
+      // Report success to backend
+      await axios.post(
+        `${apiUrl}/api/platforms/facebook/message-sent`,
+        {
+          pending_id: msg.id,
+          success: true,
+          platform_message_id: result.messageId || `fb_sent_${Date.now()}`
+        },
+        {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          },
+          timeout: 30000
+        }
+      );
+      
+      console.log(`[facebook] Message ${msg.id} sent successfully!`);
+      sendingMessages.delete(msg.id);
+      
+      if (mainWindow) {
+        mainWindow.webContents.send('facebook-message-sent', {
+          success: true,
+          pendingId: msg.id,
+          message: 'Message sent!'
+        });
+      }
+    } else {
+      throw new Error(result.error || 'Failed to send message');
+    }
+    
+  } catch (error) {
+    sendingMessages.delete(msg.id);
+    
+    const errorMsg = error.message || 'Unknown error';
+    console.error(`[facebook] Failed to send message ${msg.id}:`, errorMsg);
+    
+    // Report failure to backend
+    try {
+      await axios.post(
+        `${apiUrl}/api/platforms/facebook/message-sent`,
+        {
+          pending_id: msg.id,
+          success: false,
+          error: errorMsg
+        },
+        {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          },
+          timeout: 30000
+        }
+      );
+    } catch (reportErr) {
+      console.error('[facebook] Failed to report error:', reportErr.message);
+    }
+    
+    if (mainWindow) {
+      mainWindow.webContents.send('facebook-message-sent', {
+        success: false,
+        pendingId: msg.id,
+        error: errorMsg
+      });
+    }
+  }
+}
+
+// Send Facebook message using browser automation
+function sendFacebookMessageViaBrowser(msg, cookies) {
+  return new Promise(async (resolve) => {
+    try {
+      // Use the same session as the login window
+      const facebookSession = session.fromPartition('facebook-login');
+      
+      // Close existing send window
+      if (facebookSendWindow && !facebookSendWindow.isDestroyed()) {
+        facebookSendWindow.close();
+      }
+      
+      // Create hidden browser window
+      facebookSendWindow = new BrowserWindow({
+        width: 800,
+        height: 600,
+        show: false,  // Hidden window
+        webPreferences: {
+          nodeIntegration: false,
+          contextIsolation: true,
+          session: facebookSession
+        }
+      });
+      
+      // Handle e2ee threads - they have different URL format
+      let threadId = msg.platformConversationId;
+      let threadUrl = '';
+      
+      if (threadId.startsWith('e2ee_')) {
+        // End-to-end encrypted conversation
+        const actualId = threadId.replace('e2ee_', '');
+        threadUrl = `https://www.facebook.com/messages/e2ee/t/${actualId}/`;
+      } else {
+        threadUrl = `https://www.facebook.com/messages/t/${threadId}/`;
+      }
+      
+      console.log('[facebook] Loading thread:', threadUrl);
+      
+      facebookSendWindow.loadURL(threadUrl);
+      
+      let isResolved = false;
+      let retryCount = 0;
+      const maxRetries = 3;
+      
+      const tryToSend = async () => {
+        if (isResolved) return;
+        
+        try {
+          const currentURL = facebookSendWindow.webContents.getURL();
+          console.log('[facebook] Send - Current URL:', currentURL);
+          
+          // Check if redirected to login
+          if (currentURL.includes('/login') || currentURL.includes('/checkpoint')) {
+            isResolved = true;
+            if (facebookSendWindow && !facebookSendWindow.isDestroyed()) {
+              facebookSendWindow.close();
+            }
+            resolve({ success: false, error: 'Facebook session expired. Please re-login via Desktop App.' });
+            return;
+          }
+          
+          // Execute script to find and type in the message input, then send
+          const result = await facebookSendWindow.webContents.executeJavaScript(`
+            (function() {
+              try {
+                // Find message input - Facebook uses various selectors
+                const messageInput = document.querySelector('div[contenteditable="true"][role="textbox"]') ||
+                                    document.querySelector('div[aria-label*="Message"]') ||
+                                    document.querySelector('[data-lexical-editor="true"]') ||
+                                    document.querySelector('div[contenteditable="true"]');
+                
+                if (!messageInput) {
+                  return { success: false, error: 'Message input not found. Chat may not have loaded.' };
+                }
+                
+                // Focus the input
+                messageInput.focus();
+                
+                // Set the message content
+                messageInput.textContent = ${JSON.stringify(msg.content)};
+                messageInput.dispatchEvent(new InputEvent('input', { bubbles: true, data: ${JSON.stringify(msg.content)} }));
+                
+                return { success: true, step: 'typed' };
+              } catch (e) {
+                return { success: false, error: e.message };
+              }
+            })();
+          `);
+          
+          console.log('[facebook] Type result:', result);
+          
+          if (!result.success) {
+            if (retryCount < maxRetries) {
+              retryCount++;
+              console.log(`[facebook] Send - Retrying... (${retryCount}/${maxRetries})`);
+              setTimeout(tryToSend, 3000);
+              return;
+            }
+            isResolved = true;
+            if (facebookSendWindow && !facebookSendWindow.isDestroyed()) {
+              facebookSendWindow.close();
+            }
+            resolve({ success: false, error: result.error || 'Could not type message' });
+            return;
+          }
+          
+          // Wait a moment then press Enter to send
+          await new Promise(r => setTimeout(r, 500));
+          
+          const sendResult = await facebookSendWindow.webContents.executeJavaScript(`
+            (function() {
+              try {
+                const messageInput = document.querySelector('div[contenteditable="true"][role="textbox"]') ||
+                                    document.querySelector('div[aria-label*="Message"]') ||
+                                    document.querySelector('[data-lexical-editor="true"]') ||
+                                    document.querySelector('div[contenteditable="true"]');
+                
+                if (messageInput) {
+                  // Simulate Enter key press
+                  const enterEvent = new KeyboardEvent('keydown', {
+                    key: 'Enter',
+                    code: 'Enter',
+                    keyCode: 13,
+                    which: 13,
+                    bubbles: true
+                  });
+                  messageInput.dispatchEvent(enterEvent);
+                  
+                  // Also try sending Enter keyup
+                  const enterUpEvent = new KeyboardEvent('keyup', {
+                    key: 'Enter',
+                    code: 'Enter',
+                    keyCode: 13,
+                    which: 13,
+                    bubbles: true
+                  });
+                  messageInput.dispatchEvent(enterUpEvent);
+                  
+                  return { success: true, method: 'enter' };
+                }
+                
+                // Try finding and clicking send button
+                const sendButtons = document.querySelectorAll('[aria-label*="Send"], [aria-label*="send"], button[type="submit"]');
+                for (const btn of sendButtons) {
+                  if (btn.offsetParent !== null) { // Visible
+                    btn.click();
+                    return { success: true, method: 'click' };
+                  }
+                }
+                
+                return { success: false, error: 'Could not find send method' };
+              } catch (e) {
+                return { success: false, error: e.message };
+              }
+            })();
+          `);
+          
+          console.log('[facebook] Send result:', sendResult);
+          
+          // Wait for message to be sent
+          await new Promise(r => setTimeout(r, 2000));
+          
+          isResolved = true;
+          
+          // Close the window
+          if (facebookSendWindow && !facebookSendWindow.isDestroyed()) {
+            facebookSendWindow.close();
+          }
+          
+          if (sendResult.success) {
+            resolve({ success: true, messageId: `fb_browser_${Date.now()}` });
+          } else {
+            resolve({ success: false, error: sendResult.error || 'Failed to send' });
+          }
+          
+        } catch (err) {
+          console.error('[facebook] Browser automation error:', err.message);
+          if (retryCount < maxRetries) {
+            retryCount++;
+            console.log(`[facebook] Send - Retrying... (${retryCount}/${maxRetries})`);
+            setTimeout(tryToSend, 3000);
+          } else {
+            isResolved = true;
+            if (facebookSendWindow && !facebookSendWindow.isDestroyed()) {
+              facebookSendWindow.close();
+            }
+            resolve({ success: false, error: err.message });
+          }
+        }
+      };
+      
+      // Start trying to send after page loads
+      facebookSendWindow.webContents.on('did-finish-load', () => {
+        console.log('[facebook] Send - Page loaded, waiting for DOM...');
+        setTimeout(tryToSend, 4000);  // Wait 4s for Facebook's JS to load
+      });
+      
+      // Timeout after 35 seconds
+      setTimeout(() => {
+        if (!isResolved) {
+          isResolved = true;
+          if (facebookSendWindow && !facebookSendWindow.isDestroyed()) {
+            facebookSendWindow.close();
+          }
+          resolve({ success: false, error: 'Timeout: Page took too long to load' });
+        }
+      }, 35000);
+      
+    } catch (err) {
+      console.error('[facebook] Browser send error:', err.message);
+      resolve({ success: false, error: err.message });
+    }
+  });
+}
 
 // Send Instagram message using Electron browser automation (MOST RELIABLE METHOD)
 // This method opens Instagram's actual web interface and types/sends the message

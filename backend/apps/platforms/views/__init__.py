@@ -27,6 +27,9 @@ from .facebook import (
     FacebookMessagesView,
     FacebookSendMessageView,
     FacebookRateLimitStatusView,
+    FacebookPendingMessagesView,
+    FacebookMessageSentView,
+    FacebookDesktopSyncView,
 )
 
 from .whatsapp import (
@@ -79,6 +82,9 @@ __all__ = [
     'FacebookMessagesView',
     'FacebookSendMessageView',
     'FacebookRateLimitStatusView',
+    'FacebookPendingMessagesView',
+    'FacebookMessageSentView',
+    'FacebookDesktopSyncView',
     'WhatsAppQRCodeView',
     'WhatsAppRefreshQRView',
     'WhatsAppSessionStatusView',

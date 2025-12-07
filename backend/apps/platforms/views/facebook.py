@@ -562,6 +562,138 @@ class FacebookRateLimitStatusView(APIView):
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+class FacebookPendingMessagesView(APIView):
+    """
+    Get pending Facebook messages for Desktop App to send.
+    
+    GET /api/platforms/facebook/pending
+    """
+    permission_classes = [AllowAny]
+    
+    def get(self, request):
+        try:
+            if not hasattr(request, 'user_jwt') or not request.user_jwt:
+                return Response({
+                    'error': {'code': 'UNAUTHORIZED', 'message': 'User not authenticated', 'retryable': False}
+                }, status=status.HTTP_401_UNAUTHORIZED)
+            
+            user_id = request.user_jwt['user_id']
+            
+            from apps.messaging.models import PendingOutgoingMessage
+            
+            # Get pending messages for this user's Facebook accounts
+            pending_messages = PendingOutgoingMessage.objects.filter(
+                user_id=user_id,
+                platform='facebook',
+                status='pending'
+            ).order_by('created_at')[:10]  # Limit to 10
+            
+            messages_data = []
+            for msg in pending_messages:
+                messages_data.append({
+                    'id': str(msg.id),
+                    'platformConversationId': msg.platform_conversation_id,
+                    'recipientId': msg.recipient_id,
+                    'content': msg.content,
+                    'createdAt': msg.created_at.isoformat(),
+                })
+            
+            return Response({
+                'pendingMessages': messages_data,
+                'count': len(messages_data),
+            })
+            
+        except Exception as e:
+            print(f'[facebook] Failed to get pending messages: {e}')
+            return Response({
+                'error': {'code': 'FETCH_FAILED', 'message': str(e), 'retryable': True}
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class FacebookMessageSentView(APIView):
+    """
+    Report message sent status from Desktop App.
+    
+    POST /api/platforms/facebook/message-sent
+    """
+    permission_classes = [AllowAny]
+    
+    def post(self, request):
+        try:
+            if not hasattr(request, 'user_jwt') or not request.user_jwt:
+                return Response({
+                    'error': {'code': 'UNAUTHORIZED', 'message': 'User not authenticated', 'retryable': False}
+                }, status=status.HTTP_401_UNAUTHORIZED)
+            
+            user_id = request.user_jwt['user_id']
+            pending_id = request.data.get('pending_id')
+            success = request.data.get('success', False)
+            platform_message_id = request.data.get('platform_message_id', '')
+            error = request.data.get('error', '')
+            
+            if not pending_id:
+                return Response({
+                    'error': {'code': 'MISSING_PENDING_ID', 'message': 'pending_id is required', 'retryable': False}
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            from apps.messaging.models import PendingOutgoingMessage, Message
+            from apps.core.utils.crypto import encrypt
+            from django.utils import timezone
+            
+            try:
+                pending_msg = PendingOutgoingMessage.objects.get(
+                    id=pending_id,
+                    user_id=user_id,
+                    platform='facebook'
+                )
+            except PendingOutgoingMessage.DoesNotExist:
+                return Response({
+                    'error': {'code': 'NOT_FOUND', 'message': 'Pending message not found', 'retryable': False}
+                }, status=status.HTTP_404_NOT_FOUND)
+            
+            if success:
+                # Create the actual message in database
+                try:
+                    Message.objects.create(
+                        conversation=pending_msg.conversation,
+                        platform_message_id=platform_message_id or f'fb_sent_{timezone.now().timestamp()}',
+                        sender_id='me',
+                        sender_name='You',
+                        content=encrypt(pending_msg.content),
+                        message_type='text',
+                        is_outgoing=True,
+                        is_read=True,
+                        sent_at=timezone.now()
+                    )
+                    
+                    # Update conversation
+                    pending_msg.conversation.last_message_at = timezone.now()
+                    pending_msg.conversation.save()
+                    
+                except Exception as db_err:
+                    print(f'[facebook] Failed to save sent message: {db_err}')
+                
+                # Delete pending message
+                pending_msg.delete()
+                
+                print(f'[facebook] Message {pending_id} sent successfully via Desktop App')
+                return Response({'success': True, 'message': 'Message sent successfully'})
+            else:
+                # Mark as failed
+                pending_msg.status = 'failed'
+                pending_msg.error_message = error
+                pending_msg.save()
+                
+                print(f'[facebook] Message {pending_id} failed: {error}')
+                return Response({'success': False, 'message': f'Message failed: {error}'})
+            
+        except Exception as e:
+            print(f'[facebook] Failed to process message status: {e}')
+            return Response({
+                'error': {'code': 'PROCESS_FAILED', 'message': str(e), 'retryable': True}
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
 class FacebookDesktopSyncView(APIView):
     """
     Receive Facebook Messenger data from the desktop app.
