@@ -460,7 +460,8 @@ async function fetchLinkedInMessages(cookies, retryCount = 0) {
       }
       
       // Create browser window to fetch messages
-      const DEBUG_SHOW_WINDOW = false;  // Set true to debug
+      // Set to TRUE to debug - will show the browser window
+      const DEBUG_SHOW_WINDOW = true;  // Enable to see what LinkedIn page looks like
       
       linkedinFetchWindow = new BrowserWindow({
         width: 1200,
@@ -473,12 +474,16 @@ async function fetchLinkedInMessages(cookies, retryCount = 0) {
         }
       });
       
-      console.log('[linkedin] Loading LinkedIn Messaging...');
-      linkedinFetchWindow.loadURL('https://www.linkedin.com/messaging/');
+      console.log('[linkedin] Loading LinkedIn Messaging inbox...');
+      
+      // IMPORTANT: Load the main messaging page, not a specific thread
+      // Add query param to prevent auto-redirect to last conversation
+      linkedinFetchWindow.loadURL('https://www.linkedin.com/messaging/?filter=focused');
       
       let isResolved = false;
       let extractAttempts = 0;
-      const maxAttempts = 4;
+      const maxAttempts = 5;
+      let hasNavigatedToInbox = false;
       
       const extractConversations = async () => {
         if (isResolved) return;
@@ -498,16 +503,25 @@ async function fetchLinkedInMessages(cookies, retryCount = 0) {
           console.log('[linkedin] Current URL:', currentURL);
           
           // Check if redirected to login
-          if (currentURL.includes('/login') || currentURL.includes('/checkpoint') || currentURL.includes('/authwall')) {
+          if (currentURL.includes('/login') || currentURL.includes('/checkpoint') || currentURL.includes('/authwall') || currentURL.includes('/uas/')) {
             isResolved = true;
             if (linkedinFetchWindow && !linkedinFetchWindow.isDestroyed()) {
               linkedinFetchWindow.close();
             }
-            reject(new Error('LinkedIn session expired. Please update your cookies.'));
+            reject(new Error('LinkedIn session expired. Please click "Open LinkedIn Login" to re-login.'));
             return;
           }
           
-          // Extract conversations using DOM scraping
+          // If we're on a thread page instead of inbox, navigate back to inbox
+          if (currentURL.includes('/messaging/thread/') && !hasNavigatedToInbox) {
+            console.log('[linkedin] On thread page, navigating to inbox...');
+            hasNavigatedToInbox = true;
+            linkedinFetchWindow.loadURL('https://www.linkedin.com/messaging/?filter=focused');
+            setTimeout(extractConversations, 4000);
+            return;
+          }
+          
+          // Extract conversations using DOM scraping - UPDATED SELECTORS
           const result = await linkedinFetchWindow.webContents.executeJavaScript(`
             (function() {
               try {
@@ -515,67 +529,109 @@ async function fetchLinkedInMessages(cookies, retryCount = 0) {
                 const seenIds = new Set();
                 
                 console.log('[LinkedIn Debug] Starting extraction...');
+                console.log('[LinkedIn Debug] Current URL:', window.location.href);
                 
-                // Method 1: Find conversation list items
-                const listItems = document.querySelectorAll('.msg-conversation-listitem, [data-control-name*="conversation"], li.msg-conversation-card');
-                console.log('[LinkedIn Debug] Found', listItems.length, 'list items via class');
+                // Skip certain UI elements that are NOT conversations
+                const skipNames = ['messaging', 'try premium', 'help center', 'compose', 'search', 'focused', 'jobs', 'unread', 'connections', 'inmail', 'starred'];
                 
-                // Method 2: Find links to conversation threads
-                const threadLinks = document.querySelectorAll('a[href*="/messaging/thread/"]');
-                console.log('[LinkedIn Debug] Found', threadLinks.length, 'thread links');
+                const isValidConversation = (name) => {
+                  if (!name || name.length < 2) return false;
+                  const lower = name.toLowerCase();
+                  for (const skip of skipNames) {
+                    if (lower === skip || lower.includes(skip)) return false;
+                  }
+                  // Must look like a person/company name (has uppercase letter or is multi-word)
+                  return /[A-Z]/.test(name) || name.includes(' ');
+                };
                 
-                // Process thread links
-                threadLinks.forEach((link, index) => {
+                // Method 1: Find conversation items in the left panel
+                // LinkedIn uses msg-conversation-listitem or msg-conversation-card
+                const conversationItems = document.querySelectorAll(
+                  '.msg-conversation-listitem, ' +
+                  '.msg-conversation-card, ' +
+                  '.msg-conversations-container__convo-item, ' +
+                  '[data-control-name="view_message"], ' +
+                  'li[class*="msg-conversation"]'
+                );
+                console.log('[LinkedIn Debug] Found', conversationItems.length, 'conversation items');
+                
+                conversationItems.forEach((item, index) => {
                   if (conversations.length >= 15) return;
                   
                   try {
-                    const href = link.getAttribute('href') || '';
-                    const threadMatch = href.match(/\\/messaging\\/thread\\/([^/]+)/);
-                    if (!threadMatch) return;
+                    // Find the link to the thread
+                    const link = item.querySelector('a[href*="/messaging/thread/"]') || 
+                                item.closest('a[href*="/messaging/thread/"]');
                     
-                    const threadId = threadMatch[1];
-                    if (seenIds.has(threadId)) return;
-                    seenIds.add(threadId);
-                    
-                    // Find container element
-                    const container = link.closest('li') || link.closest('[class*="conversation"]') || link.parentElement?.parentElement;
-                    
-                    // Get participant name
-                    let participantName = 'LinkedIn User';
-                    const nameEl = container?.querySelector('.msg-conversation-card__participant-names, .msg-conversation-listitem__participant-names, [class*="participant-name"]') ||
-                                  container?.querySelector('h3, h4, span.truncate') ||
-                                  link.querySelector('span');
-                    if (nameEl && nameEl.textContent?.trim()) {
-                      participantName = nameEl.textContent.trim().split('\\n')[0].trim();
+                    let threadId = '';
+                    if (link) {
+                      const href = link.getAttribute('href') || '';
+                      const threadMatch = href.match(/\\/messaging\\/thread\\/([^/\\?]+)/);
+                      if (threadMatch) {
+                        threadId = threadMatch[1];
+                      }
                     }
+                    
+                    if (!threadId) {
+                      // Try to get from data attributes
+                      threadId = item.getAttribute('data-thread-id') || 
+                                item.getAttribute('data-conversation-id') ||
+                                '';
+                    }
+                    
+                    if (!threadId || seenIds.has(threadId)) return;
+                    
+                    // Get participant name - try multiple selectors
+                    let participantName = '';
+                    const nameSelectors = [
+                      '.msg-conversation-card__participant-names',
+                      '.msg-conversation-listitem__participant-names', 
+                      '.msg-conversation-card__title-row span',
+                      'h3.truncate',
+                      'span.truncate',
+                      '.msg-conversation-card__row span[dir="ltr"]'
+                    ];
+                    
+                    for (const sel of nameSelectors) {
+                      const nameEl = item.querySelector(sel);
+                      if (nameEl && nameEl.textContent?.trim()) {
+                        participantName = nameEl.textContent.trim().split('\\n')[0].trim();
+                        if (isValidConversation(participantName)) break;
+                        participantName = '';
+                      }
+                    }
+                    
+                    // Fallback: get first span with text that looks like a name
+                    if (!participantName) {
+                      const spans = item.querySelectorAll('span');
+                      for (const span of spans) {
+                        const text = span.textContent?.trim();
+                        if (text && isValidConversation(text)) {
+                          participantName = text;
+                          break;
+                        }
+                      }
+                    }
+                    
+                    if (!participantName || !isValidConversation(participantName)) {
+                      console.log('[LinkedIn Debug] Skipping item - no valid name found');
+                      return;
+                    }
+                    
+                    seenIds.add(threadId);
                     
                     // Get avatar URL
                     let avatarUrl = '';
-                    const avatarImg = container?.querySelector('img.presence-entity__image, img[src*="profile"], img.msg-facepile-grid__img');
+                    const avatarImg = item.querySelector('img.presence-entity__image, img[src*="profile"], img.msg-facepile-grid__img, img[class*="EntityPhoto"]');
                     if (avatarImg) {
                       avatarUrl = avatarImg.src || '';
                     }
                     
                     // Get last message preview
                     let lastMessage = '';
-                    const previewEl = container?.querySelector('.msg-conversation-card__message-snippet, .msg-conversation-listitem__message-snippet, [class*="message-snippet"]');
+                    const previewEl = item.querySelector('.msg-conversation-card__message-snippet, .msg-conversation-listitem__message-snippet, [class*="message-snippet"]');
                     if (previewEl && previewEl.textContent?.trim()) {
                       lastMessage = previewEl.textContent.trim();
-                    }
-                    
-                    // Get timestamp
-                    let timestamp = new Date().toISOString();
-                    const timeEl = container?.querySelector('.msg-conversation-card__time-stamp, .msg-conversation-listitem__time-stamp, time');
-                    if (timeEl) {
-                      const timeText = timeEl.getAttribute('datetime') || timeEl.textContent;
-                      if (timeText) {
-                        try {
-                          const parsed = new Date(timeText);
-                          if (!isNaN(parsed.getTime())) {
-                            timestamp = parsed.toISOString();
-                          }
-                        } catch (e) {}
-                      }
                     }
                     
                     conversations.push({
@@ -585,65 +641,68 @@ async function fetchLinkedInMessages(cookies, retryCount = 0) {
                         name: participantName,
                         avatar: avatarUrl
                       }],
-                      messages: [], // We'll fetch messages separately or use preview
+                      messages: [],
                       avatarUrl: avatarUrl,
                       lastPreview: lastMessage,
-                      lastActivityAt: timestamp
+                      lastActivityAt: new Date().toISOString()
                     });
                     
-                    console.log('[LinkedIn Debug] Found conversation:', threadId, participantName);
+                    console.log('[LinkedIn Debug] Found conversation:', threadId.substring(0, 20) + '...', participantName);
                   } catch (itemErr) {
                     console.error('[LinkedIn Debug] Item error:', itemErr.message);
                   }
                 });
                 
-                // Method 3: If no conversations found, try alternative selectors
+                // Method 2: If no conversations found via items, try finding all thread links
                 if (conversations.length === 0) {
-                  console.log('[LinkedIn Debug] Trying alternative selectors...');
+                  console.log('[LinkedIn Debug] Trying thread links method...');
                   
-                  // Find any list items in the messaging section
-                  const allListItems = document.querySelectorAll('ul li, [role="listitem"]');
-                  allListItems.forEach((item, index) => {
+                  const threadLinks = document.querySelectorAll('a[href*="/messaging/thread/"]');
+                  console.log('[LinkedIn Debug] Found', threadLinks.length, 'thread links');
+                  
+                  threadLinks.forEach((link, index) => {
                     if (conversations.length >= 15) return;
                     
-                    const link = item.querySelector('a[href*="messaging"]');
-                    if (!link) return;
-                    
-                    const href = link.getAttribute('href') || '';
-                    let threadId = '';
-                    
-                    // Try to extract any ID from URL
-                    const idMatch = href.match(/thread\\/([^/]+)/) || href.match(/\\/([0-9]+)$/);
-                    if (idMatch) {
-                      threadId = idMatch[1];
-                    } else {
-                      threadId = 'conv_' + index;
-                    }
-                    
-                    if (seenIds.has(threadId)) return;
-                    seenIds.add(threadId);
-                    
-                    // Get name from any text
-                    let name = 'LinkedIn User';
-                    const texts = item.querySelectorAll('span, h3, h4');
-                    for (const t of texts) {
-                      const text = t.textContent?.trim();
-                      if (text && text.length > 2 && text.length < 50 && !text.includes('ago') && !text.includes('message')) {
-                        name = text;
-                        break;
+                    try {
+                      const href = link.getAttribute('href') || '';
+                      const threadMatch = href.match(/\\/messaging\\/thread\\/([^/\\?]+)/);
+                      if (!threadMatch) return;
+                      
+                      const threadId = threadMatch[1];
+                      if (seenIds.has(threadId)) return;
+                      
+                      // Get the container (parent list item)
+                      const container = link.closest('li') || link.closest('[role="listitem"]') || link.parentElement;
+                      if (!container) return;
+                      
+                      // Get name
+                      let name = '';
+                      const allText = container.querySelectorAll('span, h3, h4');
+                      for (const el of allText) {
+                        const text = el.textContent?.trim();
+                        if (text && isValidConversation(text)) {
+                          name = text;
+                          break;
+                        }
                       }
-                    }
-                    
-                    conversations.push({
-                      id: threadId,
-                      participants: [{ id: threadId, name: name }],
-                      messages: []
-                    });
+                      
+                      if (!name || !isValidConversation(name)) return;
+                      
+                      seenIds.add(threadId);
+                      
+                      conversations.push({
+                        id: threadId,
+                        participants: [{ id: threadId, name: name }],
+                        messages: []
+                      });
+                      
+                      console.log('[LinkedIn Debug] Found via link:', threadId.substring(0, 20) + '...', name);
+                    } catch (e) {}
                   });
                 }
                 
                 // Debug output
-                console.log('[LinkedIn Debug] Total conversations found:', conversations.length);
+                console.log('[LinkedIn Debug] Total valid conversations found:', conversations.length);
                 console.log('[LinkedIn Debug] Page title:', document.title);
                 
                 return { 
@@ -652,8 +711,8 @@ async function fetchLinkedInMessages(cookies, retryCount = 0) {
                   debug: {
                     title: document.title,
                     url: window.location.href,
-                    listItemsFound: listItems.length,
-                    threadLinksFound: threadLinks.length
+                    conversationItemsFound: conversationItems.length,
+                    threadLinksFound: document.querySelectorAll('a[href*="/messaging/thread/"]').length
                   }
                 };
               } catch (e) {
