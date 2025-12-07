@@ -93,7 +93,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, isOutgoing }) =>
         <div
           className={`rounded-lg px-4 py-2 ${
             isOutgoing
-              ? message.id.startsWith('pending_') 
+              ? (message.id.startsWith('pending_') || message.content?.startsWith('⏳'))
                 ? 'bg-blue-400 text-white rounded-br-none opacity-70'  // Pending message
                 : 'bg-blue-600 text-white rounded-br-none'  // Sent message
               : 'bg-gray-200 text-gray-900 rounded-bl-none'

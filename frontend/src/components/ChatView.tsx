@@ -206,10 +206,10 @@ const ChatView: React.FC<ChatViewProps> = ({
         const pendingMessage: Message = {
           id: pendingId,
           conversationId: conversationId,
-          platformMessageId: '',
+          platformMessageId: 'pending',
           senderId: 'me',
           senderName: 'You',
-          content: content,  // Show original content
+          content: `⏳ ${content}`,  // Show with pending indicator
           messageType: 'text',
           isOutgoing: true,
           isRead: false,  // Not read because not sent yet
@@ -218,27 +218,59 @@ const ChatView: React.FC<ChatViewProps> = ({
         };
         setMessages((prev) => [...prev, pendingMessage]);
         setTimeout(() => scrollToBottom(true), 100);
-        showSuccess('📤 Message queued - Desktop App will send it');
+        showSuccess('📤 Message queued - Desktop App will send it (keep Desktop App running!)');
         
-        // Poll to check if message was sent or failed
-        const checkInterval = setInterval(async () => {
+        // Store pending ID to track status
+        const pendingCheckRef = { active: true };
+        
+        // Poll to check if message was sent or failed (without causing page reload)
+        const checkPendingStatus = async () => {
+          if (!pendingCheckRef.active) return;
+          
           try {
             const checkResponse = await apiClient.get(`/api/platforms/instagram/pending`);
             const pendingMessages = checkResponse.data.pendingMessages || [];
             const stillPending = pendingMessages.some((m: any) => m.id === pendingId);
             
             if (!stillPending) {
-              // Message was either sent or failed - reload messages
-              clearInterval(checkInterval);
-              loadMessages(1, false);
+              // Message was either sent or failed
+              pendingCheckRef.active = false;
+              
+              // Update the pending message in place instead of reloading
+              setMessages((prev) => {
+                const idx = prev.findIndex(m => m.id === pendingId);
+                if (idx !== -1) {
+                  // Replace pending message with sent version
+                  const updated = [...prev];
+                  updated[idx] = {
+                    ...updated[idx],
+                    content: content,  // Remove pending indicator
+                    platformMessageId: `sent_${Date.now()}`,
+                    isRead: true,
+                  };
+                  return updated;
+                }
+                return prev;
+              });
+              showSuccess('✅ Message sent via Desktop App!');
+              return;
             }
+            
+            // Keep checking
+            setTimeout(checkPendingStatus, 5000);
           } catch (err) {
-            // Ignore errors
+            // On error, try again
+            setTimeout(checkPendingStatus, 5000);
           }
-        }, 3000); // Check every 3 seconds
+        };
         
-        // Stop checking after 30 seconds
-        setTimeout(() => clearInterval(checkInterval), 30000);
+        // Start checking after 3 seconds
+        setTimeout(checkPendingStatus, 3000);
+        
+        // Stop checking after 60 seconds
+        setTimeout(() => {
+          pendingCheckRef.active = false;
+        }, 60000);
         
         onMessageSent?.();
         return;

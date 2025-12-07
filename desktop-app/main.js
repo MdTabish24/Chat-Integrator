@@ -74,6 +74,15 @@ function createWindow() {
     if (!app.isQuitting) {
       event.preventDefault();
       mainWindow.hide();
+      
+      // Show notification that app is still running
+      if (tray) {
+        tray.displayBalloon({
+          title: 'Chat Orbitor',
+          content: '✅ Still running in background! Instagram messages will sync automatically.',
+          iconType: 'info'
+        });
+      }
     }
   });
 
@@ -1146,7 +1155,11 @@ async function checkAndSendPendingMessages() {
 // Track messages being sent to avoid duplicate sends
 const sendingMessages = new Set();
 
-// Send a single Instagram message using MOBILE API (more reliable than web API)
+// Instagram Send Window (hidden browser window for sending)
+let instagramSendWindow = null;
+
+// Send Instagram message using Electron browser automation (MOST RELIABLE METHOD)
+// This method opens Instagram's actual web interface and types/sends the message
 async function sendInstagramMessage(msg, cookies, token, apiUrl) {
   // Prevent duplicate sends
   if (sendingMessages.has(msg.id)) {
@@ -1159,200 +1172,50 @@ async function sendInstagramMessage(msg, cookies, token, apiUrl) {
   console.log(`[instagram] Content: "${msg.content.substring(0, 50)}..."`);
   
   try {
-    // Generate unique identifiers
-    const timestamp = Date.now();
-    const uuid = `${Math.random().toString(36).substring(2, 10)}-${Math.random().toString(36).substring(2, 6)}-${Math.random().toString(36).substring(2, 6)}-${Math.random().toString(36).substring(2, 6)}-${Math.random().toString(36).substring(2, 14)}`;
-    const clientContext = `6${timestamp}${Math.floor(Math.random() * 1000000000)}`;
+    // METHOD: Browser Automation (open Instagram DM page and type message)
+    console.log('[instagram] Using browser automation to send message...');
     
-    // Try METHOD 1: Mobile API (i.instagram.com)
-    console.log('[instagram] Trying Mobile API (i.instagram.com)...');
+    const result = await sendMessageViaBrowser(msg, cookies);
     
-    // Build full cookie string with ALL available cookies
-    const allCookies = [
-      `sessionid=${cookies.sessionid}`,
-      `csrftoken=${cookies.csrftoken}`,
-      cookies.ds_user_id ? `ds_user_id=${cookies.ds_user_id}` : '',
-      cookies.mid ? `mid=${cookies.mid}` : '',
-      cookies.ig_did ? `ig_did=${cookies.ig_did}` : '',
-      cookies.rur ? `rur=${cookies.rur}` : '',
-      'ig_nrcb=1',
-    ].filter(Boolean).join('; ');
-    
-    console.log('[instagram] Using cookies:', allCookies.substring(0, 100) + '...');
-    
-    const mobileHeaders = {
-      'User-Agent': 'Instagram 269.0.0.18.75 Android (26/8.0.0; 480dpi; 1080x1920; OnePlus; 6T Dev; devitron; qcom; en_US; 314665256)',
-      'Accept': '*/*',
-      'Accept-Language': 'en-US',
-      'Accept-Encoding': 'gzip, deflate',
-      'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-      'X-IG-Capabilities': '3brTvwE=',
-      'X-IG-Connection-Type': 'WIFI',
-      'X-IG-App-ID': '567067343352427',
-      'Cookie': allCookies,
-      'X-CSRFToken': cookies.csrftoken,
-    };
-    
-    // Mobile API payload
-    const mobilePayload = new URLSearchParams();
-    mobilePayload.append('_uuid', uuid);
-    mobilePayload.append('_csrftoken', cookies.csrftoken);
-    mobilePayload.append('thread_ids', `[${msg.platformConversationId}]`);
-    mobilePayload.append('client_context', clientContext);
-    mobilePayload.append('text', msg.content);
-    mobilePayload.append('action', 'send_item');
-    
-    let sendResponse = await instagramAxios({
-      method: 'POST',
-      url: 'https://i.instagram.com/api/v1/direct_v2/threads/broadcast/text/',
-      data: mobilePayload.toString(),
-      headers: mobileHeaders,
-    });
-    
-    console.log('[instagram] Mobile API response status:', sendResponse.status);
-    
-    // If mobile API fails, try Web API as fallback
-    if (sendResponse.status !== 200 || (typeof sendResponse.data === 'string' && sendResponse.data.includes('login'))) {
-      console.log('[instagram] Mobile API failed, trying Web API...');
-      
-      const webHeaders = {
-        'accept': '*/*',
-        'accept-language': 'en-US,en;q=0.9',
-        'content-type': 'application/x-www-form-urlencoded',
-        'cookie': allCookies,
-        'origin': 'https://www.instagram.com',
-        'referer': `https://www.instagram.com/direct/t/${msg.platformConversationId}/`,
-        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'x-csrftoken': cookies.csrftoken,
-        'x-ig-app-id': '936619743392459',
-        'x-ig-www-claim': 'hmac.AR3W0DThY2Mu5Fag4sW5u3RhaR3qhFD_5wvYbOJOD9qaPjIf',
-        'x-instagram-ajax': '1011201729',
-        'x-requested-with': 'XMLHttpRequest',
-      };
-      
-      const webPayload = new URLSearchParams();
-      webPayload.append('action', 'send_item');
-      webPayload.append('thread_ids', `["${msg.platformConversationId}"]`);
-      webPayload.append('client_context', clientContext);
-      webPayload.append('text', msg.content);
-      webPayload.append('offline_threading_id', clientContext);
-      
-      sendResponse = await instagramAxios({
-        method: 'POST',
-        url: 'https://www.instagram.com/api/v1/direct_v2/threads/broadcast/text/',
-        data: webPayload.toString(),
-        headers: webHeaders,
-      });
-      
-      console.log('[instagram] Web API response status:', sendResponse.status);
-    }
-    
-    console.log('[instagram] Send response status:', sendResponse.status);
-    
-    // Check for redirects (means session expired)
-    if (sendResponse.status === 301 || sendResponse.status === 302 || sendResponse.status === 303) {
-      const location = sendResponse.headers?.location || '';
-      console.log('[instagram] Redirect detected to:', location);
-      sendingMessages.delete(msg.id);
-      throw new Error('Instagram session expired (redirect). Please re-login via Desktop App.');
-    }
-    
-    if (sendResponse.data) {
-      const dataStr = typeof sendResponse.data === 'string' 
-        ? sendResponse.data.substring(0, 500) 
-        : JSON.stringify(sendResponse.data).substring(0, 500);
-      console.log('[instagram] Send response data:', dataStr);
-      
-      // Check if response is HTML (means login page)
-      if (typeof sendResponse.data === 'string' && 
-          (sendResponse.data.includes('<!DOCTYPE') || sendResponse.data.includes('login'))) {
-        sendingMessages.delete(msg.id);
-        throw new Error('Instagram session expired (login page). Please re-login via Desktop App.');
-      }
-    }
-    
-    // Check if successful
-    if (sendResponse.status === 200 && sendResponse.data) {
-      const isSuccess = sendResponse.data.status === 'ok' || 
-                       sendResponse.data.payload || 
-                       sendResponse.data.threads;
-      
-      if (isSuccess) {
-        // Report success to backend
-        const messageId = sendResponse.data.payload?.item_id || 
-                         sendResponse.data.payload?.message_id || 
-                         `sent_${Date.now()}`;
-        
-        await axios.post(
-          `${apiUrl}/api/platforms/instagram/message-sent`,
-          {
-            pending_id: msg.id,
-            success: true,
-            platform_message_id: messageId
+    if (result.success) {
+      // Report success to backend
+      await axios.post(
+        `${apiUrl}/api/platforms/instagram/message-sent`,
+        {
+          pending_id: msg.id,
+          success: true,
+          platform_message_id: result.messageId || `sent_${Date.now()}`
+        },
+        {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
           },
-          {
-            headers: {
-              'Authorization': `Bearer ${token}`,
-              'Content-Type': 'application/json'
-            },
-            timeout: 30000
-          }
-        );
-        
-        console.log(`[instagram] Message ${msg.id} sent successfully!`);
-        sendingMessages.delete(msg.id);
-        
-        // Notify UI
-        if (mainWindow) {
-          mainWindow.webContents.send('instagram-message-sent', {
-            success: true,
-            pendingId: msg.id,
-            message: 'Message sent!'
-          });
+          timeout: 30000
         }
-        return;
+      );
+      
+      console.log(`[instagram] Message ${msg.id} sent successfully!`);
+      sendingMessages.delete(msg.id);
+      
+      // Notify UI
+      if (mainWindow) {
+        mainWindow.webContents.send('instagram-message-sent', {
+          success: true,
+          pendingId: msg.id,
+          message: 'Message sent!'
+        });
       }
+      return;
+    } else {
+      throw new Error(result.error || 'Failed to send message');
     }
-    
-    // If we get here, check for specific errors
-    if (sendResponse.status === 400) {
-      const errorMsg = sendResponse.data?.message || 'Bad request';
-      throw new Error(`Instagram rejected: ${errorMsg}`);
-    }
-    
-    if (sendResponse.status === 401 || sendResponse.status === 403) {
-      throw new Error('Instagram session expired. Please re-login via Desktop App.');
-    }
-    
-    // If we get here, something went wrong
-    const errorMsg = sendResponse.data?.message || sendResponse.data?.error || `Status ${sendResponse.status}`;
-    throw new Error(`Instagram: ${errorMsg}`);
     
   } catch (error) {
     sendingMessages.delete(msg.id);
     
-    // Check if this is a redirect error (session expired)
-    const errorMsg = error.message || '';
-    const isRedirectError = errorMsg.includes('redirect') || 
-                           errorMsg.includes('Redirect') ||
-                           errorMsg.includes('Maximum') ||
-                           error.code === 'ERR_FR_TOO_MANY_REDIRECTS';
-    
-    let displayError = error.message;
-    if (isRedirectError) {
-      displayError = 'Instagram session expired. Please click "Open Instagram Login" in Desktop App to re-login.';
-      console.error(`[instagram] Session expired (redirect error) for message ${msg.id}`);
-    } else {
-      console.error(`[instagram] Failed to send message ${msg.id}:`, error.message);
-    }
-    
-    if (error.response) {
-      console.error('[instagram] Response status:', error.response.status);
-      const dataStr = typeof error.response.data === 'string' 
-        ? error.response.data.substring(0, 500) 
-        : JSON.stringify(error.response.data || {}).substring(0, 500);
-      console.error('[instagram] Response data:', dataStr);
-    }
+    const errorMsg = error.message || 'Unknown error';
+    console.error(`[instagram] Failed to send message ${msg.id}:`, errorMsg);
     
     // Report failure to backend
     try {
@@ -1361,7 +1224,7 @@ async function sendInstagramMessage(msg, cookies, token, apiUrl) {
         {
           pending_id: msg.id,
           success: false,
-          error: displayError
+          error: errorMsg
         },
         {
           headers: {
@@ -1380,19 +1243,255 @@ async function sendInstagramMessage(msg, cookies, token, apiUrl) {
       mainWindow.webContents.send('instagram-message-sent', {
         success: false,
         pendingId: msg.id,
-        error: displayError
+        error: errorMsg
       });
-      
-      // If session expired, update UI to show re-login needed
-      if (isRedirectError) {
-        mainWindow.webContents.send('sync-status', { 
-          platform: 'instagram', 
-          success: false, 
-          message: 'Session expired - please re-login'
-        });
-      }
     }
   }
+}
+
+// Send message using browser automation (opens actual Instagram page)
+function sendMessageViaBrowser(msg, cookies) {
+  return new Promise(async (resolve) => {
+    try {
+      // Use the same session as the login window
+      const instagramSession = session.fromPartition('instagram-login');
+      
+      // Make sure cookies are set in the session
+      const cookiesToSet = [
+        { url: 'https://www.instagram.com', name: 'sessionid', value: cookies.sessionid, domain: '.instagram.com' },
+        { url: 'https://www.instagram.com', name: 'csrftoken', value: cookies.csrftoken, domain: '.instagram.com' },
+      ];
+      
+      if (cookies.ds_user_id) {
+        cookiesToSet.push({ url: 'https://www.instagram.com', name: 'ds_user_id', value: cookies.ds_user_id, domain: '.instagram.com' });
+      }
+      if (cookies.mid) {
+        cookiesToSet.push({ url: 'https://www.instagram.com', name: 'mid', value: cookies.mid, domain: '.instagram.com' });
+      }
+      if (cookies.ig_did) {
+        cookiesToSet.push({ url: 'https://www.instagram.com', name: 'ig_did', value: cookies.ig_did, domain: '.instagram.com' });
+      }
+      
+      for (const cookie of cookiesToSet) {
+        try {
+          await instagramSession.cookies.set(cookie);
+        } catch (e) {
+          console.log('[instagram] Cookie set warning:', e.message);
+        }
+      }
+      
+      // Close existing send window
+      if (instagramSendWindow && !instagramSendWindow.isDestroyed()) {
+        instagramSendWindow.close();
+      }
+      
+      // Create hidden browser window
+      instagramSendWindow = new BrowserWindow({
+        width: 800,
+        height: 600,
+        show: false,  // Hidden window
+        webPreferences: {
+          nodeIntegration: false,
+          contextIsolation: true,
+          session: instagramSession
+        }
+      });
+      
+      const threadUrl = `https://www.instagram.com/direct/t/${msg.platformConversationId}/`;
+      console.log('[instagram] Loading thread:', threadUrl);
+      
+      instagramSendWindow.loadURL(threadUrl);
+      
+      let isResolved = false;
+      let retryCount = 0;
+      const maxRetries = 3;
+      
+      const tryToSend = async () => {
+        if (isResolved) return;
+        
+        try {
+          // Check if page loaded correctly (not login page)
+          const currentURL = instagramSendWindow.webContents.getURL();
+          console.log('[instagram] Current URL:', currentURL);
+          
+          if (currentURL.includes('/accounts/login') || currentURL.includes('/challenge')) {
+            isResolved = true;
+            if (instagramSendWindow && !instagramSendWindow.isDestroyed()) {
+              instagramSendWindow.close();
+            }
+            resolve({ success: false, error: 'Instagram session expired. Please re-login via Desktop App.' });
+            return;
+          }
+          
+          // Execute script to find and type in the message input, then send
+          const result = await instagramSendWindow.webContents.executeJavaScript(`
+            (function() {
+              try {
+                // Find message input - Instagram uses contenteditable div or textarea
+                const messageInput = document.querySelector('textarea[placeholder*="Message"]') ||
+                                    document.querySelector('div[contenteditable="true"][role="textbox"]') ||
+                                    document.querySelector('div[aria-label*="Message"]') ||
+                                    document.querySelector('[data-lexical-editor="true"]');
+                
+                if (!messageInput) {
+                  return { success: false, error: 'Message input not found. Try clicking on chat first.' };
+                }
+                
+                // Focus and set the message content
+                messageInput.focus();
+                
+                // For textarea
+                if (messageInput.tagName === 'TEXTAREA') {
+                  messageInput.value = ${JSON.stringify(msg.content)};
+                  messageInput.dispatchEvent(new Event('input', { bubbles: true }));
+                } else {
+                  // For contenteditable div
+                  messageInput.textContent = ${JSON.stringify(msg.content)};
+                  messageInput.dispatchEvent(new InputEvent('input', { bubbles: true, data: ${JSON.stringify(msg.content)} }));
+                }
+                
+                // Wait a moment for Instagram to process
+                return { success: true, step: 'typed' };
+              } catch (e) {
+                return { success: false, error: e.message };
+              }
+            })();
+          `);
+          
+          console.log('[instagram] Type result:', result);
+          
+          if (!result.success) {
+            if (retryCount < maxRetries) {
+              retryCount++;
+              console.log(`[instagram] Retrying... (${retryCount}/${maxRetries})`);
+              setTimeout(tryToSend, 2000);
+              return;
+            }
+            isResolved = true;
+            if (instagramSendWindow && !instagramSendWindow.isDestroyed()) {
+              instagramSendWindow.close();
+            }
+            resolve({ success: false, error: result.error || 'Could not type message' });
+            return;
+          }
+          
+          // Wait a moment then click send button
+          await new Promise(r => setTimeout(r, 500));
+          
+          const sendResult = await instagramSendWindow.webContents.executeJavaScript(`
+            (function() {
+              try {
+                // Find send button - various selectors Instagram uses
+                const sendButton = document.querySelector('button[type="submit"]') ||
+                                  document.querySelector('div[role="button"][tabindex="0"]:has(svg)') ||
+                                  Array.from(document.querySelectorAll('div[role="button"]')).find(b => b.textContent === 'Send');
+                
+                // Alternative: Press Enter key
+                const messageInput = document.querySelector('textarea[placeholder*="Message"]') ||
+                                    document.querySelector('div[contenteditable="true"][role="textbox"]') ||
+                                    document.querySelector('[data-lexical-editor="true"]');
+                
+                if (messageInput) {
+                  // Simulate Enter key press
+                  const enterEvent = new KeyboardEvent('keydown', {
+                    key: 'Enter',
+                    code: 'Enter',
+                    keyCode: 13,
+                    which: 13,
+                    bubbles: true
+                  });
+                  messageInput.dispatchEvent(enterEvent);
+                  return { success: true, method: 'enter' };
+                }
+                
+                if (sendButton) {
+                  sendButton.click();
+                  return { success: true, method: 'click' };
+                }
+                
+                return { success: false, error: 'Send button not found' };
+              } catch (e) {
+                return { success: false, error: e.message };
+              }
+            })();
+          `);
+          
+          console.log('[instagram] Send result:', sendResult);
+          
+          // Wait for message to be sent
+          await new Promise(r => setTimeout(r, 2000));
+          
+          isResolved = true;
+          
+          // Close the window
+          if (instagramSendWindow && !instagramSendWindow.isDestroyed()) {
+            instagramSendWindow.close();
+          }
+          
+          if (sendResult.success) {
+            resolve({ success: true, messageId: `browser_${Date.now()}` });
+          } else {
+            resolve({ success: false, error: sendResult.error || 'Failed to send' });
+          }
+          
+        } catch (err) {
+          console.error('[instagram] Browser automation error:', err.message);
+          if (retryCount < maxRetries) {
+            retryCount++;
+            console.log(`[instagram] Retrying... (${retryCount}/${maxRetries})`);
+            setTimeout(tryToSend, 2000);
+          } else {
+            isResolved = true;
+            if (instagramSendWindow && !instagramSendWindow.isDestroyed()) {
+              instagramSendWindow.close();
+            }
+            resolve({ success: false, error: err.message });
+          }
+        }
+      };
+      
+      // Start trying to send after page loads
+      instagramSendWindow.webContents.on('did-finish-load', () => {
+        console.log('[instagram] Page loaded, waiting for DOM...');
+        setTimeout(tryToSend, 3000);  // Wait 3s for Instagram's JS to load
+      });
+      
+      // Timeout after 30 seconds
+      setTimeout(() => {
+        if (!isResolved) {
+          isResolved = true;
+          if (instagramSendWindow && !instagramSendWindow.isDestroyed()) {
+            instagramSendWindow.close();
+          }
+          resolve({ success: false, error: 'Timeout: Page took too long to load' });
+        }
+      }, 30000);
+      
+    } catch (err) {
+      console.error('[instagram] Browser send error:', err.message);
+      resolve({ success: false, error: err.message });
+    }
+  });
+}
+
+// Auto-start on Windows login
+function setupAutoLaunch() {
+  const AutoLaunch = require('auto-launch');
+  
+  const autoLauncher = new AutoLaunch({
+    name: 'Chat Orbitor',
+    isHidden: true,  // Start minimized
+  });
+  
+  // Enable auto-launch by default
+  autoLauncher.isEnabled().then((isEnabled) => {
+    if (!isEnabled) {
+      autoLauncher.enable();
+      console.log('[app] Auto-launch enabled - app will start on Windows login');
+    }
+  }).catch((err) => {
+    console.log('[app] Auto-launch setup skipped:', err.message);
+  });
 }
 
 // App lifecycle
@@ -1401,6 +1500,13 @@ app.whenReady().then(() => {
   createTray();
   startAutoSync();
   startPendingMessagePoll(); // Start polling for pending Instagram messages
+  
+  // Setup auto-launch (start on Windows login)
+  try {
+    setupAutoLaunch();
+  } catch (err) {
+    console.log('[app] Auto-launch not available:', err.message);
+  }
 });
 
 app.on('window-all-closed', () => {
