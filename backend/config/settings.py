@@ -142,13 +142,30 @@ USE_I18N = True
 USE_TZ = True
 
 # Static files (CSS, JavaScript, Images)
-STATIC_URL = 'static/'
+STATIC_URL = '/static/'
 STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 
 # Frontend static files (if serving from Django)
-STATICFILES_DIRS = [
-    os.path.join(BASE_DIR, '../frontend/dist'),
-] if os.path.exists(os.path.join(BASE_DIR, '../frontend/dist')) else []
+# Check multiple possible locations for frontend dist
+_frontend_dist_paths = [
+    os.path.join(BASE_DIR, '..', 'frontend', 'dist'),
+    os.path.join(BASE_DIR, 'frontend', 'dist'),
+    '/opt/render/project/src/frontend/dist',
+]
+
+STATICFILES_DIRS = []
+for _path in _frontend_dist_paths:
+    if os.path.exists(_path):
+        STATICFILES_DIRS.append(_path)
+        break
+
+# Also serve frontend assets directory specifically
+_frontend_assets_path = os.path.join(BASE_DIR, '..', 'frontend', 'dist', 'assets')
+if os.path.exists(_frontend_assets_path) and _frontend_assets_path not in STATICFILES_DIRS:
+    pass  # Assets are inside dist, so already covered
+
+# WhiteNoise for serving static files in production
+STATICFILES_STORAGE = 'django.contrib.staticfiles.storage.StaticFilesStorage'
 
 # Default primary key field type
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
