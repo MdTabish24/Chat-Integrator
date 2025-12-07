@@ -586,12 +586,16 @@ class FacebookDesktopSyncView(APIView):
             from apps.core.utils.crypto import encrypt
             from django.utils import timezone
             
+            # Try to find Facebook account (could be 'facebook' or 'facebook_cookie')
             try:
-                account = ConnectedAccount.objects.get(user_id=user_id, platform='facebook', is_active=True)
+                account = ConnectedAccount.objects.get(user_id=user_id, platform='facebook_cookie', is_active=True)
             except ConnectedAccount.DoesNotExist:
-                return Response({
-                    'error': {'code': 'ACCOUNT_NOT_FOUND', 'message': 'No active Facebook account found', 'retryable': False}
-                }, status=status.HTTP_404_NOT_FOUND)
+                try:
+                    account = ConnectedAccount.objects.get(user_id=user_id, platform='facebook', is_active=True)
+                except ConnectedAccount.DoesNotExist:
+                    return Response({
+                        'error': {'code': 'ACCOUNT_NOT_FOUND', 'message': 'No active Facebook account found. Please connect Facebook first via the Desktop App.', 'retryable': False}
+                    }, status=status.HTTP_404_NOT_FOUND)
             
             saved_conversations = 0
             saved_messages = 0

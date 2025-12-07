@@ -23,6 +23,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   loginInstagramBrowser: () => ipcRenderer.invoke('login-instagram-browser'),
   closeInstagramLogin: () => ipcRenderer.invoke('close-instagram-login'),
   
+  // Facebook browser-based login (opens Facebook website)
+  loginFacebookBrowser: () => ipcRenderer.invoke('login-facebook-browser'),
+  closeFacebookLogin: () => ipcRenderer.invoke('close-facebook-login'),
+  
   // WhatsApp operations (via whatsapp-web.js)
   whatsappConnect: () => ipcRenderer.invoke('whatsapp-connect'),
   whatsappDisconnect: () => ipcRenderer.invoke('whatsapp-disconnect'),
@@ -38,6 +42,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Instagram login status updates
   onInstagramLoginStatus: (callback) => {
     ipcRenderer.on('instagram-login-status', (event, data) => callback(data));
+  },
+  
+  // Facebook login status updates
+  onFacebookLoginStatus: (callback) => {
+    ipcRenderer.on('facebook-login-status', (event, data) => callback(data));
   },
   
   // WhatsApp status updates (QR code, connection, etc.)

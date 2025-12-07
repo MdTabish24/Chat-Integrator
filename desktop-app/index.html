@@ -192,7 +192,7 @@
       twitter: 'credentials', // Can use username/password
       linkedin: 'cookies',
       instagram: 'browser', // Can use browser login (opens Instagram)
-      facebook: 'cookies'
+      facebook: 'browser' // Can use browser login (opens Facebook)
     };
     
     // Platform cookie instructions
@@ -428,6 +428,71 @@
               </div>
             </div>
           `;
+        }
+        // Facebook has browser login option (like Instagram)
+        else if (id === 'facebook') {
+          card.innerHTML = `
+            <div class="platform-header">
+              <div class="platform-title">
+                <span>${config.icon}</span>
+                <span>${config.name}</span>
+              </div>
+              <span class="platform-status ${hasCookies ? 'connected' : 'disconnected'}" id="status-${id}">
+                ${hasCookies ? '✓ Connected' : 'Not connected'}
+              </span>
+            </div>
+            ${lastSync ? `<div style="font-size:10px;color:#888;margin-bottom:8px;">Last sync: ${new Date(lastSync).toLocaleString()}</div>` : ''}
+            
+            <div style="display:flex;gap:8px;margin-bottom:10px;">
+              <button class="toggle-btn" onclick="showFacebookLogin()" id="facebook-login-tab" style="font-weight:600;color:#667eea;">
+                🔐 Login (Recommended)
+              </button>
+              <button class="toggle-btn" onclick="showFacebookCookies()" id="facebook-cookies-tab">
+                🍪 Cookies
+              </button>
+            </div>
+            
+            <!-- Browser Login (Recommended) -->
+            <div class="platform-fields show" id="facebook-login-form">
+              <div style="background:#e7f3ff;padding:12px;border-radius:8px;margin-bottom:12px;">
+                <div style="font-size:12px;color:#1877F2;margin-bottom:8px;">
+                  <strong>🌐 Browser Login (Best Method)</strong>
+                </div>
+                <div style="font-size:11px;color:#555;line-height:1.5;">
+                  1. Click "Open Facebook Login" below<br>
+                  2. Login to Facebook normally in the popup<br>
+                  3. After login, cookies will be extracted automatically<br>
+                  4. Handles 2FA & verification automatically!
+                </div>
+              </div>
+              <div class="platform-actions">
+                <button class="btn btn-primary btn-sm" onclick="loginFacebookBrowser()" id="facebook-login-btn" style="background:#1877F2;">
+                  🔐 Open Facebook Login
+                </button>
+                <button class="btn btn-secondary btn-sm" onclick="syncPlatform('facebook')">🔄 Sync</button>
+                <button class="btn btn-danger btn-sm" onclick="clearPlatform('facebook')">🗑️</button>
+              </div>
+            </div>
+            
+            <!-- Cookies Form (Manual - hidden by default) -->
+            <div class="platform-fields" id="facebook-cookies-form">
+              <div style="background:#fff3cd;padding:8px;border-radius:6px;margin-bottom:10px;font-size:10px;color:#856404;">
+                ⚠️ Manual method - Use Browser Login above if possible
+              </div>
+              ${config.cookieFields.map(field => `
+                <div class="form-group">
+                  <label>${field}</label>
+                  <input type="text" id="${id}-${field}" placeholder="${field}" value="${platformData.cookies?.[field] || ''}">
+                  <small>${cookieInstructions[id]?.[field] || ''}</small>
+                </div>
+              `).join('')}
+              <div class="platform-actions">
+                <button class="btn btn-primary btn-sm" onclick="savePlatform('${id}')">💾 Save</button>
+                <button class="btn btn-secondary btn-sm" onclick="syncPlatform('${id}')">🔄 Sync</button>
+                <button class="btn btn-danger btn-sm" onclick="clearPlatform('${id}')">🗑️</button>
+              </div>
+            </div>
+          `;
         } else {
           card.innerHTML = `
             <div class="platform-header">
@@ -553,6 +618,61 @@
       document.getElementById('instagram-login-tab').style.color = '#888';
       document.getElementById('instagram-cookies-tab').style.fontWeight = '600';
       document.getElementById('instagram-cookies-tab').style.color = '#667eea';
+    }
+    
+    // Facebook tab switching
+    function showFacebookLogin() {
+      document.getElementById('facebook-login-form').classList.add('show');
+      document.getElementById('facebook-cookies-form').classList.remove('show');
+      document.getElementById('facebook-login-tab').style.fontWeight = '600';
+      document.getElementById('facebook-login-tab').style.color = '#667eea';
+      document.getElementById('facebook-cookies-tab').style.fontWeight = 'normal';
+      document.getElementById('facebook-cookies-tab').style.color = '#888';
+    }
+    
+    function showFacebookCookies() {
+      document.getElementById('facebook-login-form').classList.remove('show');
+      document.getElementById('facebook-cookies-form').classList.add('show');
+      document.getElementById('facebook-login-tab').style.fontWeight = 'normal';
+      document.getElementById('facebook-login-tab').style.color = '#888';
+      document.getElementById('facebook-cookies-tab').style.fontWeight = '600';
+      document.getElementById('facebook-cookies-tab').style.color = '#667eea';
+    }
+    
+    // Facebook browser login - opens Facebook in a popup window
+    async function loginFacebookBrowser() {
+      const btn = document.getElementById('facebook-login-btn');
+      const status = document.getElementById('status-facebook');
+      
+      btn.disabled = true;
+      btn.textContent = '⏳ Opening Facebook...';
+      status.className = 'platform-status syncing';
+      status.textContent = '⏳ Opening login...';
+      
+      try {
+        const result = await window.electronAPI.loginFacebookBrowser();
+        
+        if (result.success) {
+          status.className = 'platform-status connected';
+          status.textContent = '✓ Connected';
+          alert('Facebook connected successfully! Syncing messages...');
+          credentials = await window.electronAPI.getCredentials();
+          renderPlatforms();
+        } else {
+          status.className = 'platform-status error';
+          status.textContent = '✗ ' + (result.error || 'Login failed');
+          if (result.error && result.error !== 'Login window was closed') {
+            alert('Login failed: ' + result.error);
+          }
+        }
+      } catch (err) {
+        status.className = 'platform-status error';
+        status.textContent = '✗ Error';
+        alert('Login error: ' + err.message);
+      }
+      
+      btn.disabled = false;
+      btn.textContent = '🔐 Open Facebook Login';
     }
     
     // Instagram browser login - opens Instagram in a popup window
@@ -757,6 +877,41 @@
         if (btn) {
           btn.disabled = false;
           btn.textContent = '🔐 Open Instagram Login';
+        }
+      }
+    });
+    
+    // Listen for Facebook login status updates
+    window.electronAPI.onFacebookLoginStatus((data) => {
+      const status = document.getElementById('status-facebook');
+      const btn = document.getElementById('facebook-login-btn');
+      
+      if (!status) return;
+      
+      if (data.status === 'window_opened') {
+        status.className = 'platform-status syncing';
+        status.textContent = '⏳ Waiting for login...';
+        if (btn) {
+          btn.textContent = '⏳ Login in progress...';
+        }
+      } else if (data.status === 'success') {
+        status.className = 'platform-status connected';
+        status.textContent = '✓ Connected';
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = '🔐 Open Facebook Login';
+        }
+        // Refresh credentials
+        setTimeout(async () => {
+          credentials = await window.electronAPI.getCredentials();
+          renderPlatforms();
+        }, 500);
+      } else if (data.status === 'cancelled') {
+        status.className = 'platform-status disconnected';
+        status.textContent = 'Not connected';
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = '🔐 Open Facebook Login';
         }
       }
     });

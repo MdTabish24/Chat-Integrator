@@ -1,18 +1,38 @@
 import React from 'react';
+import { DashboardSkeleton, FormSkeleton, PageSkeleton } from './SkeletonLoader';
 
 interface LoadingSpinnerProps {
   size?: 'sm' | 'md' | 'lg' | 'xl';
-  color?: 'blue' | 'white' | 'gray';
+  color?: 'primary' | 'white' | 'gray';
   text?: string;
   fullScreen?: boolean;
+  variant?: 'spinner' | 'skeleton-dashboard' | 'skeleton-form' | 'skeleton-page';
 }
 
 const LoadingSpinner: React.FC<LoadingSpinnerProps> = ({
   size = 'md',
-  color = 'blue',
+  color = 'primary',
   text,
   fullScreen = false,
+  variant = 'spinner',
 }) => {
+  // Return skeleton variants
+  if (variant === 'skeleton-dashboard') {
+    return <DashboardSkeleton />;
+  }
+  
+  if (variant === 'skeleton-form') {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 flex items-center justify-center p-4">
+        <FormSkeleton />
+      </div>
+    );
+  }
+  
+  if (variant === 'skeleton-page') {
+    return <PageSkeleton />;
+  }
+
   const sizeClasses = {
     sm: 'h-4 w-4',
     md: 'h-8 w-8',
@@ -21,39 +41,33 @@ const LoadingSpinner: React.FC<LoadingSpinnerProps> = ({
   };
 
   const colorClasses = {
-    blue: 'text-blue-600',
+    primary: 'text-indigo-600',
     white: 'text-white',
-    gray: 'text-gray-600',
+    gray: 'text-gray-500',
   };
 
   const spinner = (
-    <svg
-      className={`animate-spin ${sizeClasses[size]} ${colorClasses[color]}`}
-      fill="none"
-      viewBox="0 0 24 24"
-    >
-      <circle
-        className="opacity-25"
-        cx="12"
-        cy="12"
-        r="10"
-        stroke="currentColor"
-        strokeWidth="4"
-      />
-      <path
-        className="opacity-75"
-        fill="currentColor"
-        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-      />
-    </svg>
+    <div className="relative">
+      {/* Outer ring */}
+      <div className={`${sizeClasses[size]} rounded-full border-[3px] border-gray-200`}></div>
+      {/* Spinning arc */}
+      <div 
+        className={`absolute top-0 left-0 ${sizeClasses[size]} rounded-full border-[3px] border-transparent animate-spin`}
+        style={{
+          borderTopColor: color === 'primary' ? '#6366f1' : color === 'white' ? '#ffffff' : '#6b7280',
+        }}
+      ></div>
+    </div>
   );
 
   if (fullScreen) {
     return (
-      <div className="fixed inset-0 bg-white bg-opacity-90 flex items-center justify-center z-50">
-        <div className="flex flex-col items-center">
+      <div className="fixed inset-0 bg-gradient-to-br from-gray-50 to-gray-100 flex items-center justify-center z-50">
+        <div className="card-3d p-8 flex flex-col items-center">
           {spinner}
-          {text && <p className="mt-4 text-gray-700 font-medium">{text}</p>}
+          {text && (
+            <p className="mt-4 text-gray-600 font-medium text-sm">{text}</p>
+          )}
         </div>
       </div>
     );
@@ -62,7 +76,7 @@ const LoadingSpinner: React.FC<LoadingSpinnerProps> = ({
   return (
     <div className="flex flex-col items-center justify-center">
       {spinner}
-      {text && <p className="mt-2 text-gray-700 text-sm">{text}</p>}
+      {text && <p className="mt-3 text-gray-600 text-sm font-medium">{text}</p>}
     </div>
   );
 };

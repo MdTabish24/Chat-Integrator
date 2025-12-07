@@ -25,17 +25,17 @@ interface PlatformData {
 }
 
 const PLATFORM_CONFIGS: Record<Platform, { name: string; icon: string; color: string }> = {
-  telegram: { name: 'Telegram', icon: '✈️', color: 'bg-blue-500' },
-  twitter: { name: 'Twitter/X', icon: '🐦', color: 'bg-sky-500' },
-  'twitter-dm': { name: 'Twitter DMs', icon: '💬', color: 'bg-sky-600' },
-  linkedin: { name: 'LinkedIn', icon: '💼', color: 'bg-blue-700' },
-  'linkedin-dm': { name: 'LinkedIn DMs', icon: '💼', color: 'bg-blue-800' },
-  instagram: { name: 'Instagram', icon: '📷', color: 'bg-pink-500' },
-  whatsapp: { name: 'WhatsApp', icon: '💬', color: 'bg-green-500' },
-  facebook: { name: 'Facebook', icon: '👥', color: 'bg-blue-600' },
-  teams: { name: 'Microsoft Teams', icon: '👔', color: 'bg-purple-600' },
-  discord: { name: 'Discord', icon: '🎮', color: 'bg-indigo-600' },
-  gmail: { name: 'Gmail', icon: '📧', color: 'bg-red-500' },
+  telegram: { name: 'Telegram', icon: 'TG', color: 'bg-blue-500' },
+  twitter: { name: 'Twitter/X', icon: 'TW', color: 'bg-sky-500' },
+  'twitter-dm': { name: 'Twitter DMs', icon: 'TW', color: 'bg-sky-600' },
+  linkedin: { name: 'LinkedIn', icon: 'LI', color: 'bg-blue-700' },
+  'linkedin-dm': { name: 'LinkedIn DMs', icon: 'LI', color: 'bg-blue-800' },
+  instagram: { name: 'Instagram', icon: 'IG', color: 'bg-gradient-to-br from-purple-500 to-pink-500' },
+  whatsapp: { name: 'WhatsApp', icon: 'WA', color: 'bg-green-500' },
+  facebook: { name: 'Facebook', icon: 'FB', color: 'bg-blue-600' },
+  teams: { name: 'Microsoft Teams', icon: 'MT', color: 'bg-purple-600' },
+  discord: { name: 'Discord', icon: 'DC', color: 'bg-indigo-600' },
+  gmail: { name: 'Gmail', icon: 'GM', color: 'bg-red-500' },
 };
 
 const Dashboard: React.FC = () => {
@@ -320,19 +320,15 @@ const Dashboard: React.FC = () => {
   }, [loadConnectedAccounts]);
 
 
-  // Loading state
+  // Loading state - show skeleton
   if (isLoadingAccounts) {
-    return (
-      <div className="min-h-screen bg-gray-100 flex items-center justify-center">
-        <LoadingSpinner size="xl" text="Loading your accounts..." />
-      </div>
-    );
+    return <LoadingSpinner variant="skeleton-dashboard" />;
   }
 
   // Error state
   if (error) {
     return (
-      <div className="min-h-screen bg-gray-100 flex items-center justify-center p-4">
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-gray-100 flex items-center justify-center p-4">
         <ErrorDisplay message={error} title="Failed to load accounts" onRetry={loadConnectedAccounts} />
       </div>
     );
@@ -348,7 +344,7 @@ const Dashboard: React.FC = () => {
   // No connected accounts at all
   if (connectedAccounts.length === 0) {
     return (
-      <div className="min-h-screen bg-gray-100 flex flex-col">
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-gray-100 flex flex-col">
         <Header
           user={user}
           totalUnread={0}
@@ -376,7 +372,7 @@ const Dashboard: React.FC = () => {
 
   // Main dashboard layout with sidebar
   return (
-    <div className="h-screen flex flex-col bg-gray-100">
+    <div className="h-screen flex flex-col bg-gradient-to-br from-slate-50 to-gray-100">
       {/* Header */}
       <Header
         user={user}

@@ -18,7 +18,7 @@ const EmptyState: React.FC<EmptyStateProps> = ({
 }) => {
   const defaultIcon = (
     <svg
-      className="w-16 h-16 text-gray-400"
+      className="w-16 h-16 text-gray-300"
       fill="none"
       stroke="currentColor"
       viewBox="0 0 24 24"
@@ -26,23 +26,32 @@ const EmptyState: React.FC<EmptyStateProps> = ({
       <path
         strokeLinecap="round"
         strokeLinejoin="round"
-        strokeWidth={2}
+        strokeWidth={1.5}
         d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"
       />
     </svg>
   );
 
   return (
-    <div className="flex flex-col items-center justify-center py-12 px-4 text-center">
-      <div className="mb-4">{icon || defaultIcon}</div>
-      <h3 className="text-lg font-semibold text-gray-900 mb-2">{title}</h3>
+    <div className="flex flex-col items-center justify-center py-16 px-6 text-center animate-fade-in">
+      {/* Icon Container */}
+      <div className="w-24 h-24 mb-6 bg-gradient-to-br from-gray-50 to-gray-100 rounded-3xl flex items-center justify-center shadow-inner">
+        {icon || defaultIcon}
+      </div>
+      
+      {/* Title */}
+      <h3 className="text-xl font-semibold text-gray-900 mb-2">{title}</h3>
+      
+      {/* Description */}
       {description && (
-        <p className="text-gray-600 mb-6 max-w-md">{description}</p>
+        <p className="text-gray-500 mb-8 max-w-md leading-relaxed">{description}</p>
       )}
+      
+      {/* Action Button */}
       {action && (
         <button
           onClick={action.onClick}
-          className="px-6 py-3 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors"
+          className="btn-professional btn-primary-3d px-8 py-3"
         >
           {action.label}
         </button>

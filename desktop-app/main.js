@@ -253,6 +253,32 @@ async function syncPlatform(platform, cookies, token) {
         data = await fetchInstagramDMs(cookies);
         break;
       case 'facebook':
+        // For Facebook, first ensure account is registered in backend
+        try {
+          console.log('[facebook] Ensuring account is registered in backend...');
+          await axios.post(
+            `${apiUrl}/api/platforms/facebook/cookies`,
+            { 
+              c_user: cookies.c_user,
+              xs: cookies.xs,
+              platform_user_id: cookies.c_user,  // c_user IS the Facebook user ID
+              platform_username: `Facebook User ${cookies.c_user.substring(0, 6)}`
+            },
+            {
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+              },
+              timeout: 30000
+            }
+          );
+          console.log('[facebook] Account registration complete');
+        } catch (regErr) {
+          // If already registered, that's fine - continue with sync
+          if (!regErr.response || regErr.response.status !== 400) {
+            console.log('[facebook] Registration note:', regErr.message);
+          }
+        }
         data = await fetchFacebookMessages(cookies);
         break;
       default:
@@ -954,26 +980,87 @@ function parseInstagramResponse(data) {
 }
 
 // ============ FACEBOOK ============
-async function fetchFacebookMessages(cookies) {
+// Facebook login window reference
+let facebookLoginWindow = null;
+
+// Track last Facebook fetch time
+let lastFacebookFetch = 0;
+const FACEBOOK_MIN_INTERVAL = 30000; // 30 seconds between fetches
+
+async function fetchFacebookMessages(cookies, retryCount = 0) {
+  // Rate limit check
+  const now = Date.now();
+  const timeSinceLastFetch = now - lastFacebookFetch;
+  if (timeSinceLastFetch < FACEBOOK_MIN_INTERVAL && retryCount === 0) {
+    console.log(`[facebook] Rate limit: waiting ${Math.ceil((FACEBOOK_MIN_INTERVAL - timeSinceLastFetch) / 1000)}s`);
+    await new Promise(resolve => setTimeout(resolve, FACEBOOK_MIN_INTERVAL - timeSinceLastFetch));
+  }
+
+  console.log('[facebook] Fetching messages with cookies...');
+  console.log('[facebook] c_user:', cookies.c_user ? 'present' : 'missing');
+  console.log('[facebook] xs:', cookies.xs ? 'present' : 'missing');
+
+  if (!cookies.c_user || !cookies.xs) {
+    throw new Error('Facebook session not found. Please login via "Open Facebook Login" button.');
+  }
+
   const headers = {
     'cookie': `c_user=${cookies.c_user}; xs=${cookies.xs}`,
-    'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+    'accept-language': 'en-US,en;q=0.5',
+    'sec-fetch-dest': 'document',
+    'sec-fetch-mode': 'navigate',
+    'sec-fetch-site': 'none',
   };
 
-  // Facebook Messenger API is complex, using a simplified approach
-  const response = await axios.get(
-    'https://www.facebook.com/api/graphql/',
-    { 
-      headers, 
-      timeout: 60000,
-      params: {
-        doc_id: '6195354443842040', // Inbox query
-        variables: JSON.stringify({ limit: 20 })
+  try {
+    // First, verify cookies by checking if we can access messenger
+    const verifyResponse = await axios.get(
+      'https://www.facebook.com/messages/',
+      { 
+        headers, 
+        timeout: 30000,
+        maxRedirects: 0,
+        validateStatus: (status) => status < 400 || status === 302 || status === 301
+      }
+    );
+
+    // Check for redirect to login page
+    if (verifyResponse.status === 301 || verifyResponse.status === 302) {
+      const location = verifyResponse.headers.location || '';
+      console.log('[facebook] Redirected to:', location);
+      if (location.includes('login') || location.includes('checkpoint')) {
+        throw new Error('Facebook session expired. Please click "Open Facebook Login" to re-login.');
       }
     }
-  );
 
-  return parseFacebookResponse(response.data);
+    lastFacebookFetch = Date.now();
+
+    // Facebook's web interface doesn't have a simple API like Twitter
+    // We'll fetch basic info and let the backend handle the heavy lifting
+    // For now, return empty and rely on backend sync via browser session
+    console.log('[facebook] Cookies valid - syncing via backend');
+    
+    return [];
+
+  } catch (error) {
+    console.error('[facebook] Fetch error:', error.message);
+
+    // Retry on connection errors
+    const isRetryableError = error.message.includes('ECONNRESET') || 
+                            error.message.includes('ETIMEDOUT') ||
+                            error.message.includes('socket hang up');
+    
+    if (isRetryableError && retryCount < 3) {
+      const waitTime = Math.pow(2, retryCount) * 3000;
+      console.log(`[facebook] Retrying in ${waitTime/1000}s... (attempt ${retryCount + 1}/3)`);
+      await new Promise(resolve => setTimeout(resolve, waitTime));
+      return fetchFacebookMessages(cookies, retryCount + 1);
+    }
+
+    throw error;
+  }
 }
 
 function parseFacebookResponse(data) {
@@ -1846,6 +1933,223 @@ ipcMain.handle('login-instagram-browser', async () => {
 ipcMain.handle('close-instagram-login', async () => {
   if (instagramLoginWindow && !instagramLoginWindow.isDestroyed()) {
     instagramLoginWindow.close();
+  }
+  return { success: true };
+});
+
+// Facebook browser-based login (opens Facebook in a window, extracts cookies after login)
+ipcMain.handle('login-facebook-browser', async () => {
+  return new Promise((resolve) => {
+    try {
+      const token = store.get('chatorbitor_token');
+      if (!token) {
+        resolve({ success: false, error: 'Please save your Chat Orbitor token first' });
+        return;
+      }
+
+      // Close existing Facebook login window if open
+      if (facebookLoginWindow && !facebookLoginWindow.isDestroyed()) {
+        facebookLoginWindow.close();
+      }
+
+      // Create a new session for Facebook login (isolated from main app)
+      const facebookSession = session.fromPartition('facebook-login');
+      
+      // Clear any existing cookies to start fresh
+      facebookSession.clearStorageData({ storages: ['cookies'] });
+
+      // Create Facebook login window
+      facebookLoginWindow = new BrowserWindow({
+        width: 500,
+        height: 700,
+        resizable: true,
+        title: 'Login to Facebook',
+        parent: mainWindow,
+        modal: false,
+        webPreferences: {
+          nodeIntegration: false,
+          contextIsolation: true,
+          session: facebookSession
+        }
+      });
+
+      // Load Facebook login page
+      facebookLoginWindow.loadURL('https://www.facebook.com/login');
+
+      console.log('[facebook] Login window opened');
+
+      // Notify main window that login window is open
+      if (mainWindow) {
+        mainWindow.webContents.send('facebook-login-status', { status: 'window_opened' });
+      }
+
+      // Check for successful login by monitoring URL and cookies
+      let loginCheckInterval = null;
+      let isResolved = false;
+
+      const checkForLogin = async () => {
+        if (isResolved) return;
+        
+        try {
+          if (facebookLoginWindow.isDestroyed()) {
+            clearInterval(loginCheckInterval);
+            if (!isResolved) {
+              isResolved = true;
+              resolve({ success: false, error: 'Login window was closed' });
+            }
+            return;
+          }
+
+          const currentURL = facebookLoginWindow.webContents.getURL();
+          
+          // Check if user is logged in (URL changed to home or messages)
+          if (currentURL.includes('facebook.com') && 
+              !currentURL.includes('/login') && 
+              !currentURL.includes('/checkpoint') &&
+              !currentURL.includes('/recover') &&
+              !currentURL.includes('/two_factor')) {
+            
+            // Get cookies from the session
+            const cookies = await facebookSession.cookies.get({ domain: '.facebook.com' });
+            
+            // Find required cookies
+            let c_user = '';
+            let xs = '';
+            let datr = '';
+            let fr = '';
+
+            for (const cookie of cookies) {
+              if (cookie.name === 'c_user') c_user = cookie.value;
+              if (cookie.name === 'xs') xs = cookie.value;
+              if (cookie.name === 'datr') datr = cookie.value;
+              if (cookie.name === 'fr') fr = cookie.value;
+            }
+
+            console.log('[facebook] Checking cookies - c_user:', !!c_user, 'xs:', !!xs);
+
+            // If we have the required cookies, login was successful
+            if (c_user && xs) {
+              clearInterval(loginCheckInterval);
+              isResolved = true;
+
+              console.log('[facebook] Login successful! Extracting cookies...');
+              console.log('[facebook] c_user (your Facebook ID):', c_user);
+
+              // Save cookies
+              const facebookCookies = { 
+                c_user, 
+                xs,
+                datr: datr || '',
+                fr: fr || ''
+              };
+              store.set('facebook_cookies', facebookCookies);
+
+              // Close login window
+              if (!facebookLoginWindow.isDestroyed()) {
+                facebookLoginWindow.close();
+              }
+
+              // Notify main window
+              if (mainWindow) {
+                mainWindow.webContents.send('facebook-login-status', { 
+                  status: 'success',
+                  message: 'Login successful!'
+                });
+              }
+
+              resolve({ success: true, cookies: facebookCookies });
+              
+              // Register with backend and auto-sync after successful login
+              const chatToken = store.get('chatorbitor_token');
+              if (chatToken) {
+                setTimeout(async () => {
+                  try {
+                    // First, register/create the Facebook account in backend
+                    const apiUrl = store.get('apiUrl') || API_BASE_URL;
+                    await axios.post(
+                      `${apiUrl}/api/platforms/facebook/cookies`,
+                      { 
+                        c_user: c_user,
+                        xs: xs,
+                        platform_user_id: c_user,  // c_user IS the Facebook user ID
+                        platform_username: `Facebook User ${c_user.substring(0, 6)}` // Will be updated later
+                      },
+                      {
+                        headers: {
+                          'Authorization': `Bearer ${chatToken}`,
+                          'Content-Type': 'application/json'
+                        },
+                        timeout: 30000
+                      }
+                    );
+                    console.log('[facebook] Account registered in backend');
+                    
+                    // Now sync
+                    syncPlatform('facebook', facebookCookies, chatToken);
+                  } catch (regError) {
+                    console.error('[facebook] Backend registration error:', regError.message);
+                    // Still try to sync even if registration fails
+                    syncPlatform('facebook', facebookCookies, chatToken);
+                  }
+                }, 1000);
+              }
+            }
+          }
+        } catch (err) {
+          console.error('[facebook] Error checking login status:', err.message);
+        }
+      };
+
+      // Start checking for login every 2 seconds
+      loginCheckInterval = setInterval(checkForLogin, 2000);
+
+      // Also check when page finishes loading
+      facebookLoginWindow.webContents.on('did-finish-load', () => {
+        setTimeout(checkForLogin, 1000);
+      });
+
+      // Handle window close
+      facebookLoginWindow.on('closed', () => {
+        clearInterval(loginCheckInterval);
+        facebookLoginWindow = null;
+        
+        if (!isResolved) {
+          isResolved = true;
+          if (mainWindow) {
+            mainWindow.webContents.send('facebook-login-status', { 
+              status: 'cancelled',
+              message: 'Login cancelled'
+            });
+          }
+          resolve({ success: false, error: 'Login window was closed' });
+        }
+      });
+
+      // Timeout after 5 minutes
+      setTimeout(() => {
+        if (!isResolved) {
+          clearInterval(loginCheckInterval);
+          isResolved = true;
+          
+          if (facebookLoginWindow && !facebookLoginWindow.isDestroyed()) {
+            facebookLoginWindow.close();
+          }
+          
+          resolve({ success: false, error: 'Login timed out. Please try again.' });
+        }
+      }, 5 * 60 * 1000);
+
+    } catch (error) {
+      console.error('[facebook] Login error:', error.message);
+      resolve({ success: false, error: error.message });
+    }
+  });
+});
+
+// Close Facebook login window
+ipcMain.handle('close-facebook-login', async () => {
+  if (facebookLoginWindow && !facebookLoginWindow.isDestroyed()) {
+    facebookLoginWindow.close();
   }
   return { success: true };
 });
