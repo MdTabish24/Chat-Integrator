@@ -330,46 +330,79 @@ class GmailAdapter(BasePlatformAdapter):
     def _extract_body(self, payload: Dict) -> str:
         """
         Extract email body from payload.
+        Prefers plain text, falls back to HTML (stripped).
         
         Args:
             payload: Gmail message payload
             
         Returns:
-            Email body text
+            Email body text (plain text, no HTML)
         """
-        body = ''
+        plain_text_body = ''
+        html_body = ''
         
-        # Check for simple body
-        if 'body' in payload and payload['body'].get('data'):
-            body = base64.urlsafe_b64decode(payload['body']['data']).decode('utf-8', errors='ignore')
-        
-        # Check for multipart
-        elif 'parts' in payload:
-            for part in payload['parts']:
+        def extract_from_parts(parts):
+            nonlocal plain_text_body, html_body
+            
+            for part in parts:
                 mime_type = part.get('mimeType', '')
                 
-                # Prefer plain text
+                # Plain text is preferred
                 if mime_type == 'text/plain' and part.get('body', {}).get('data'):
-                    body = base64.urlsafe_b64decode(part['body']['data']).decode('utf-8', errors='ignore')
-                    break
+                    try:
+                        plain_text_body = base64.urlsafe_b64decode(part['body']['data']).decode('utf-8', errors='ignore')
+                    except:
+                        pass
                 
-                # Fall back to HTML
-                elif mime_type == 'text/html' and part.get('body', {}).get('data') and not body:
-                    html_body = base64.urlsafe_b64decode(part['body']['data']).decode('utf-8', errors='ignore')
-                    body = self._strip_html(html_body)
+                # HTML as fallback
+                elif mime_type == 'text/html' and part.get('body', {}).get('data'):
+                    try:
+                        html_body = base64.urlsafe_b64decode(part['body']['data']).decode('utf-8', errors='ignore')
+                    except:
+                        pass
                 
-                # Recurse into nested parts
+                # Recurse into nested multipart
                 elif 'parts' in part:
-                    nested_body = self._extract_body(part)
-                    if nested_body:
-                        body = nested_body
-                        break
+                    extract_from_parts(part['parts'])
+                
+                # If we found plain text, we can stop
+                if plain_text_body:
+                    return
         
-        return body.strip()
+        # Check for simple body (non-multipart)
+        if 'body' in payload and payload['body'].get('data'):
+            try:
+                raw_body = base64.urlsafe_b64decode(payload['body']['data']).decode('utf-8', errors='ignore')
+                mime_type = payload.get('mimeType', '')
+                
+                if mime_type == 'text/plain':
+                    plain_text_body = raw_body
+                elif mime_type == 'text/html':
+                    html_body = raw_body
+                else:
+                    # Unknown type, try to detect HTML
+                    if '<html' in raw_body.lower() or '<body' in raw_body.lower() or '<div' in raw_body.lower():
+                        html_body = raw_body
+                    else:
+                        plain_text_body = raw_body
+            except:
+                pass
+        
+        # Check for multipart
+        if 'parts' in payload:
+            extract_from_parts(payload['parts'])
+        
+        # Return plain text if available, otherwise strip HTML
+        if plain_text_body:
+            return plain_text_body.strip()
+        elif html_body:
+            return self._strip_html(html_body)
+        
+        return ''
     
     def _strip_html(self, html: str) -> str:
         """
-        Strip HTML tags from content.
+        Strip HTML tags from content and convert to readable plain text.
         
         Args:
             html: HTML content
@@ -378,17 +411,44 @@ class GmailAdapter(BasePlatformAdapter):
             Plain text
         """
         import re
-        # Remove HTML tags
-        text = re.sub(r'<[^>]*>', '', html)
-        # Decode HTML entities
-        text = text.replace('&nbsp;', ' ')
-        text = text.replace('&amp;', '&')
-        text = text.replace('&lt;', '<')
-        text = text.replace('&gt;', '>')
-        text = text.replace('&quot;', '"')
-        text = text.replace('&#39;', "'")
-        # Clean up whitespace
-        text = re.sub(r'\s+', ' ', text)
+        from html import unescape
+        
+        if not html:
+            return ''
+        
+        # Remove style and script tags completely (including content)
+        text = re.sub(r'<style[^>]*>.*?</style>', '', html, flags=re.DOTALL | re.IGNORECASE)
+        text = re.sub(r'<script[^>]*>.*?</script>', '', text, flags=re.DOTALL | re.IGNORECASE)
+        text = re.sub(r'<head[^>]*>.*?</head>', '', text, flags=re.DOTALL | re.IGNORECASE)
+        
+        # Replace <br>, <br/>, <br /> with newlines
+        text = re.sub(r'<br\s*/?>', '\n', text, flags=re.IGNORECASE)
+        
+        # Replace </p>, </div>, </tr>, </li> with newlines
+        text = re.sub(r'</(?:p|div|tr|li|h[1-6])>', '\n', text, flags=re.IGNORECASE)
+        
+        # Replace <td> with tab for table formatting
+        text = re.sub(r'<td[^>]*>', '\t', text, flags=re.IGNORECASE)
+        
+        # Remove all remaining HTML tags
+        text = re.sub(r'<[^>]+>', '', text)
+        
+        # Decode HTML entities (handles &nbsp;, &amp;, &#39;, etc.)
+        text = unescape(text)
+        
+        # Replace multiple spaces with single space
+        text = re.sub(r'[ \t]+', ' ', text)
+        
+        # Replace multiple newlines with double newline (paragraph break)
+        text = re.sub(r'\n\s*\n', '\n\n', text)
+        
+        # Remove leading/trailing whitespace from each line
+        lines = [line.strip() for line in text.split('\n')]
+        text = '\n'.join(lines)
+        
+        # Remove excessive newlines (more than 2)
+        text = re.sub(r'\n{3,}', '\n\n', text)
+        
         return text.strip()
     
     def _extract_email_address(self, from_header: str) -> str:

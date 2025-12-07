@@ -37,10 +37,55 @@ const GmailInboxModal: React.FC<GmailInboxModalProps> = ({ isOpen, onClose, acco
   // Ref for scroll container to detect when user scrolls to bottom
   const emailListRef = React.useRef<HTMLDivElement>(null);
 
+  // Strip HTML tags from text (safety fallback)
+  const stripHtml = (html: string): string => {
+    if (!html) return '';
+    
+    // Check if it looks like HTML
+    if (!html.includes('<') || !html.includes('>')) {
+      return html;
+    }
+    
+    // Remove style, script, head tags completely
+    let text = html.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '');
+    text = text.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '');
+    text = text.replace(/<head[^>]*>[\s\S]*?<\/head>/gi, '');
+    
+    // Replace br, p, div with newlines
+    text = text.replace(/<br\s*\/?>/gi, '\n');
+    text = text.replace(/<\/(?:p|div|tr|li|h[1-6])>/gi, '\n');
+    
+    // Remove all remaining HTML tags
+    text = text.replace(/<[^>]+>/g, '');
+    
+    // Decode common HTML entities
+    text = text.replace(/&nbsp;/g, ' ');
+    text = text.replace(/&amp;/g, '&');
+    text = text.replace(/&lt;/g, '<');
+    text = text.replace(/&gt;/g, '>');
+    text = text.replace(/&quot;/g, '"');
+    text = text.replace(/&#39;/g, "'");
+    text = text.replace(/&#x27;/g, "'");
+    
+    // Clean up whitespace
+    text = text.replace(/[ \t]+/g, ' ');
+    text = text.replace(/\n\s*\n/g, '\n\n');
+    text = text.split('\n').map(line => line.trim()).join('\n');
+    text = text.replace(/\n{3,}/g, '\n\n');
+    
+    return text.trim();
+  };
+
   // Map raw API email to our Email interface
   const mapEmailData = (e: any): Email => {
     const threadId = e.conversationId || e.threadId || e.thread_id || '';
     const messageId = e.platformMessageId || e.platform_message_id || e.messageId || e.id || '';
+    
+    // Get body and strip HTML if present
+    let body = e.body || e.content || '';
+    if (body && (body.includes('<html') || body.includes('<body') || body.includes('<div') || body.includes('<table'))) {
+      body = stripHtml(body);
+    }
     
     return {
       id: messageId,
@@ -49,7 +94,7 @@ const GmailInboxModal: React.FC<GmailInboxModalProps> = ({ isOpen, onClose, acco
       fromEmail: e.senderId || e.sender_id || e.senderEmail || e.fromEmail || '',
       subject: e.subject || '(No Subject)',
       snippet: e.snippet || e.preview || '',
-      body: e.body || e.content || '',
+      body: body,
       date: e.date || e.sentAt || e.sent_at || new Date().toISOString(),
       isUnread: e.isUnread ?? e.is_unread ?? !e.isRead ?? !e.is_read ?? true,
       isOutgoing: e.isOutgoing ?? e.is_outgoing ?? false,
