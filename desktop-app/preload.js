@@ -43,5 +43,20 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // WhatsApp status updates (QR code, connection, etc.)
   onWhatsAppStatus: (callback) => {
     ipcRenderer.on('whatsapp-status', (event, data) => callback(data));
+  },
+  
+  // WhatsApp real-time message updates
+  onWhatsAppRealtimeMessage: (callback) => {
+    ipcRenderer.on('whatsapp-realtime-message', (event, data) => callback(data));
+  },
+  
+  // WhatsApp message sent confirmation
+  onWhatsAppMessageSent: (callback) => {
+    ipcRenderer.on('whatsapp-message-sent', (event, data) => callback(data));
+  },
+  
+  // Instagram message sent confirmation
+  onInstagramMessageSent: (callback) => {
+    ipcRenderer.on('instagram-message-sent', (event, data) => callback(data));
   }
 });

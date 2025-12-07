@@ -338,6 +338,10 @@ MICROSOFT_CLIENT_ID = config('MICROSOFT_CLIENT_ID', default='')
 MICROSOFT_CLIENT_SECRET = config('MICROSOFT_CLIENT_SECRET', default='')
 MICROSOFT_TENANT_ID = config('MICROSOFT_TENANT_ID', default='')
 
+# Google OAuth (for Gmail)
+GOOGLE_CLIENT_ID = config('GOOGLE_CLIENT_ID', default='')
+GOOGLE_CLIENT_SECRET = config('GOOGLE_CLIENT_SECRET', default='')
+
 # Webhook Configuration
 WEBHOOK_BASE_URL = config('WEBHOOK_BASE_URL', default='https://chatintegrator.onrender.com')
 

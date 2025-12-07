@@ -1101,6 +1101,36 @@ async function initWhatsApp() {
       }, 2000);
     });
     
+    // ======== REAL-TIME MESSAGE LISTENERS ========
+    
+    // Listen for incoming messages (real-time)
+    whatsappClient.on('message', async (msg) => {
+      console.log('[whatsapp] 📩 New message received in real-time!');
+      console.log(`[whatsapp] From: ${msg.from}, Body: "${msg.body?.substring(0, 50) || '[Media]'}..."`);
+      
+      // Immediately sync this single message to backend
+      await syncSingleWhatsAppMessage(msg, false);
+    });
+    
+    // Listen for sent messages (real-time)
+    whatsappClient.on('message_create', async (msg) => {
+      // Only handle messages sent by us
+      if (msg.fromMe) {
+        console.log('[whatsapp] 📤 Message sent in real-time!');
+        console.log(`[whatsapp] To: ${msg.to}, Body: "${msg.body?.substring(0, 50) || '[Media]'}..."`);
+        
+        // Immediately sync this single message to backend
+        await syncSingleWhatsAppMessage(msg, true);
+      }
+    });
+    
+    // Listen for message acknowledgement (delivered/read)
+    whatsappClient.on('message_ack', async (msg, ack) => {
+      // ack: 1 = sent, 2 = delivered, 3 = read
+      const ackStatus = ['ERROR', 'SENT', 'DELIVERED', 'READ'][ack] || 'UNKNOWN';
+      console.log(`[whatsapp] ✅ Message ${msg.id?._serialized?.substring(0, 20)}... status: ${ackStatus}`);
+    });
+    
     // Authentication failure
     whatsappClient.on('auth_failure', (msg) => {
       console.error('[whatsapp] Authentication failed:', msg);
@@ -1151,6 +1181,79 @@ async function initWhatsApp() {
         });
       }
     }
+  }
+}
+
+// Sync a SINGLE WhatsApp message to backend (real-time)
+async function syncSingleWhatsAppMessage(msg, isFromMe) {
+  const token = store.get('chatorbitor_token');
+  if (!token) {
+    console.log('[whatsapp] No token, skipping real-time sync');
+    return;
+  }
+  
+  try {
+    const chatId = isFromMe ? msg.to : msg.from;
+    const chat = await whatsappClient.getChatById(chatId);
+    const chatName = chat?.name || chat?.pushname || chatId?.split('@')[0] || 'Unknown';
+    
+    // Format the single message
+    const messageData = {
+      id: msg.id?._serialized || msg.id?.id || `msg_${Date.now()}`,
+      text: msg.body || (msg.hasMedia ? '[Media]' : ''),
+      senderId: msg.from || '',
+      senderName: isFromMe ? 'You' : (msg._data?.notifyName || chatName),
+      isFromMe: isFromMe,
+      createdAt: msg.timestamp ? new Date(msg.timestamp * 1000).toISOString() : new Date().toISOString(),
+      type: msg.type || 'chat'
+    };
+    
+    // Create conversation data with single message
+    const conversation = {
+      id: chat?.id?._serialized || chatId,
+      name: chatName,
+      isGroup: chat?.isGroup || false,
+      participants: [{
+        id: chat?.id?._serialized || chatId,
+        name: chatName
+      }],
+      messages: [messageData],
+      unreadCount: chat?.unreadCount || 0,
+      lastMessageAt: new Date().toISOString()
+    };
+    
+    // Send to backend
+    const apiUrl = store.get('apiUrl') || API_BASE_URL;
+    
+    console.log(`[whatsapp] 🚀 Real-time sync: "${messageData.text?.substring(0, 30)}..." to ${chatName}`);
+    
+    const response = await axios.post(
+      `${apiUrl}/api/platforms/whatsapp/sync-from-desktop`,
+      { conversations: [conversation] },
+      {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        timeout: 30000
+      }
+    );
+    
+    console.log('[whatsapp] ✅ Real-time sync successful!');
+    
+    // Notify UI about new message
+    if (mainWindow) {
+      mainWindow.webContents.send('whatsapp-realtime-message', {
+        chatId: conversation.id,
+        chatName: chatName,
+        message: messageData,
+        isFromMe: isFromMe
+      });
+    }
+    
+  } catch (error) {
+    console.error('[whatsapp] Real-time sync error:', error.message);
+    // Don't throw - just log. Regular sync will catch it later
   }
 }
 
@@ -1832,7 +1935,7 @@ async function checkAndSendPendingMessages() {
     return; // No Instagram session
   }
   
-  const apiUrl = store.get('apiUrl') || API_BASE_URL;
+  // apiUrl already declared above
   
   try {
     // Fetch pending messages from backend
