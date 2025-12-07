@@ -87,7 +87,74 @@ const ChatView: React.FC<ChatViewProps> = ({
 
       const limit = 50;
       const offset = (pageNum - 1) * limit;
-      
+
+      // For Facebook, fetch fresh messages via backend adapter (fbchat) and use them directly
+      // This gives better history than the preview-based Desktop sync, especially for older chats
+      if (platform === 'facebook' && pageNum === 1 && !append) {
+        try {
+          // Load conversation to get account ID and platform conversation ID (thread ID)
+          const convResponse = await apiClient.get('/api/conversations');
+          const conversations = convResponse.data.conversations || [];
+          const conv = conversations.find((c: Conversation) => c.id === conversationId);
+
+          if (conv) {
+            const accountId = (conv as any).account_id || (conv as any).accountId;
+            const platformConvId = (conv as any).platform_conversation_id || (conv as any).platformConversationId;
+
+            if (accountId && platformConvId) {
+              const fbResponse = await apiClient.get(`/api/platforms/facebook/messages/${accountId}`);
+
+              // Handle auth/expiry errors from backend adapter
+              if (fbResponse.data.error?.code === 'AUTH_EXPIRED') {
+                setError('Facebook cookies have expired. Please re-login via the Desktop App (Open Facebook Login).');
+                setIsLoading(false);
+                return;
+              }
+
+              const fbMessagesRaw = fbResponse.data.messages || [];
+
+              const fbMessages = fbMessagesRaw
+                .filter((m: any) => {
+                  const convId = m.conversationId || m.conversation_id || m.thread_id;
+                  return convId === platformConvId;
+                })
+                .map((m: any) => {
+                  const sentAt = m.sentAt || m.sent_at || new Date().toISOString();
+                  return {
+                    id: m.id || m.platformMessageId || m.platform_message_id || `fb_${Date.now()}_${Math.random()}`,
+                    conversationId,
+                    platformMessageId: m.platformMessageId || m.platform_message_id,
+                    senderId: m.senderId || m.sender_id,
+                    senderName: m.senderName || m.sender_name || 'Facebook User',
+                    content: m.content || '',
+                    messageType: m.messageType || m.message_type || 'text',
+                    mediaUrl: m.mediaUrl || m.media_url,
+                    isOutgoing: m.isOutgoing ?? m.is_outgoing ?? false,
+                    isRead: m.isRead ?? m.is_read ?? true,
+                    sentAt,
+                    deliveredAt: m.deliveredAt || m.delivered_at || sentAt,
+                    createdAt: m.createdAt || m.created_at || sentAt,
+                  } as Message;
+                });
+
+              // Sort chronologically
+              fbMessages.sort((a, b) => new Date(a.sentAt).getTime() - new Date(b.sentAt).getTime());
+
+              setMessages(fbMessages);
+              setHasMore(false);
+              setIsLoading(false);
+
+              // Mark messages as read (best-effort, using generic endpoint by DB id will not work here,
+              // so we skip marking for now)
+              return; // Skip loading from DB
+            }
+          }
+        } catch (fbErr: any) {
+          console.log('[facebook] API fetch failed, falling back to cached DB messages:', fbErr);
+          // Fall through to the generic DB-based loader below
+        }
+      }
+
       // For LinkedIn, fetch fresh messages from API and use them directly
       if (platform === 'linkedin' && pageNum === 1 && !append) {
         try {
