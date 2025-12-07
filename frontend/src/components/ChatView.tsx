@@ -70,8 +70,23 @@ const ChatView: React.FC<ChatViewProps> = ({
     try {
       const response = await apiClient.get('/api/conversations');
       const conversations = response.data.conversations || [];
-      const conv = conversations.find((c: Conversation) => c.id === conversationId);
-      if (conv) setConversation(conv);
+      const rawConv = conversations.find((c: any) => c.id === conversationId);
+      if (rawConv) {
+        // Map snake_case to camelCase
+        const conv: Conversation = {
+          id: rawConv.id,
+          accountId: rawConv.account_id || rawConv.accountId,
+          platformConversationId: rawConv.platform_conversation_id || rawConv.platformConversationId,
+          participantName: rawConv.participant_name || rawConv.participantName || 'Unknown',
+          participantId: rawConv.participant_id || rawConv.participantId || '',
+          participantAvatarUrl: rawConv.participant_avatar_url || rawConv.participantAvatarUrl || '',
+          lastMessageAt: rawConv.last_message_at || rawConv.lastMessageAt,
+          unreadCount: rawConv.unread_count || rawConv.unreadCount || 0,
+          createdAt: rawConv.created_at || rawConv.createdAt,
+          updatedAt: rawConv.updated_at || rawConv.updatedAt,
+        };
+        setConversation(conv);
+      }
     } catch (err) {
       console.error('Error loading conversation:', err);
     }
@@ -286,20 +301,40 @@ const ChatView: React.FC<ChatViewProps> = ({
         params: { limit, offset },
       });
 
-      const newMessages = (response.data.messages || []).map((m: any) => ({
-        ...m,
-        conversationId: m.conversation_id || m.conversationId,
-        platformMessageId: m.platform_message_id || m.platformMessageId,
-        senderId: m.sender_id || m.senderId,
-        senderName: m.sender_name || m.senderName,
-        messageType: m.message_type || m.messageType,
-        mediaUrl: m.media_url || m.mediaUrl,
-        isOutgoing: m.is_outgoing || m.isOutgoing,
-        isRead: m.is_read || m.isRead,
-        sentAt: m.sent_at || m.sentAt,
-        deliveredAt: m.delivered_at || m.deliveredAt,
-        createdAt: m.created_at || m.createdAt,
-      }));
+      const newMessages = (response.data.messages || [])
+        .map((m: any) => ({
+          ...m,
+          conversationId: m.conversation_id || m.conversationId,
+          platformMessageId: m.platform_message_id || m.platformMessageId,
+          senderId: m.sender_id || m.senderId,
+          senderName: m.sender_name || m.senderName,
+          content: m.content || '',
+          messageType: m.message_type || m.messageType,
+          mediaUrl: m.media_url || m.mediaUrl,
+          isOutgoing: m.is_outgoing || m.isOutgoing,
+          isRead: m.is_read || m.isRead,
+          sentAt: m.sent_at || m.sentAt,
+          deliveredAt: m.delivered_at || m.deliveredAt,
+          createdAt: m.created_at || m.createdAt,
+        }))
+        // Filter out fake/preview messages
+        .filter((m: any) => {
+          const content = (m.content || '').toLowerCase();
+          const platformMsgId = m.platformMessageId || '';
+          
+          // Skip preview messages
+          if (platformMsgId.startsWith('preview_')) return false;
+          
+          // Skip E2EE notices
+          if (content.includes('end-to-end encryption')) return false;
+          if (content === '[end-to-end encrypted chat]') return false;
+          if (content.includes('messages and calls are secured')) return false;
+          
+          // Skip "You: " prefixed messages (these are fake previews)
+          if (content.startsWith('you:') && !m.isOutgoing) return false;
+          
+          return true;
+        });
 
       const reversedMessages = [...newMessages].reverse();
       if (append) {
