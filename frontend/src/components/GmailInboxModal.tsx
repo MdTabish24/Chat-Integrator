@@ -37,17 +37,26 @@ const GmailInboxModal: React.FC<GmailInboxModalProps> = ({ isOpen, onClose, acco
       setLoading(true);
       setError(null);
       const response = await apiClient.get(`/api/platforms/gmail/emails/${accountId}`);
-      const emailData = (response.data.emails || []).map((e: any) => ({
-        id: e.id || e.messageId,
-        threadId: e.threadId,
-        from: e.senderName || e.from || 'Unknown',
-        fromEmail: e.senderEmail || e.fromEmail || '',
-        subject: e.subject || '(No Subject)',
-        snippet: e.snippet || e.preview || '',
-        body: e.body || e.content || '',
-        date: e.date || e.sentAt || new Date().toISOString(),
-        isUnread: e.isUnread ?? !e.isRead ?? true,
-      }));
+      console.log('[gmail] Raw API response (first email):', response.data.emails?.[0]);
+      const emailData = (response.data.emails || []).map((e: any) => {
+        // Extract thread ID - could be in different fields depending on API response
+        const threadId = e.conversationId || e.threadId || e.thread_id || '';
+        // Extract message ID for mark as read
+        const messageId = e.platformMessageId || e.platform_message_id || e.id || e.messageId || '';
+        
+        return {
+          id: messageId,  // Gmail message ID for mark as read
+          threadId: threadId,  // Gmail thread ID for replies
+          from: e.senderName || e.sender_name || e.from || 'Unknown',
+          fromEmail: e.senderId || e.sender_id || e.senderEmail || e.fromEmail || '',
+          subject: e.subject || '(No Subject)',
+          snippet: e.snippet || e.preview || '',
+          body: e.body || e.content || '',
+          date: e.date || e.sentAt || e.sent_at || new Date().toISOString(),
+          isUnread: e.isUnread ?? e.is_unread ?? !e.isRead ?? !e.is_read ?? true,
+        };
+      });
+      console.log('[gmail] Mapped email data (first):', emailData?.[0]);
       setEmails(emailData);
     } catch (err: any) {
       const errMsg = err.response?.data?.error?.message || 'Failed to fetch emails';
@@ -86,6 +95,12 @@ const GmailInboxModal: React.FC<GmailInboxModalProps> = ({ isOpen, onClose, acco
 
   const handleSendReply = async () => {
     if (!selectedEmail || !replyContent.trim() || !accountId) return;
+    
+    console.log('[gmail] Sending reply:', {
+      threadId: selectedEmail.threadId,
+      emailId: selectedEmail.id,
+      content: replyContent.trim().substring(0, 50) + '...',
+    });
     
     try {
       setSending(true);
