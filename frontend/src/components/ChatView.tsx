@@ -109,20 +109,29 @@ const ChatView: React.FC<ChatViewProps> = ({
 
       // For LinkedIn, fetch fresh messages from API and use them directly
       if (platform === 'linkedin' && pageNum === 1 && !append) {
+        console.log('[linkedin-fe] ========== LOADING LINKEDIN MESSAGES ==========');
+        console.log('[linkedin-fe] conversationId:', conversationId);
         try {
           // Get conversation to find account ID and platform conversation ID
           const convResponse = await apiClient.get('/api/conversations');
           const conversations = convResponse.data.conversations || [];
           const conv = conversations.find((c: Conversation) => c.id === conversationId);
           
+          console.log('[linkedin-fe] Found conversation:', conv);
+          
           if (conv) {
             const accountId = conv.account_id || conv.accountId;
             const platformConvId = conv.platform_conversation_id || conv.platformConversationId;
             
+            console.log('[linkedin-fe] accountId:', accountId, 'platformConvId:', platformConvId);
+            
             if (accountId && platformConvId) {
               // Fetch fresh messages from LinkedIn API and USE THEM DIRECTLY
+              console.log('[linkedin-fe] Making API call to fetch messages...');
               const linkedinResponse = await apiClient.get(`/api/platforms/linkedin/conversations/${accountId}/${platformConvId}/messages`);
-              console.log('[linkedin] Fetched fresh messages from API:', linkedinResponse.data);
+              console.log('[linkedin-fe] API Response status:', linkedinResponse.status);
+              console.log('[linkedin-fe] API Response data:', linkedinResponse.data);
+              console.log('[linkedin-fe] Messages received:', linkedinResponse.data.messages?.length || 0);
               
               // Check if cookies are expired
               if (linkedinResponse.data.cookiesExpired || linkedinResponse.data.error?.code === 'COOKIES_EXPIRED') {
@@ -131,28 +140,43 @@ const ChatView: React.FC<ChatViewProps> = ({
                 return;
               }
               
-              const freshMessages = (linkedinResponse.data.messages || []).map((m: any) => ({
-                id: m.id || m.platformMessageId || `linkedin_${Date.now()}_${Math.random()}`,
-                conversationId: conversationId,
-                platformMessageId: m.platformMessageId || m.platform_message_id,
-                senderId: m.senderId || m.sender_id,
-                senderName: m.senderName || m.sender_name,
-                content: m.content,
-                messageType: m.messageType || m.message_type || 'text',
-                mediaUrl: m.mediaUrl || m.media_url,
-                isOutgoing: m.isOutgoing ?? m.is_outgoing ?? false,
-                isRead: m.isRead ?? m.is_read ?? true,
-                sentAt: m.sentAt || m.sent_at,
-                deliveredAt: m.deliveredAt || m.delivered_at,
-                createdAt: m.createdAt || m.created_at,
-              }));
+              const rawMessages = linkedinResponse.data.messages || [];
+              console.log('[linkedin-fe] Processing', rawMessages.length, 'raw messages');
+              
+              // Log first message for debugging
+              if (rawMessages.length > 0) {
+                console.log('[linkedin-fe] Sample raw message:', rawMessages[0]);
+              }
+              
+              const freshMessages = rawMessages.map((m: any, idx: number) => {
+                const mapped = {
+                  id: m.id || m.platformMessageId || `linkedin_${Date.now()}_${Math.random()}`,
+                  conversationId: conversationId,
+                  platformMessageId: m.platformMessageId || m.platform_message_id,
+                  senderId: m.senderId || m.sender_id,
+                  senderName: m.senderName || m.sender_name,
+                  content: m.content,
+                  messageType: m.messageType || m.message_type || 'text',
+                  mediaUrl: m.mediaUrl || m.media_url,
+                  isOutgoing: m.isOutgoing ?? m.is_outgoing ?? false,
+                  isRead: m.isRead ?? m.is_read ?? true,
+                  sentAt: m.sentAt || m.sent_at,
+                  deliveredAt: m.deliveredAt || m.delivered_at,
+                  createdAt: m.createdAt || m.created_at,
+                };
+                
+                // Log each message content for debugging
+                console.log(`[linkedin-fe] Message ${idx + 1}: content="${mapped.content?.substring(0, 50)}..." from=${mapped.senderName}`);
+                
+                return mapped;
+              });
               
               // Sort by sentAt and use directly
               freshMessages.sort((a: any, b: any) => new Date(a.sentAt).getTime() - new Date(b.sentAt).getTime());
               setMessages(freshMessages);
               setHasMore(false);
               setIsLoading(false);
-              console.log('[linkedin] Using fresh messages directly:', freshMessages.length);
+              console.log('[linkedin-fe] Using fresh messages directly:', freshMessages.length);
               return; // Skip loading from DB
             }
           }

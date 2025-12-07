@@ -961,8 +961,22 @@ class LinkedInCookieAdapter(BasePlatformAdapter):
         """
         import requests
         
-        cookies = self._get_cookies(account_id)
-        account = ConnectedAccount.objects.get(id=account_id)
+        print(f'[linkedin-debug] ========== GET CONVERSATION MESSAGES ==========')
+        print(f'[linkedin-debug] account_id: {account_id}, conversation_id: {conversation_id}')
+        
+        try:
+            cookies = self._get_cookies(account_id)
+            print(f'[linkedin-debug] Cookies loaded: li_at={cookies["li_at"][:20]}..., JSESSIONID={cookies["JSESSIONID"][:20]}...')
+        except Exception as cookie_err:
+            print(f'[linkedin-debug] ERROR loading cookies: {cookie_err}')
+            raise
+        
+        try:
+            account = ConnectedAccount.objects.get(id=account_id)
+            print(f'[linkedin-debug] Account found: platform_user_id={account.platform_user_id}')
+        except Exception as acc_err:
+            print(f'[linkedin-debug] ERROR getting account: {acc_err}')
+            raise
         
         try:
             self.apply_human_delay(account_id)
@@ -977,9 +991,12 @@ class LinkedInCookieAdapter(BasePlatformAdapter):
                 'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
             }
             
+            url = f'https://www.linkedin.com/voyager/api/messaging/conversations/{conversation_id}/events'
+            print(f'[linkedin-debug] Making request to: {url}')
+            
             # Use decorated endpoint to get full message content
             response = requests.get(
-                f'https://www.linkedin.com/voyager/api/messaging/conversations/{conversation_id}/events',
+                url,
                 headers=headers,
                 params={
                     'keyVersion': 'LEGACY_INBOX',
@@ -988,7 +1005,11 @@ class LinkedInCookieAdapter(BasePlatformAdapter):
                 timeout=30
             )
             
+            print(f'[linkedin-debug] Response status: {response.status_code}')
+            print(f'[linkedin-debug] Response headers: {dict(response.headers)}')
+            
             if response.status_code != 200:
+                print(f'[linkedin-debug] ERROR: Non-200 response. Body: {response.text[:500]}')
                 raise PlatformAPIError(
                     f'LinkedIn API returned {response.status_code}',
                     'linkedin',
@@ -996,12 +1017,19 @@ class LinkedInCookieAdapter(BasePlatformAdapter):
                     retryable=response.status_code >= 500
                 )
             
-            raw_response = response.json()
+            try:
+                raw_response = response.json()
+            except Exception as json_err:
+                print(f'[linkedin-debug] ERROR parsing JSON: {json_err}')
+                print(f'[linkedin-debug] Raw response text: {response.text[:1000]}')
+                raise
+            
             messages = []
             
-            # Debug: Log full response structure for first call
-            print(f'[linkedin] Fetching messages for conversation {conversation_id}')
-            print(f'[linkedin] Response keys: {list(raw_response.keys())}')
+            # Debug: Log full response structure
+            print(f'[linkedin-debug] ========== PARSING RESPONSE ==========')
+            print(f'[linkedin-debug] Response keys: {list(raw_response.keys())}')
+            print(f'[linkedin-debug] Full response (first 2000 chars): {json.dumps(raw_response, default=str)[:2000]}')
             
             # Handle different response wrappers
             messages_data = raw_response
@@ -1023,17 +1051,26 @@ class LinkedInCookieAdapter(BasePlatformAdapter):
                 if dash_urn:
                     included_map[dash_urn] = item
             
-            print(f'[linkedin] Found {len(elements)} elements, {len(included)} included items')
+            print(f'[linkedin-debug] Found {len(elements)} elements, {len(included)} included items')
+            
+            # Log sample of included items for debugging
+            if included:
+                print(f'[linkedin-debug] Sample included item types:')
+                for i, item in enumerate(included[:5]):
+                    item_type = item.get('$type', 'NO_TYPE')
+                    item_keys = list(item.keys())[:10]
+                    print(f'[linkedin-debug]   [{i}] $type={item_type}, keys={item_keys}')
             
             # If elements is empty but we have included data, extract events from there
             if not elements and included:
-                print(f'[linkedin] Using included array to find messages')
+                print(f'[linkedin-debug] Using included array to find messages')
                 for item in included:
                     item_type = item.get('$type', '') or ''
                     # Look for message events in included array
                     if 'Event' in item_type or 'Message' in item_type or item.get('eventContent'):
                         elements.append(item)
-                print(f'[linkedin] Extracted {len(elements)} message events from included')
+                        print(f'[linkedin-debug] Found event item: $type={item_type}')
+                print(f'[linkedin-debug] Extracted {len(elements)} message events from included')
             
             # Also check if elements contain references to included items
             resolved_elements = []
@@ -1097,13 +1134,21 @@ class LinkedInCookieAdapter(BasePlatformAdapter):
                 # Extract message content using the comprehensive extraction method with included_map
                 content = self._extract_message_content(msg, msg_event, included_map)
                 
-                # Debug logging for messages with no content
+                # Debug logging for ALL messages
+                print(f'[linkedin-debug] -------- MESSAGE {len(messages)+1} --------')
+                print(f'[linkedin-debug] entityUrn: {msg.get("entityUrn", "unknown")}')
+                print(f'[linkedin-debug] Extracted content: "{content[:100]}..."' if len(content) > 100 else f'[linkedin-debug] Extracted content: "{content}"')
+                print(f'[linkedin-debug] sender: {sender_name} (id={sender_id})')
+                print(f'[linkedin-debug] isOutgoing: {is_outgoing}')
+                
+                # Extra debug for [No content] messages
                 if content == '[No content]':
-                    print(f'[linkedin] Warning: No content in message {msg.get("entityUrn", "unknown")}')
-                    print(f'[linkedin] Message keys: {list(msg.keys())}')
-                    print(f'[linkedin] Full message: {json.dumps(msg, default=str)[:800]}')
+                    print(f'[linkedin-debug] *** NO CONTENT FOUND ***')
+                    print(f'[linkedin-debug] Message keys: {list(msg.keys())}')
+                    print(f'[linkedin-debug] Full message JSON: {json.dumps(msg, default=str)[:1500]}')
                     if event_content:
-                        print(f'[linkedin] eventContent: {json.dumps(event_content, default=str)[:500]}')
+                        print(f'[linkedin-debug] eventContent keys: {list(event_content.keys())}')
+                        print(f'[linkedin-debug] eventContent JSON: {json.dumps(event_content, default=str)[:800]}')
                 
                 # Determine message type from attachments
                 message_type = 'text'

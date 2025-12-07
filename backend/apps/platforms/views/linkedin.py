@@ -642,13 +642,18 @@ class LinkedInConversationMessagesView(APIView):
     permission_classes = [AllowAny]
     
     def get(self, request, account_id, conversation_id):
+        print(f'[linkedin-view] ========== LinkedInConversationMessagesView ==========')
+        print(f'[linkedin-view] account_id: {account_id}, conversation_id: {conversation_id}')
+        
         try:
             if not hasattr(request, 'user_jwt') or not request.user_jwt:
+                print(f'[linkedin-view] ERROR: User not authenticated')
                 return Response({
                     'error': {'code': 'UNAUTHORIZED', 'message': 'User not authenticated', 'retryable': False}
                 }, status=status.HTTP_401_UNAUTHORIZED)
             
             user_id = request.user_jwt['user_id']
+            print(f'[linkedin-view] user_id: {user_id}')
             
             # Verify account belongs to user
             try:
@@ -658,14 +663,18 @@ class LinkedInConversationMessagesView(APIView):
                     platform='linkedin',
                     is_active=True
                 )
+                print(f'[linkedin-view] Account found: {account.platform_username}')
             except ConnectedAccount.DoesNotExist:
+                print(f'[linkedin-view] ERROR: Account not found')
                 return Response({
                     'error': {'code': 'ACCOUNT_NOT_FOUND', 'message': 'LinkedIn account not found or inactive', 'retryable': False}
                 }, status=status.HTTP_404_NOT_FOUND)
             
             # Fetch messages from LinkedIn API
             try:
+                print(f'[linkedin-view] Calling linkedin_cookie_adapter.get_conversation_messages...')
                 messages = linkedin_cookie_adapter.get_conversation_messages(str(account_id), conversation_id)
+                print(f'[linkedin-view] Got {len(messages)} messages from adapter')
                 
                 # Also save to database for caching (only if we got actual content)
                 from apps.conversations.models import Conversation
@@ -717,7 +726,11 @@ class LinkedInConversationMessagesView(APIView):
                 
             except Exception as fetch_err:
                 error_msg = str(fetch_err).lower()
-                print(f'[linkedin] Failed to fetch messages from API: {fetch_err}')
+                print(f'[linkedin-view] *** FETCH ERROR ***')
+                print(f'[linkedin-view] Error type: {type(fetch_err).__name__}')
+                print(f'[linkedin-view] Error message: {fetch_err}')
+                import traceback
+                print(f'[linkedin-view] Traceback: {traceback.format_exc()}')
                 
                 # If cookies are expired, return error - don't fallback to cached stale data
                 if 'expired' in error_msg or 'invalid' in error_msg or 'unauthorized' in error_msg or '401' in error_msg or '403' in error_msg:
