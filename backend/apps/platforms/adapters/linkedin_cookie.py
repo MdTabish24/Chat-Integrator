@@ -1063,34 +1063,72 @@ class LinkedInCookieAdapter(BasePlatformAdapter):
             print(f'[linkedin-debug] CSRF token being used: {csrf_token}')
             print(f'[linkedin-debug] li_at being used: {cookies["li_at"][:30]}...')
             
+            # Use requests Session to maintain cookies across the request
+            import requests
+            session = requests.Session()
+            
+            # Set cookies on the session
+            session.cookies.set('li_at', cookies['li_at'], domain='.linkedin.com')
+            session.cookies.set('JSESSIONID', f'"{csrf_token}"', domain='.linkedin.com')
+            
             headers = {
-                'cookie': f'li_at={cookies["li_at"]}; JSESSIONID="{csrf_token}"',
                 'csrf-token': csrf_token,
                 'x-restli-protocol-version': '2.0.0',
                 'x-li-lang': 'en_US',
+                'x-li-page-instance': 'urn:li:page:messaging_thread;' + conversation_id.replace('=', '%3D'),
                 'x-li-track': '{"clientVersion":"1.13.8857","mpVersion":"1.13.8857","osName":"web","timezoneOffset":5.5,"timezone":"Asia/Kolkata","deviceFormFactor":"DESKTOP","mpName":"voyager-web"}',
                 'accept': 'application/vnd.linkedin.normalized+json+2.1',
                 'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                 'origin': 'https://www.linkedin.com',
-                'referer': f'https://www.linkedin.com/messaging/thread/{conversation_id}/',
+                'referer': 'https://www.linkedin.com/messaging/',
+                'sec-ch-ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+                'sec-ch-ua-mobile': '?0',
+                'sec-ch-ua-platform': '"Windows"',
                 'sec-fetch-dest': 'empty',
                 'sec-fetch-mode': 'cors',
                 'sec-fetch-site': 'same-origin',
             }
             
+            # Try raw conversation ID first (LinkedIn might not like URL encoding)
             url = f'https://www.linkedin.com/voyager/api/messaging/conversations/{conversation_id}/events'
             print(f'[linkedin-debug] Making request to: {url}')
             
-            # Use decorated endpoint to get full message content
-            response = requests.get(
+            # Make the API request
+            response = session.get(
                 url,
                 headers=headers,
                 params={
                     'keyVersion': 'LEGACY_INBOX',
-                    'count': 50,  # Get more messages
+                    'count': 50,
                 },
                 timeout=30
             )
+            
+            # If we get 403, try alternative: use the thread-based URL
+            if response.status_code == 403:
+                print(f'[linkedin-debug] Got 403, trying alternative API endpoint...')
+                
+                # Try without keyVersion parameter
+                alt_url = f'https://www.linkedin.com/voyager/api/messaging/conversations/{conversation_id}/events'
+                response = session.get(
+                    alt_url,
+                    headers=headers,
+                    params={'count': 50},
+                    timeout=30
+                )
+                print(f'[linkedin-debug] Alternative response status: {response.status_code}')
+                
+            # If still 403, try with different accept header
+            if response.status_code == 403:
+                print(f'[linkedin-debug] Still 403, trying with standard JSON accept...')
+                headers['accept'] = 'application/json'
+                response = session.get(
+                    url,
+                    headers=headers,
+                    params={'count': 50},
+                    timeout=30
+                )
+                print(f'[linkedin-debug] JSON accept response status: {response.status_code}')
             
             print(f'[linkedin-debug] Response status: {response.status_code}')
             print(f'[linkedin-debug] Response headers: {dict(response.headers)}')
