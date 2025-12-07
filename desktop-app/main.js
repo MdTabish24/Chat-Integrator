@@ -555,12 +555,17 @@ async function fetchLinkedInMessages(cookies, retryCount = 0) {
                 };
                 
                 const isValidName = (text) => {
-                  if (!text || text.length < 2 || text.length > 60) return false;
-                  // Must have at least one uppercase letter (like a proper name)
-                  if (!/[A-Z]/.test(text)) return false;
-                  // Should not be all caps (UI labels are often all caps)
-                  if (text === text.toUpperCase() && text.length > 3) return false;
-                  return !isSkipText(text);
+                  if (!text || text.length < 2 || text.length > 80) return false;
+                  const trimmed = text.trim();
+                  // Must have at least one letter
+                  if (!/[a-zA-Z]/.test(trimmed)) return false;
+                  // Should not be all caps (UI labels are often all caps) unless short
+                  if (trimmed === trimmed.toUpperCase() && trimmed.length > 5) return false;
+                  // Check against skip list
+                  if (isSkipText(trimmed)) return false;
+                  // Names usually have capital first letter or are company names
+                  // Accept anything that passed skip list check
+                  return true;
                 };
                 
                 // METHOD 1: Find all list items in messaging panel - this is the most reliable
@@ -597,18 +602,48 @@ async function fetchLinkedInMessages(cookies, retryCount = 0) {
                   if (conversations.length >= 15) return;
                   
                   try {
-                    // Must have a link to be a valid conversation
+                    // Try to get thread ID from link (old LinkedIn)
+                    let threadId = '';
                     const link = item.querySelector('a[href*="/messaging/thread/"]');
-                    if (!link) {
-                      console.log('[LinkedIn Debug] Item', index, 'has no thread link, skipping');
-                      return;
+                    if (link) {
+                      const href = link.getAttribute('href') || '';
+                      const threadMatch = href.match(/\\/messaging\\/thread\\/([^/\\?]+)/);
+                      if (threadMatch) {
+                        threadId = threadMatch[1];
+                      }
                     }
                     
-                    const href = link.getAttribute('href') || '';
-                    const threadMatch = href.match(/\\/messaging\\/thread\\/([^/\\?]+)/);
-                    if (!threadMatch) return;
+                    // Try data attributes (new LinkedIn)
+                    if (!threadId) {
+                      threadId = item.getAttribute('data-thread-urn') ||
+                                item.getAttribute('data-entity-urn') ||
+                                item.getAttribute('data-id') ||
+                                '';
+                      // Extract ID from URN format like "urn:li:fs_conversation:2-xxx"
+                      if (threadId.includes(':')) {
+                        threadId = threadId.split(':').pop();
+                      }
+                    }
                     
-                    const threadId = threadMatch[1];
+                    // Try finding any link that might contain thread info
+                    if (!threadId) {
+                      const anyLink = item.querySelector('a[href*="messaging"]');
+                      if (anyLink) {
+                        const href = anyLink.getAttribute('href') || '';
+                        // Try various URL patterns
+                        const match = href.match(/thread\\/([^/\\?]+)/) || 
+                                     href.match(/conversation\\/([^/\\?]+)/) ||
+                                     href.match(/messaging\\/([^/\\?]+)/);
+                        if (match) threadId = match[1];
+                      }
+                    }
+                    
+                    // Generate ID based on index if nothing else works
+                    if (!threadId) {
+                      threadId = 'linkedin_conv_' + index + '_' + Date.now();
+                      console.log('[LinkedIn Debug] Generated ID for item', index);
+                    }
+                    
                     if (seenIds.has(threadId)) return;
                     
                     // Get participant name - look for the NAME specifically
@@ -676,8 +711,23 @@ async function fetchLinkedInMessages(cookies, retryCount = 0) {
                     }
                     
                     if (!participantName) {
-                      console.log('[LinkedIn Debug] Could not find valid name for thread:', threadId.substring(0, 15));
-                      console.log('[LinkedIn Debug] Item text:', item.innerText.substring(0, 100));
+                      // Log what we found for debugging
+                      const allText = item.innerText.replace(/\\s+/g, ' ').substring(0, 200);
+                      console.log('[LinkedIn Debug] ⚠️ Item', index, 'no valid name. Text:', allText);
+                      
+                      // Last last resort - just take the first reasonable text chunk
+                      const chunks = item.innerText.split(/[\\n\\t]+/).map(s => s.trim()).filter(s => s.length >= 3 && s.length <= 50);
+                      for (const chunk of chunks) {
+                        if (!isSkipText(chunk) && /[A-Za-z]/.test(chunk)) {
+                          participantName = chunk;
+                          console.log('[LinkedIn Debug] Using chunk as name:', participantName);
+                          break;
+                        }
+                      }
+                    }
+                    
+                    if (!participantName) {
+                      console.log('[LinkedIn Debug] ❌ Skipping item', index, '- no valid name found');
                       return;
                     }
                     
