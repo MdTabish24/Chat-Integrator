@@ -383,7 +383,11 @@ const Accounts: React.FC = () => {
   };
 
   const isConnected = (platform: Platform): boolean => {
-    return connectedAccounts.some(acc => acc.platform === platform && acc.isActive !== false);
+    return connectedAccounts.some(acc => {
+      // Handle platform name variations (e.g., facebook vs facebook_cookie)
+      const normalizedPlatform = acc.platform?.replace('_cookie', '') || acc.platform;
+      return (normalizedPlatform === platform || acc.platform === platform) && acc.isActive !== false;
+    });
   };
 
   return (

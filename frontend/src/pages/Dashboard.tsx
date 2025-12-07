@@ -25,7 +25,7 @@ interface PlatformData {
   error?: string;
 }
 
-const PLATFORM_CONFIGS: Record<Platform, { name: string; icon: string; color: string }> = {
+const PLATFORM_CONFIGS: Record<Platform | string, { name: string; icon: string; color: string }> = {
   telegram: { name: 'Telegram', icon: 'TG', color: 'bg-blue-500' },
   twitter: { name: 'Twitter/X', icon: 'TW', color: 'bg-sky-500' },
   'twitter-dm': { name: 'Twitter DMs', icon: 'TW', color: 'bg-sky-600' },
@@ -34,9 +34,16 @@ const PLATFORM_CONFIGS: Record<Platform, { name: string; icon: string; color: st
   instagram: { name: 'Instagram', icon: 'IG', color: 'bg-gradient-to-br from-purple-500 to-pink-500' },
   whatsapp: { name: 'WhatsApp', icon: 'WA', color: 'bg-green-500' },
   facebook: { name: 'Facebook', icon: 'FB', color: 'bg-blue-600' },
+  facebook_cookie: { name: 'Facebook', icon: 'FB', color: 'bg-blue-600' }, // Alias for cookie-based Facebook
   teams: { name: 'Microsoft Teams', icon: 'MT', color: 'bg-purple-600' },
   discord: { name: 'Discord', icon: 'DC', color: 'bg-indigo-600' },
   gmail: { name: 'Gmail', icon: 'GM', color: 'bg-red-500' },
+};
+
+// Helper function to normalize platform names
+const normalizePlatform = (platform: string): Platform => {
+  if (platform === 'facebook_cookie') return 'facebook';
+  return platform as Platform;
 };
 
 const Dashboard: React.FC = () => {
@@ -125,11 +132,14 @@ const Dashboard: React.FC = () => {
         // Skip Gmail - it's shown in header modal, not sidebar
         if (account.platform === 'gmail') return;
         
-        if (!newPlatformsData.has(account.platform)) {
-          const config = PLATFORM_CONFIGS[account.platform];
+        // Normalize platform name (e.g., facebook_cookie -> facebook)
+        const normalizedPlatform = normalizePlatform(account.platform);
+        
+        if (!newPlatformsData.has(normalizedPlatform)) {
+          const config = PLATFORM_CONFIGS[account.platform] || PLATFORM_CONFIGS[normalizedPlatform];
           if (config) {
-            newPlatformsData.set(account.platform, {
-              platform: account.platform,
+            newPlatformsData.set(normalizedPlatform, {
+              platform: normalizedPlatform,
               name: config.name,
               icon: config.icon,
               color: config.color,
@@ -297,6 +307,13 @@ const Dashboard: React.FC = () => {
         } catch (err) {
           console.log('[discord] Sync error (will still load cached):', err);
         }
+      }
+      
+      // For Facebook, load conversations synced from Desktop App
+      // Note: Facebook data is synced via Desktop App like Instagram
+      if (platform === 'facebook') {
+        console.log('[facebook] Loading from database (use Desktop App to sync Facebook messages)');
+        // Data is synced via Desktop App directly to database
       }
       
       loadConversationsForPlatform(platform);

@@ -44,7 +44,14 @@ class ConversationsListView(APIView):
             accounts_query = ConnectedAccount.objects.filter(user_id=user_id, is_active=True)
             
             if platform:
-                accounts_query = accounts_query.filter(platform=platform)
+                # Handle platform name variations (facebook vs facebook_cookie)
+                platform_variations = [platform]
+                if platform == 'facebook':
+                    platform_variations.append('facebook_cookie')
+                elif platform == 'facebook_cookie':
+                    platform_variations.append('facebook')
+                    
+                accounts_query = accounts_query.filter(platform__in=platform_variations)
             
             # Get all conversations for this platform
             all_conversations = Conversation.objects.filter(
