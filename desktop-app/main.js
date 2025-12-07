@@ -986,7 +986,7 @@ let facebookFetchWindow = null;
 
 // Track last Facebook fetch time
 let lastFacebookFetch = 0;
-const FACEBOOK_MIN_INTERVAL = 30000; // 30 seconds between fetches
+const FACEBOOK_MIN_INTERVAL = 60000; // 60 seconds minimum between fetches (safer)
 
 async function fetchFacebookMessages(cookies, retryCount = 0) {
   // Rate limit check
@@ -2383,23 +2383,29 @@ ipcMain.handle('close-facebook-login', async () => {
   return { success: true };
 });
 
-// Start auto-sync interval (every 1 minute for near real-time updates)
+// Start auto-sync interval (every 3 minutes - safer to avoid account flags)
 function startAutoSync() {
   if (syncInterval) {
     clearInterval(syncInterval);
   }
   
-  // Sync every 1 minute instead of 5 minutes for faster updates
-  syncInterval = setInterval(() => {
-    syncAllPlatforms();
-  }, 1 * 60 * 1000); // 1 minute
+  // Sync every 3 minutes (safer interval to avoid detection)
+  // Add randomness (2.5 to 3.5 minutes) to look more human
+  const scheduleNextSync = () => {
+    const randomDelay = (2.5 + Math.random()) * 60 * 1000; // 2.5-3.5 minutes
+    syncInterval = setTimeout(() => {
+      syncAllPlatforms();
+      scheduleNextSync(); // Schedule next sync after this one completes
+    }, randomDelay);
+  };
   
-  // Initial sync after 5 seconds
+  // Initial sync after 10 seconds
   setTimeout(() => {
     syncAllPlatforms();
-  }, 5000);
+    scheduleNextSync();
+  }, 10000);
   
-  console.log('[sync] Auto-sync started - syncing every 1 minute');
+  console.log('[sync] Auto-sync started - syncing every ~3 minutes (with randomness for safety)');
 }
 
 // ============ INSTAGRAM SEND MESSAGE (via Desktop App) ============
