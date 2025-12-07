@@ -211,21 +211,49 @@ class SendMessageView(AsyncAPIView):
                         'error': f'Failed to send message via Twitter: {str(twitter_err)}',
                     }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
             elif conversation.account.platform == 'linkedin':
-                # Use cookie-based adapter for LinkedIn messages
-                from apps.platforms.adapters.linkedin_cookie import linkedin_cookie_adapter
+                # LinkedIn: Queue message for Desktop App to send (uses browser automation)
+                # LinkedIn's API from server IPs is blocked/unreliable, so we use Desktop App
+                from .models import PendingOutgoingMessage
+                import uuid
+                from django.utils import timezone
+                
                 try:
-                    # Run sync function in thread pool
-                    sent_msg = await sync_to_async(linkedin_cookie_adapter.send_message)(
-                        account_id=str(conversation.account.id),
-                        conversation_id=conversation.platform_conversation_id,
-                        content=content
+                    # Create pending message for Desktop App to send
+                    pending_msg = await sync_to_async(PendingOutgoingMessage.objects.create)(
+                        id=uuid.uuid4(),
+                        user_id=user_id,
+                        account=conversation.account,
+                        conversation=conversation,
+                        platform='linkedin',
+                        platform_conversation_id=conversation.platform_conversation_id,
+                        recipient_id=conversation.participant_id or '',
+                        content=content,
+                        status='pending'
                     )
+                    
+                    print(f'[send-message] LinkedIn message queued for Desktop App: {pending_msg.id}')
+                    
+                    # Return 202 Accepted with pending info
+                    return Response({
+                        'success': True,
+                        'message': {
+                            'id': str(pending_msg.id),
+                            'content': content,
+                            'senderName': 'You',
+                            'isOutgoing': True,
+                            'sentAt': timezone.now().isoformat(),
+                            'status': 'pending',
+                        },
+                        'pendingId': str(pending_msg.id),
+                        'note': 'Message queued for Desktop App. Make sure Desktop App is running with LinkedIn connected!',
+                    }, status=status.HTTP_202_ACCEPTED)
+                    
                 except Exception as linkedin_err:
-                    print(f'[send-message] LinkedIn send failed: {linkedin_err}')
+                    print(f'[send-message] LinkedIn queue failed: {linkedin_err}')
                     import traceback
                     traceback.print_exc()
                     return Response({
-                        'error': f'Failed to send message via LinkedIn: {str(linkedin_err)}',
+                        'error': f'Failed to queue LinkedIn message: {str(linkedin_err)}',
                     }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
             elif conversation.account.platform == 'instagram':
                 # Instagram: Queue message for Desktop App to send (server IP is blocked by Instagram)

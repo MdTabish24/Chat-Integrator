@@ -460,8 +460,8 @@ async function fetchLinkedInMessages(cookies, retryCount = 0) {
       }
       
       // Create browser window to fetch messages
-      // Set to FALSE for production - hidden window
-      const DEBUG_SHOW_WINDOW = false;  // Disabled - causes passkey prompts
+      // Set to TRUE to debug what LinkedIn shows, FALSE for production
+      const DEBUG_SHOW_WINDOW = false;  // DISABLED - hidden window for production
       
       linkedinFetchWindow = new BrowserWindow({
         width: 1200,
@@ -882,10 +882,11 @@ async function fetchLinkedInMessages(cookies, retryCount = 0) {
       // Wait for page to load, then extract
       linkedinFetchWindow.webContents.on('did-finish-load', () => {
         console.log('[linkedin] Page loaded, waiting for React to render...');
-        setTimeout(extractConversations, 5000);
+        // Wait 8 seconds for LinkedIn's React app to fully render
+        setTimeout(extractConversations, 8000);
       });
       
-      // Timeout after 50 seconds
+      // Timeout after 90 seconds (more time for clicking and extracting messages)
       setTimeout(() => {
         if (!isResolved) {
           console.log('[linkedin] Timeout - returning empty');
@@ -895,7 +896,7 @@ async function fetchLinkedInMessages(cookies, retryCount = 0) {
           }
           resolve([]);
         }
-      }, 50000);
+      }, 90000);
       
     } catch (error) {
       console.error('[linkedin] Fetch error:', error.message);
@@ -911,11 +912,13 @@ async function fetchLinkedInMessagesByClicking(browserWindow, conversationIndex,
   }
   
   try {
+    console.log(`[linkedin] Clicking on conversation ${conversationIndex} (${participantName})...`);
+    
     // Click on the conversation by index
     const clickResult = await browserWindow.webContents.executeJavaScript(`
       (function() {
         try {
-          // Find conversation list items
+          // Find conversation list items - multiple selectors for different LinkedIn versions
           const listContainers = document.querySelectorAll(
             '.msg-conversations-container__conversations-list, ' +
             '[class*="conversations-list"], ' +
@@ -939,20 +942,31 @@ async function fetchLinkedInMessagesByClicking(browserWindow, conversationIndex,
             if (!allListItems.includes(item)) allListItems.push(item);
           });
           
+          console.log('[LinkedIn Debug] Total list items for clicking:', allListItems.length);
+          
           // Find the item at the specified index
           const targetItem = allListItems[${conversationIndex}];
           if (!targetItem) {
-            return { success: false, error: 'Conversation not found at index ${conversationIndex}' };
+            return { success: false, error: 'Conversation not found at index ${conversationIndex}', totalItems: allListItems.length };
           }
           
           // Click on the item (find clickable element inside)
           const clickable = targetItem.querySelector('a') || 
                            targetItem.querySelector('[role="button"]') ||
+                           targetItem.querySelector('[role="listitem"]') ||
                            targetItem;
           
           if (clickable) {
+            // Scroll into view first
+            clickable.scrollIntoView({ behavior: 'instant', block: 'center' });
+            
+            // Use multiple click methods for reliability
             clickable.click();
-            return { success: true };
+            
+            // Also dispatch click event
+            clickable.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+            
+            return { success: true, clickedTag: clickable.tagName };
           }
           
           return { success: false, error: 'No clickable element found' };
@@ -962,87 +976,212 @@ async function fetchLinkedInMessagesByClicking(browserWindow, conversationIndex,
       })();
     `);
     
+    console.log('[linkedin] Click result:', clickResult);
+    
     if (!clickResult.success) {
       console.log('[linkedin] Click failed:', clickResult.error);
       return [];
     }
     
-    // Wait for conversation to load
-    await new Promise(resolve => setTimeout(resolve, 2500));
+    // Wait longer for conversation to load - LinkedIn is slow
+    await new Promise(resolve => setTimeout(resolve, 4000));
     
-    // Extract messages from the opened conversation
+    // Extract messages from the opened conversation - IMPROVED VERSION
     const messagesResult = await browserWindow.webContents.executeJavaScript(`
       (function() {
         try {
           const messages = [];
+          const participantName = ${JSON.stringify(participantName || 'Other')};
           
-          // Find message elements - LinkedIn uses various class patterns
-          const msgSelectors = [
-            '.msg-s-event-listitem',
-            '.msg-s-message-list__event', 
-            '[class*="message-event"]',
-            '.msg-s-message-group',
-            '[data-view-name="message-list-item"]'
+          console.log('[LinkedIn Debug] ========== MESSAGE EXTRACTION ==========');
+          console.log('[LinkedIn Debug] Looking for messages in conversation with:', participantName);
+          
+          // FIRST: Find the message thread/conversation container
+          // LinkedIn has different containers depending on version
+          const threadContainerSelectors = [
+            '.msg-s-message-list-content',
+            '.msg-s-message-list',
+            '[class*="message-list"]',
+            '.msg-thread',
+            '.scaffold-layout__detail',
+            '[role="main"] [class*="thread"]',
+            '[role="main"]'
           ];
           
-          let msgElements = [];
-          for (const sel of msgSelectors) {
-            const found = document.querySelectorAll(sel);
-            if (found.length > 0) {
-              msgElements = found;
-              console.log('[LinkedIn Debug] Found', found.length, 'messages with selector:', sel);
+          let threadContainer = null;
+          for (const sel of threadContainerSelectors) {
+            const found = document.querySelector(sel);
+            if (found) {
+              threadContainer = found;
+              console.log('[LinkedIn Debug] Found thread container with:', sel);
               break;
             }
           }
           
-          // If no specific elements found, try to find message bubbles
-          if (msgElements.length === 0) {
-            // Look for any p tags or spans that look like messages in the conversation area
-            const conversationPane = document.querySelector('.msg-conversation-listitem--active')?.closest('.msg-thread') ||
-                                    document.querySelector('[class*="conversation-card--active"]') ||
-                                    document.querySelector('.scaffold-layout__main') ||
-                                    document.querySelector('[role="main"]');
-            
-            if (conversationPane) {
-              // Get all text content that looks like messages
-              const allP = conversationPane.querySelectorAll('p');
-              console.log('[LinkedIn Debug] Found', allP.length, 'p elements in conversation pane');
-              msgElements = allP;
+          if (!threadContainer) {
+            console.log('[LinkedIn Debug] No thread container found!');
+            // Try the whole main area
+            threadContainer = document.querySelector('.scaffold-layout__main') || document.body;
+          }
+          
+          // SECOND: Find message elements within the thread container
+          // LinkedIn uses message groups that contain multiple messages from same sender
+          const msgGroupSelectors = [
+            '.msg-s-message-group',
+            '.msg-s-message-list__event',
+            '.msg-s-event-listitem',
+            '[class*="message-group"]',
+            '[class*="msg-s-event"]',
+            '[data-control-name*="message"]'
+          ];
+          
+          let msgGroups = [];
+          for (const sel of msgGroupSelectors) {
+            const found = threadContainer.querySelectorAll(sel);
+            if (found.length > 0) {
+              msgGroups = Array.from(found);
+              console.log('[LinkedIn Debug] Found', found.length, 'message groups with:', sel);
+              break;
             }
           }
           
-          msgElements.forEach((msgEl, index) => {
-            if (messages.length >= 15) return;
+          // If no groups found, try alternative approach - find all message bubbles
+          if (msgGroups.length === 0) {
+            console.log('[LinkedIn Debug] Trying alternative message selectors...');
+            
+            // Look for message content directly
+            const altSelectors = [
+              '.msg-s-event-listitem__body',
+              '.msg-s-message-group__content',
+              'p.msg-s-event-listitem__body',
+              '[class*="message-body"]',
+              '[class*="event-listitem__body"]'
+            ];
+            
+            for (const sel of altSelectors) {
+              const found = threadContainer.querySelectorAll(sel);
+              if (found.length > 0) {
+                msgGroups = Array.from(found);
+                console.log('[LinkedIn Debug] Found', found.length, 'message elements with:', sel);
+                break;
+              }
+            }
+          }
+          
+          // THIRD: If still nothing, try to get ANY text that looks like messages
+          if (msgGroups.length === 0) {
+            console.log('[LinkedIn Debug] Trying paragraph fallback...');
+            
+            // Get all paragraphs in the thread area
+            const allP = threadContainer.querySelectorAll('p');
+            const validP = Array.from(allP).filter(p => {
+              const text = p.textContent?.trim() || '';
+              // Filter out UI elements
+              if (text.length < 2 || text.length > 500) return false;
+              if (text.includes('Type a message') || text.includes('Write a message')) return false;
+              if (text.includes('Start a conversation') || text.includes('No messages')) return false;
+              return true;
+            });
+            
+            if (validP.length > 0) {
+              msgGroups = validP;
+              console.log('[LinkedIn Debug] Found', validP.length, 'paragraph messages');
+            }
+          }
+          
+          console.log('[LinkedIn Debug] Processing', msgGroups.length, 'potential messages...');
+          
+          // FOURTH: Extract message data from each element
+          msgGroups.forEach((msgEl, index) => {
+            if (messages.length >= 20) return; // Limit to 20 messages
             
             try {
-              // Get message text
+              // Get message text - try multiple approaches
               let text = '';
               
-              // Try to find text in various places
-              const textEl = msgEl.querySelector('.msg-s-event-listitem__body, .msg-s-event__content, [class*="message-body"]') ||
-                            msgEl.querySelector('p') ||
-                            msgEl;
+              // Try specific content selectors first
+              const bodySelectors = [
+                '.msg-s-event-listitem__body',
+                '.msg-s-message-group__content',
+                'p[class*="body"]',
+                '.msg-s-event__content',
+                'p'
+              ];
               
-              if (textEl) {
-                text = textEl.textContent?.trim() || '';
+              for (const sel of bodySelectors) {
+                const bodyEl = msgEl.querySelector(sel) || (msgEl.matches(sel) ? msgEl : null);
+                if (bodyEl) {
+                  text = bodyEl.textContent?.trim() || '';
+                  if (text) break;
+                }
               }
               
-              // Skip empty or UI text
-              if (!text || text.length < 1 || text.length > 500) return;
-              if (text.includes('Type a message') || text.includes('Write a message')) return;
+              // Fallback to element's own text
+              if (!text) {
+                text = msgEl.textContent?.trim() || '';
+              }
+              
+              // Clean up text - remove extra whitespace
+              text = text.replace(/\\s+/g, ' ').trim();
+              
+              // Skip empty or too long/short
+              if (!text || text.length < 1 || text.length > 1000) return;
+              
+              // Skip UI elements
+              const skipTexts = ['type a message', 'write a message', 'start', 'no messages', 'send', 'attach'];
+              if (skipTexts.some(s => text.toLowerCase().includes(s) && text.length < 30)) return;
               
               // Get sender name
               let senderName = '';
-              const senderEl = msgEl.closest('.msg-s-message-group')?.querySelector('.msg-s-message-group__name') ||
-                              msgEl.querySelector('[class*="actor-name"]');
-              if (senderEl) {
-                senderName = senderEl.textContent?.trim() || '';
+              const senderSelectors = [
+                '.msg-s-message-group__name',
+                '.msg-s-message-group__profile',
+                '[class*="actor-name"]',
+                '[class*="sender-name"]',
+                '.msg-s-event-listitem__profile-name'
+              ];
+              
+              // Check parent elements for sender info
+              let parentEl = msgEl.closest('.msg-s-message-group') || msgEl.parentElement;
+              for (let i = 0; i < 5 && parentEl; i++) {
+                for (const sel of senderSelectors) {
+                  const senderEl = parentEl.querySelector(sel);
+                  if (senderEl) {
+                    senderName = senderEl.textContent?.trim() || '';
+                    if (senderName) break;
+                  }
+                }
+                if (senderName) break;
+                parentEl = parentEl.parentElement;
+              }
+              
+              // Determine if outgoing (sent by me)
+              const outboundSelectors = [
+                '.msg-s-message-group--outbound',
+                '.msg-s-event-listitem--outbound',
+                '[class*="outbound"]',
+                '[class*="sent"]'
+              ];
+              
+              let isOutgoing = false;
+              let checkEl = msgEl;
+              for (let i = 0; i < 5 && checkEl; i++) {
+                for (const sel of outboundSelectors) {
+                  if (checkEl.matches && checkEl.matches(sel)) {
+                    isOutgoing = true;
+                    break;
+                  }
+                }
+                if (isOutgoing) break;
+                checkEl = checkEl.parentElement;
               }
               
               // Get timestamp
               let timestamp = new Date().toISOString();
-              const timeEl = msgEl.querySelector('time, [class*="time-stamp"]') ||
-                            msgEl.closest('.msg-s-message-group')?.querySelector('time');
+              const timeEl = msgEl.querySelector('time') || 
+                            msgEl.closest('.msg-s-message-group')?.querySelector('time') ||
+                            msgEl.closest('.msg-s-event-listitem')?.querySelector('time');
+              
               if (timeEl) {
                 const dt = timeEl.getAttribute('datetime') || timeEl.textContent;
                 if (dt) {
@@ -1055,25 +1194,30 @@ async function fetchLinkedInMessagesByClicking(browserWindow, conversationIndex,
                 }
               }
               
-              // Check if outgoing (sent by me)
-              const isOutgoing = msgEl.closest('.msg-s-event-listitem--outbound') !== null ||
-                               msgEl.closest('[class*="outbound"]') !== null ||
-                               msgEl.closest('.msg-s-message-group--outbound') !== null;
-              
-              messages.push({
+              const msgObj = {
                 id: 'msg_' + index + '_' + Date.now(),
                 text: text,
                 senderId: isOutgoing ? 'me' : 'other',
-                senderName: senderName || (isOutgoing ? 'You' : '${participantName || "Other"}'),
+                senderName: senderName || (isOutgoing ? 'You' : participantName),
                 createdAt: timestamp,
                 isOutgoing: isOutgoing
-              });
+              };
+              
+              // Avoid duplicate messages (same text)
+              const isDupe = messages.some(m => m.text === text);
+              if (!isDupe) {
+                messages.push(msgObj);
+                console.log('[LinkedIn Debug] ✅ Message:', text.substring(0, 50) + '...', 'from:', msgObj.senderName);
+              }
+              
             } catch (e) {
               console.error('[LinkedIn Debug] Message parse error:', e.message);
             }
           });
           
-          console.log('[LinkedIn Debug] Extracted', messages.length, 'messages');
+          console.log('[LinkedIn Debug] ========== EXTRACTION COMPLETE ==========');
+          console.log('[LinkedIn Debug] Total messages extracted:', messages.length);
+          
           return messages;
         } catch (e) {
           console.error('[LinkedIn Debug] Messages extraction error:', e);
@@ -1082,6 +1226,7 @@ async function fetchLinkedInMessagesByClicking(browserWindow, conversationIndex,
       })();
     `);
     
+    console.log(`[linkedin] Extracted ${messagesResult?.length || 0} messages for ${participantName}`);
     return messagesResult || [];
     
   } catch (err) {
