@@ -982,6 +982,7 @@ function parseInstagramResponse(data) {
 // ============ FACEBOOK ============
 // Facebook login window reference
 let facebookLoginWindow = null;
+let facebookFetchWindow = null;
 
 // Track last Facebook fetch time
 let lastFacebookFetch = 0;
@@ -996,7 +997,7 @@ async function fetchFacebookMessages(cookies, retryCount = 0) {
     await new Promise(resolve => setTimeout(resolve, FACEBOOK_MIN_INTERVAL - timeSinceLastFetch));
   }
 
-  console.log('[facebook] Fetching messages with cookies...');
+  console.log('[facebook] Fetching messages with browser automation...');
   console.log('[facebook] c_user:', cookies.c_user ? 'present' : 'missing');
   console.log('[facebook] xs:', cookies.xs ? 'present' : 'missing');
 
@@ -1004,63 +1005,191 @@ async function fetchFacebookMessages(cookies, retryCount = 0) {
     throw new Error('Facebook session not found. Please login via "Open Facebook Login" button.');
   }
 
-  const headers = {
-    'cookie': `c_user=${cookies.c_user}; xs=${cookies.xs}`,
-    'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-    'accept-language': 'en-US,en;q=0.5',
-    'sec-fetch-dest': 'document',
-    'sec-fetch-mode': 'navigate',
-    'sec-fetch-site': 'none',
-  };
-
-  try {
-    // First, verify cookies by checking if we can access messenger
-    const verifyResponse = await axios.get(
-      'https://www.facebook.com/messages/',
-      { 
-        headers, 
-        timeout: 30000,
-        maxRedirects: 0,
-        validateStatus: (status) => status < 400 || status === 302 || status === 301
+  return new Promise(async (resolve, reject) => {
+    try {
+      // Use the same session as the login window
+      const facebookSession = session.fromPartition('facebook-login');
+      
+      // Set cookies in the session
+      const cookiesToSet = [
+        { url: 'https://www.facebook.com', name: 'c_user', value: cookies.c_user, domain: '.facebook.com' },
+        { url: 'https://www.facebook.com', name: 'xs', value: cookies.xs, domain: '.facebook.com' },
+      ];
+      
+      if (cookies.datr) {
+        cookiesToSet.push({ url: 'https://www.facebook.com', name: 'datr', value: cookies.datr, domain: '.facebook.com' });
       }
-    );
-
-    // Check for redirect to login page
-    if (verifyResponse.status === 301 || verifyResponse.status === 302) {
-      const location = verifyResponse.headers.location || '';
-      console.log('[facebook] Redirected to:', location);
-      if (location.includes('login') || location.includes('checkpoint')) {
-        throw new Error('Facebook session expired. Please click "Open Facebook Login" to re-login.');
+      if (cookies.fr) {
+        cookiesToSet.push({ url: 'https://www.facebook.com', name: 'fr', value: cookies.fr, domain: '.facebook.com' });
       }
+      
+      for (const cookie of cookiesToSet) {
+        try {
+          await facebookSession.cookies.set(cookie);
+        } catch (e) {
+          console.log('[facebook] Cookie set warning:', e.message);
+        }
+      }
+      
+      // Close existing fetch window
+      if (facebookFetchWindow && !facebookFetchWindow.isDestroyed()) {
+        facebookFetchWindow.close();
+      }
+      
+      // Create hidden browser window to fetch messages
+      facebookFetchWindow = new BrowserWindow({
+        width: 1200,
+        height: 800,
+        show: false,  // Hidden window
+        webPreferences: {
+          nodeIntegration: false,
+          contextIsolation: true,
+          session: facebookSession
+        }
+      });
+      
+      console.log('[facebook] Loading Messenger...');
+      facebookFetchWindow.loadURL('https://www.facebook.com/messages/t/');
+      
+      let isResolved = false;
+      
+      const extractConversations = async () => {
+        if (isResolved) return;
+        
+        try {
+          const currentURL = facebookFetchWindow.webContents.getURL();
+          console.log('[facebook] Current URL:', currentURL);
+          
+          // Check if redirected to login
+          if (currentURL.includes('/login') || currentURL.includes('/checkpoint')) {
+            isResolved = true;
+            if (facebookFetchWindow && !facebookFetchWindow.isDestroyed()) {
+              facebookFetchWindow.close();
+            }
+            reject(new Error('Facebook session expired. Please click "Open Facebook Login" to re-login.'));
+            return;
+          }
+          
+          // Wait for page to fully load, then extract conversations
+          const result = await facebookFetchWindow.webContents.executeJavaScript(`
+            (function() {
+              try {
+                const conversations = [];
+                
+                // Find conversation list items - Facebook uses various selectors
+                const chatItems = document.querySelectorAll('[role="row"], [data-testid="mwthreadlist-item"], a[href*="/messages/t/"]');
+                
+                console.log('Found', chatItems.length, 'potential chat items');
+                
+                chatItems.forEach((item, index) => {
+                  if (index >= 10) return; // Limit to 10 conversations
+                  
+                  try {
+                    // Try to extract conversation info
+                    const link = item.querySelector('a[href*="/messages/t/"]') || item.closest('a[href*="/messages/t/"]') || item;
+                    const href = link?.getAttribute('href') || '';
+                    
+                    // Extract thread ID from URL
+                    const threadMatch = href.match(/\\/messages\\/t\\/([0-9]+)/);
+                    const threadId = threadMatch ? threadMatch[1] : '';
+                    
+                    if (!threadId) return;
+                    
+                    // Try to get participant name
+                    const nameEl = item.querySelector('span[dir="auto"]') || 
+                                  item.querySelector('[data-testid="mwthreadlist-item-name"]') ||
+                                  item.querySelector('span');
+                    const participantName = nameEl?.textContent?.trim() || 'Facebook User';
+                    
+                    // Try to get last message preview
+                    const previewEl = item.querySelector('[data-testid="mwthreadlist-item-snippet"]') ||
+                                     item.querySelectorAll('span')[1];
+                    const lastMessage = previewEl?.textContent?.trim() || '';
+                    
+                    // Try to get avatar
+                    const avatarEl = item.querySelector('img[src*="scontent"]');
+                    const avatarUrl = avatarEl?.src || '';
+                    
+                    conversations.push({
+                      id: threadId,
+                      participants: [{
+                        id: threadId,
+                        name: participantName
+                      }],
+                      messages: lastMessage ? [{
+                        id: 'preview_' + threadId,
+                        text: lastMessage,
+                        senderId: '',
+                        createdAt: new Date().toISOString()
+                      }] : [],
+                      avatarUrl: avatarUrl
+                    });
+                  } catch (itemErr) {
+                    console.error('Error processing chat item:', itemErr);
+                  }
+                });
+                
+                return { success: true, conversations: conversations };
+              } catch (e) {
+                return { success: false, error: e.message, conversations: [] };
+              }
+            })();
+          `);
+          
+          console.log('[facebook] Extraction result:', result);
+          
+          lastFacebookFetch = Date.now();
+          isResolved = true;
+          
+          // Close the window
+          if (facebookFetchWindow && !facebookFetchWindow.isDestroyed()) {
+            facebookFetchWindow.close();
+          }
+          
+          if (result.success && result.conversations.length > 0) {
+            console.log(`[facebook] Found ${result.conversations.length} conversations`);
+            resolve(result.conversations);
+          } else {
+            console.log('[facebook] No conversations found via browser, returning empty');
+            resolve([]);
+          }
+          
+        } catch (err) {
+          console.error('[facebook] Extraction error:', err.message);
+          if (!isResolved) {
+            isResolved = true;
+            if (facebookFetchWindow && !facebookFetchWindow.isDestroyed()) {
+              facebookFetchWindow.close();
+            }
+            resolve([]); // Return empty rather than failing
+          }
+        }
+      };
+      
+      // Wait for page to load, then extract
+      facebookFetchWindow.webContents.on('did-finish-load', () => {
+        console.log('[facebook] Page loaded, waiting for content...');
+        // Wait for React/JS to render conversations
+        setTimeout(extractConversations, 5000);
+      });
+      
+      // Timeout after 30 seconds
+      setTimeout(() => {
+        if (!isResolved) {
+          console.log('[facebook] Timeout - returning empty');
+          isResolved = true;
+          if (facebookFetchWindow && !facebookFetchWindow.isDestroyed()) {
+            facebookFetchWindow.close();
+          }
+          resolve([]);
+        }
+      }, 30000);
+      
+    } catch (error) {
+      console.error('[facebook] Fetch error:', error.message);
+      reject(error);
     }
-
-    lastFacebookFetch = Date.now();
-
-    // Facebook's web interface doesn't have a simple API like Twitter
-    // We'll fetch basic info and let the backend handle the heavy lifting
-    // For now, return empty and rely on backend sync via browser session
-    console.log('[facebook] Cookies valid - syncing via backend');
-    
-    return [];
-
-  } catch (error) {
-    console.error('[facebook] Fetch error:', error.message);
-
-    // Retry on connection errors
-    const isRetryableError = error.message.includes('ECONNRESET') || 
-                            error.message.includes('ETIMEDOUT') ||
-                            error.message.includes('socket hang up');
-    
-    if (isRetryableError && retryCount < 3) {
-      const waitTime = Math.pow(2, retryCount) * 3000;
-      console.log(`[facebook] Retrying in ${waitTime/1000}s... (attempt ${retryCount + 1}/3)`);
-      await new Promise(resolve => setTimeout(resolve, waitTime));
-      return fetchFacebookMessages(cookies, retryCount + 1);
-    }
-
-    throw error;
-  }
+  });
 }
 
 function parseFacebookResponse(data) {
