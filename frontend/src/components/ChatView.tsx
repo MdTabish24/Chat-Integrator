@@ -112,12 +112,13 @@ const ChatView: React.FC<ChatViewProps> = ({
         console.log('[linkedin-fe] ========== LOADING LINKEDIN MESSAGES ==========');
         console.log('[linkedin-fe] conversationId:', conversationId);
         try {
-          // Get conversation to find account ID and platform conversation ID
-          const convResponse = await apiClient.get('/api/conversations');
-          const conversations = convResponse.data.conversations || [];
-          const conv = conversations.find((c: Conversation) => c.id === conversationId);
+          // Get conversation details directly using the conversation ID
+          // This avoids the max_read limit issue with the list endpoint
+          console.log('[linkedin-fe] Fetching conversation details directly...');
+          const convDetailResponse = await apiClient.get(`/api/conversations/${conversationId}`);
+          const conv = convDetailResponse.data;
           
-          console.log('[linkedin-fe] Found conversation:', conv);
+          console.log('[linkedin-fe] Got conversation details:', conv);
           
           if (conv) {
             const accountId = conv.account_id || conv.accountId;
@@ -197,10 +198,10 @@ const ChatView: React.FC<ChatViewProps> = ({
       // For Discord, fetch fresh messages from API and use them directly
       if (platform === 'discord' && pageNum === 1 && !append) {
         try {
-          // Get conversation to find account ID and platform conversation ID
-          const convResponse = await apiClient.get('/api/conversations');
-          const conversations = convResponse.data.conversations || [];
-          const conv = conversations.find((c: Conversation) => c.id === conversationId);
+          // Get conversation details directly using the conversation ID
+          console.log('[discord] Fetching conversation details directly...');
+          const convDetailResponse = await apiClient.get(`/api/conversations/${conversationId}`);
+          const conv = convDetailResponse.data;
           
           if (conv) {
             const accountId = conv.account_id || conv.accountId;
