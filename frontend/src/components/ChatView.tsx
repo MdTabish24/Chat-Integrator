@@ -509,7 +509,7 @@ const ChatView: React.FC<ChatViewProps> = ({
             <img
               src={conversation.participantAvatarUrl}
               alt={conversation.participantName}
-              className="w-11 h-11 rounded-xl shadow-md"
+              className="w-11 h-11 rounded-xl shadow-md object-cover"
             />
           ) : (
             <div className={`w-11 h-11 rounded-xl flex items-center justify-center shadow-md ${isDark ? 'bg-gradient-to-br from-gray-700 to-gray-800' : 'bg-gradient-to-br from-gray-200 to-gray-300'}`}>
@@ -520,19 +520,14 @@ const ChatView: React.FC<ChatViewProps> = ({
           )}
           <div>
             <h3 className={`font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>
-              {conversation?.participantName || 'Loading...'}
+              {conversation?.participantName || 'Select a chat'}
             </h3>
-            {isAuthenticated && (
-              <div className="flex items-center space-x-1">
-                <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
-                <span className={`text-xs ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>Live</span>
-              </div>
+            {platform && (
+              <span className={`text-xs capitalize ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
+                {platform}
+              </span>
             )}
           </div>
-        </div>
-        {/* Character count display area */}
-        <div className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
-          {messages.length} messages
         </div>
       </div>
 
@@ -602,77 +597,11 @@ const ChatView: React.FC<ChatViewProps> = ({
         </div>
       )}
 
-      {/* Facebook Info */}
-      {platform === 'facebook' && (
-        <div className={`px-4 py-2 border-t ${isDark ? 'bg-blue-900/20 border-blue-800' : 'bg-gradient-to-r from-blue-50 to-sky-50 border-blue-200'}`}>
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-2">
-              <svg className={`w-4 h-4 ${isDark ? 'text-blue-400' : 'text-blue-500'}`} fill="currentColor" viewBox="0 0 24 24">
-                <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/>
-              </svg>
-              <span className={`text-xs ${isDark ? 'text-blue-300' : 'text-blue-700'}`}>
-                <strong>Facebook:</strong> Messages sent via Desktop App. E2EE chats may show encrypted messages.
-              </span>
-            </div>
-            <button 
-              onClick={() => loadMessages(1, false)} 
-              className={`text-xs underline ${isDark ? 'text-blue-400 hover:text-blue-300' : 'text-blue-600 hover:text-blue-800'}`}
-            >
-              Refresh
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Instagram Info */}
-      {platform === 'instagram' && (
-        <div className={`px-4 py-2 border-t ${isDark ? 'bg-pink-900/20 border-pink-800' : 'bg-gradient-to-r from-pink-50 to-purple-50 border-pink-200'}`}>
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-2">
-              <svg className={`w-4 h-4 ${isDark ? 'text-pink-400' : 'text-pink-500'}`} fill="currentColor" viewBox="0 0 24 24">
-                <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zM12 0C8.741 0 8.333.014 7.053.072 2.695.272.273 2.69.073 7.052.014 8.333 0 8.741 0 12c0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98C8.333 23.986 8.741 24 12 24c3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98C15.668.014 15.259 0 12 0z"/>
-              </svg>
-              <span className={`text-xs ${isDark ? 'text-pink-300' : 'text-pink-700'}`}>
-                <strong>Instagram:</strong> Desktop App must be running. If message fails, re-login in Desktop App.
-              </span>
-            </div>
-            <button 
-              onClick={() => loadMessages(1, false)} 
-              className={`text-xs underline ${isDark ? 'text-pink-400 hover:text-pink-300' : 'text-pink-600 hover:text-pink-800'}`}
-            >
-              Refresh
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Discord Info */}
-      {platform === 'discord' && (
-        <div className={`px-4 py-2 border-t ${isDark ? 'bg-indigo-900/20 border-indigo-800' : 'bg-gradient-to-r from-indigo-50 to-purple-50 border-indigo-200'}`}>
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-2">
-              <svg className={`w-4 h-4 ${isDark ? 'text-indigo-400' : 'text-indigo-500'}`} fill="currentColor" viewBox="0 0 24 24">
-                <path d="M20.317 4.3698a19.7913 19.7913 0 00-4.8851-1.5152.0741.0741 0 00-.0785.0371c-.211.3753-.4447.8648-.6083 1.2495-1.8447-.2762-3.68-.2762-5.4868 0-.1636-.3933-.4058-.8742-.6177-1.2495a.077.077 0 00-.0785-.037 19.7363 19.7363 0 00-4.8852 1.515.0699.0699 0 00-.0321.0277C.5334 9.0458-.319 13.5799.0992 18.0578a.0824.0824 0 00.0312.0561c2.0528 1.5076 4.0413 2.4228 5.9929 3.0294a.0777.0777 0 00.0842-.0276c.4616-.6304.8731-1.2952 1.226-1.9942a.076.076 0 00-.0416-.1057c-.6528-.2476-1.2743-.5495-1.8722-.8923a.077.077 0 01-.0076-.1277c.1258-.0943.2517-.1923.3718-.2914a.0743.0743 0 01.0776-.0105c3.9278 1.7933 8.18 1.7933 12.0614 0a.0739.0739 0 01.0785.0095c.1202.099.246.1981.3728.2924a.077.077 0 01-.0066.1276 12.2986 12.2986 0 01-1.873.8914.0766.0766 0 00-.0407.1067c.3604.698.7719 1.3628 1.225 1.9932a.076.076 0 00.0842.0286c1.961-.6067 3.9495-1.5219 6.0023-3.0294a.077.077 0 00.0313-.0552c.5004-5.177-.8382-9.6739-3.5485-13.6604a.061.061 0 00-.0312-.0286z"/>
-              </svg>
-              <span className={`text-xs ${isDark ? 'text-indigo-300' : 'text-indigo-700'}`}>
-                <strong>Discord:</strong> Messages sent directly via Discord API. Token must be valid.
-              </span>
-            </div>
-            <button 
-              onClick={() => loadMessages(1, false)} 
-              className={`text-xs underline ${isDark ? 'text-indigo-400 hover:text-indigo-300' : 'text-indigo-600 hover:text-indigo-800'}`}
-            >
-              Refresh
-            </button>
-          </div>
-        </div>
-      )}
-
       {/* Message Input */}
       <MessageInput 
         onSendMessage={handleSendMessage} 
         disabled={isLoading || !!error} 
-        placeholder={platform === 'instagram' ? "Type message (sent via Desktop App)..." : "Type a message..."} 
+        placeholder="Type a message..." 
       />
     </div>
   );

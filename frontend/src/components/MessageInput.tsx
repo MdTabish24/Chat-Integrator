@@ -56,7 +56,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
   };
 
   return (
-    <div className={`border-t p-4 ${isDark ? 'border-gray-700 bg-slate-800' : 'border-gray-200 bg-white'}`}>
+    <div className={`border-t p-3 ${isDark ? 'border-gray-700 bg-slate-800' : 'border-gray-200 bg-white'}`}>
       <div className="flex items-end space-x-3">
         <div className="flex-1 relative">
           <textarea
@@ -108,10 +108,6 @@ const MessageInput: React.FC<MessageInputProps> = ({
           )}
         </button>
       </div>
-      
-      <p className={`text-xs mt-2 ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>
-        Press Enter to send, Shift+Enter for new line
-      </p>
     </div>
   );
 };
