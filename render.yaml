@@ -3,12 +3,20 @@
 # DO NOT commit API keys here!
 
 services:
+  # Frontend Static Site (SPA)
   - type: web
-    name: messaging-hub
-    env: node
+    name: chatorbitor
+    env: static
     region: singapore
     plan: free
-    buildCommand: npm run install:all && npm run build
-    startCommand: npm start
+    buildCommand: cd frontend && npm install && npm run build
+    staticPublishPath: frontend/dist
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    headers:
+      - path: /*
+        name: Cache-Control
+        value: no-cache
     # Add all environment variables in Render Dashboard
-    # See .env.render file for complete list
