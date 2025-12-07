@@ -535,6 +535,28 @@ const ChatView: React.FC<ChatViewProps> = ({
         </div>
       )}
 
+      {/* Facebook Info */}
+      {platform === 'facebook' && (
+        <div className={`px-4 py-2 border-t ${isDark ? 'bg-blue-900/20 border-blue-800' : 'bg-gradient-to-r from-blue-50 to-sky-50 border-blue-200'}`}>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-2">
+              <svg className={`w-4 h-4 ${isDark ? 'text-blue-400' : 'text-blue-500'}`} fill="currentColor" viewBox="0 0 24 24">
+                <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/>
+              </svg>
+              <span className={`text-xs ${isDark ? 'text-blue-300' : 'text-blue-700'}`}>
+                <strong>Facebook:</strong> Messages sent via Desktop App. E2EE chats may show encrypted messages.
+              </span>
+            </div>
+            <button 
+              onClick={() => loadMessages(1, false)} 
+              className={`text-xs underline ${isDark ? 'text-blue-400 hover:text-blue-300' : 'text-blue-600 hover:text-blue-800'}`}
+            >
+              Refresh
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Instagram Info */}
       {platform === 'instagram' && (
         <div className={`px-4 py-2 border-t ${isDark ? 'bg-pink-900/20 border-pink-800' : 'bg-gradient-to-r from-pink-50 to-purple-50 border-pink-200'}`}>

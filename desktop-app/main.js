@@ -1117,15 +1117,27 @@ async function fetchFacebookMessages(cookies, retryCount = 0) {
                       }
                     }
                     
-                    // Get last message preview
+                    // Get last message preview (filter out E2EE notices)
                     let lastMessage = '';
                     const spans = container?.querySelectorAll('span') || [];
                     for (const span of spans) {
                       const text = span.textContent?.trim() || '';
-                      if (text.length > 10 && text.length < 200 && text !== participantName) {
+                      // Skip E2EE notices and other non-message text
+                      if (text.includes('end-to-end encryption') || 
+                          text.includes('secured with') ||
+                          text.includes('No one outside') ||
+                          text.includes('Messages and calls')) {
+                        continue;
+                      }
+                      if (text.length > 5 && text.length < 200 && text !== participantName) {
                         lastMessage = text;
                         break;
                       }
+                    }
+                    
+                    // If no real message found for E2EE chat, mark it
+                    if (!lastMessage && href.includes('/e2ee/')) {
+                      lastMessage = '[End-to-end encrypted chat]';
                     }
                     
                     // Get avatar URL
