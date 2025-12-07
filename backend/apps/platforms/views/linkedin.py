@@ -988,6 +988,7 @@ class LinkedInPendingMessagesView(APIView):
                     'id': str(msg.id),
                     'conversationId': str(msg.conversation.id) if msg.conversation else '',
                     'platformConversationId': msg.conversation.platform_conversation_id if msg.conversation else '',
+                    'recipientName': msg.conversation.participant_name if msg.conversation else '',  # Include recipient name for matching
                     'content': msg.content,  # Already decrypted by property
                     'createdAt': msg.created_at.isoformat(),
                 })
