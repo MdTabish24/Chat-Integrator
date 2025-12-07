@@ -273,17 +273,13 @@ const Dashboard: React.FC = () => {
     
     // Load conversations after state update (outside of setState callback)
     if (newIsExpanded) {
-      // For LinkedIn, trigger backend sync first (backend fetches messages via linkedin-api)
+      // For LinkedIn, DON'T call backend sync (LinkedIn blocks server-side API calls with CSRF errors)
+      // LinkedIn data is synced via Desktop App which runs browser automation on user's PC
+      // Just load conversations from database
       if (platform === 'linkedin') {
-        try {
-          const account = connectedAccounts.find(acc => acc.platform === 'linkedin');
-          if (account) {
-            console.log('[linkedin] Triggering backend sync...');
-            await apiClient.get(`/api/platforms/linkedin/conversations/${account.id}`);
-          }
-        } catch (err) {
-          console.log('[linkedin] Sync error (will still load cached):', err);
-        }
+        console.log('[linkedin] Loading from database (use Desktop App to sync LinkedIn messages)');
+        // Skip backend sync - LinkedIn API returns CSRF errors for server IP
+        // Data is synced via Desktop App directly to database
       }
       
       // For Instagram, DON'T call backend sync (server IP is blocked by Instagram)
