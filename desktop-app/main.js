@@ -538,8 +538,12 @@ async function fetchLinkedInMessages(cookies, retryCount = 0) {
                   'new message', 'no messages', 'reach out', 'great things',
                   'via linkedin', 'you:', 'pm', 'am', 'nov', 'dec', 'jan', 'feb', 
                   'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct',
-                  'welcome to', 'see who', 'hiring'
+                  'welcome to', 'see who', 'hiring', 'load more', 'show more',
+                  'load more conversations', 'view more', 'see more', 'open conversation'
                 ];
+                
+                // DEDUPLICATION: Track seen names to avoid duplicates
+                const seenNames = new Set();
                 
                 const isSkipText = (text) => {
                   if (!text) return true;
@@ -557,12 +561,28 @@ async function fetchLinkedInMessages(cookies, retryCount = 0) {
                 const isValidName = (text) => {
                   if (!text || text.length < 2 || text.length > 80) return false;
                   const trimmed = text.trim();
+                  const lower = trimmed.toLowerCase();
+                  
                   // Must have at least one letter
                   if (!/[a-zA-Z]/.test(trimmed)) return false;
+                  
                   // Should not be all caps (UI labels are often all caps) unless short
                   if (trimmed === trimmed.toUpperCase() && trimmed.length > 5) return false;
+                  
+                  // EXPLICIT check for UI elements (case-insensitive)
+                  if (lower.includes('load more') || 
+                      lower.includes('show more') || 
+                      lower.includes('view more') ||
+                      lower.includes('conversation') && lower.includes('load') ||
+                      lower === 'messaging' ||
+                      lower.includes('premium') ||
+                      lower.includes('help center')) {
+                    return false;
+                  }
+                  
                   // Check against skip list
                   if (isSkipText(trimmed)) return false;
+                  
                   // Names usually have capital first letter or are company names
                   // Accept anything that passed skip list check
                   return true;
@@ -730,6 +750,14 @@ async function fetchLinkedInMessages(cookies, retryCount = 0) {
                       console.log('[LinkedIn Debug] ❌ Skipping item', index, '- no valid name found');
                       return;
                     }
+                    
+                    // DEDUPLICATION: Skip if we've already seen this name
+                    const normalizedName = participantName.toLowerCase().trim();
+                    if (seenNames.has(normalizedName)) {
+                      console.log('[LinkedIn Debug] ⏭️ Skipping duplicate:', participantName);
+                      return;
+                    }
+                    seenNames.add(normalizedName);
                     
                     seenIds.add(threadId);
                     
