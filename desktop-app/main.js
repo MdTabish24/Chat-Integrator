@@ -1323,6 +1323,76 @@ async function sendWhatsAppMessage(chatId, text) {
   }
 }
 
+// Send pending WhatsApp message from backend queue
+async function sendWhatsAppPendingMessage(msg, token, apiUrl) {
+  console.log(`[whatsapp] Sending pending message ${msg.id} to ${msg.platformConversationId}`);
+  console.log(`[whatsapp] Content: "${msg.content.substring(0, 50)}..."`);
+  
+  try {
+    const result = await sendWhatsAppMessage(msg.platformConversationId, msg.content);
+    
+    // Report success to backend
+    await axios.post(
+      `${apiUrl}/api/platforms/whatsapp/message-sent`,
+      {
+        pending_id: msg.id,
+        success: true,
+        platform_message_id: result.messageId || `wa_sent_${Date.now()}`
+      },
+      {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        timeout: 30000
+      }
+    );
+    
+    console.log(`[whatsapp] Pending message ${msg.id} sent successfully!`);
+    
+    if (mainWindow) {
+      mainWindow.webContents.send('whatsapp-message-sent', {
+        success: true,
+        pendingId: msg.id,
+        message: 'Message sent!'
+      });
+    }
+    
+  } catch (error) {
+    const errorMsg = error.message || 'Unknown error';
+    console.error(`[whatsapp] Failed to send pending message ${msg.id}:`, errorMsg);
+    
+    // Report failure to backend
+    try {
+      await axios.post(
+        `${apiUrl}/api/platforms/whatsapp/message-sent`,
+        {
+          pending_id: msg.id,
+          success: false,
+          error: errorMsg
+        },
+        {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          },
+          timeout: 30000
+        }
+      );
+    } catch (reportErr) {
+      console.error('[whatsapp] Failed to report error:', reportErr.message);
+    }
+    
+    if (mainWindow) {
+      mainWindow.webContents.send('whatsapp-message-sent', {
+        success: false,
+        pendingId: msg.id,
+        error: errorMsg
+      });
+    }
+  }
+}
+
 // Disconnect WhatsApp
 async function disconnectWhatsApp() {
   if (whatsappClient) {
@@ -1716,13 +1786,50 @@ function startPendingMessagePoll() {
   }, 2000);
 }
 
-// Check for pending messages and send them
+// Check for pending messages and send them (Instagram + WhatsApp)
 async function checkAndSendPendingMessages() {
   const token = store.get('chatorbitor_token');
-  const instagramCookies = store.get('instagram_cookies');
+  if (!token) {
+    return; // No token
+  }
   
-  if (!token || !instagramCookies || !instagramCookies.sessionid) {
-    return; // No token or no Instagram session
+  const apiUrl = store.get('apiUrl') || API_BASE_URL;
+  
+  // Check WhatsApp pending messages
+  if (whatsappStatus === 'connected' && whatsappClient) {
+    try {
+      const waResponse = await axios.get(
+        `${apiUrl}/api/platforms/whatsapp/pending`,
+        {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          },
+          timeout: 30000
+        }
+      );
+      
+      const waPendingMessages = waResponse.data.pendingMessages || [];
+      
+      if (waPendingMessages.length > 0) {
+        console.log(`[whatsapp] Found ${waPendingMessages.length} pending messages to send`);
+        
+        for (const msg of waPendingMessages) {
+          await sendWhatsAppPendingMessage(msg, token, apiUrl);
+          await new Promise(resolve => setTimeout(resolve, 2000));
+        }
+      }
+    } catch (waError) {
+      if (waError.response?.status !== 401) {
+        console.error('[whatsapp] Error checking pending messages:', waError.message);
+      }
+    }
+  }
+  
+  // Check Instagram pending messages
+  const instagramCookies = store.get('instagram_cookies');
+  if (!instagramCookies || !instagramCookies.sessionid) {
+    return; // No Instagram session
   }
   
   const apiUrl = store.get('apiUrl') || API_BASE_URL;

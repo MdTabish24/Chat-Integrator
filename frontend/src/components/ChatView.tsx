@@ -149,6 +149,70 @@ const ChatView: React.FC<ChatViewProps> = ({
         }
       }
       
+      // For Discord, fetch fresh messages from API and use them directly
+      if (platform === 'discord' && pageNum === 1 && !append) {
+        try {
+          // Get conversation to find account ID and platform conversation ID
+          const convResponse = await apiClient.get('/api/conversations');
+          const conversations = convResponse.data.conversations || [];
+          const conv = conversations.find((c: Conversation) => c.id === conversationId);
+          
+          if (conv) {
+            const accountId = conv.account_id || conv.accountId;
+            const platformConvId = conv.platform_conversation_id || conv.platformConversationId;
+            
+            if (accountId && platformConvId) {
+              // Fetch fresh messages from Discord API
+              console.log('[discord] Fetching fresh messages from API...');
+              const discordResponse = await apiClient.get(`/api/platforms/discord/conversations/${accountId}/${platformConvId}/messages`);
+              console.log('[discord] Fetched fresh messages from API:', discordResponse.data);
+              
+              // Check for auth errors
+              if (discordResponse.data.error?.code === 'AUTH_EXPIRED') {
+                setError('Discord token is invalid or expired. Please go to "Manage accounts" and re-connect Discord.');
+                setIsLoading(false);
+                return;
+              }
+              
+              const freshMessages = (discordResponse.data.messages || []).map((m: any) => ({
+                id: m.id || m.platformMessageId || `discord_${Date.now()}_${Math.random()}`,
+                conversationId: conversationId,
+                platformMessageId: m.platformMessageId || m.platform_message_id,
+                senderId: m.senderId || m.sender_id,
+                senderName: m.senderName || m.sender_name,
+                content: m.content,
+                messageType: m.messageType || m.message_type || 'text',
+                mediaUrl: m.mediaUrl || m.media_url,
+                isOutgoing: m.isOutgoing ?? m.is_outgoing ?? false,
+                isRead: m.isRead ?? m.is_read ?? true,
+                sentAt: m.sentAt || m.sent_at,
+                deliveredAt: m.deliveredAt || m.delivered_at,
+                createdAt: m.createdAt || m.created_at,
+              }));
+              
+              // Sort by sentAt and use directly
+              freshMessages.sort((a: any, b: any) => new Date(a.sentAt).getTime() - new Date(b.sentAt).getTime());
+              setMessages(freshMessages);
+              setHasMore(false);
+              setIsLoading(false);
+              console.log('[discord] Using fresh messages directly:', freshMessages.length);
+              return; // Skip loading from DB
+            }
+          }
+        } catch (discordErr: any) {
+          console.log('[discord] API fetch failed:', discordErr);
+          // Check if it's an auth error
+          const errData = discordErr.response?.data;
+          if (errData?.error?.code === 'AUTH_EXPIRED') {
+            setError('Discord token is invalid or expired. Please go to "Manage accounts" and re-connect Discord.');
+            setIsLoading(false);
+            return;
+          }
+          // For other errors, fall back to cached data
+          console.log('[discord] Will fall back to cached data');
+        }
+      }
+      
       const response = await apiClient.get(`/api/messages/${conversationId}`, {
         params: { limit, offset },
       });
@@ -482,6 +546,26 @@ const ChatView: React.FC<ChatViewProps> = ({
             <button 
               onClick={() => loadMessages(1, false)} 
               className="text-xs text-pink-600 hover:text-pink-800 underline"
+            >
+              🔄 Refresh
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Discord Info */}
+      {platform === 'discord' && (
+        <div className="px-4 py-2 bg-gradient-to-r from-indigo-50 to-purple-50 border-t border-indigo-200">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-2">
+              <span className="text-indigo-500">🎮</span>
+              <span className="text-xs text-indigo-700">
+                <strong>Discord:</strong> Messages sent directly via Discord API. Token must be valid.
+              </span>
+            </div>
+            <button 
+              onClick={() => loadMessages(1, false)} 
+              className="text-xs text-indigo-600 hover:text-indigo-800 underline"
             >
               🔄 Refresh
             </button>

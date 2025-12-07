@@ -271,11 +271,71 @@ class SendMessageView(AsyncAPIView):
                     return Response({
                         'error': f'Failed to queue Instagram message: {str(insta_err)}',
                     }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            elif conversation.account.platform == 'whatsapp':
+                # WhatsApp: Queue message for Desktop App to send (uses whatsapp-web.js on desktop)
+                from .models import PendingOutgoingMessage
+                import uuid
+                from django.utils import timezone
+                
+                try:
+                    # Create pending message for Desktop App to send
+                    pending_msg = await sync_to_async(PendingOutgoingMessage.objects.create)(
+                        id=uuid.uuid4(),
+                        user_id=user_id,
+                        account=conversation.account,
+                        conversation=conversation,
+                        platform='whatsapp',
+                        platform_conversation_id=conversation.platform_conversation_id,
+                        recipient_id=conversation.participant_id or '',
+                        content=content,
+                        status='pending'
+                    )
+                    
+                    print(f'[send-message] WhatsApp message queued for Desktop App: {pending_msg.id}')
+                    
+                    # Return 202 Accepted with pending info
+                    return Response({
+                        'success': True,
+                        'message': {
+                            'id': str(pending_msg.id),
+                            'content': content,
+                            'senderName': 'You',
+                            'isOutgoing': True,
+                            'sentAt': timezone.now().isoformat(),
+                            'status': 'pending',
+                        },
+                        'pendingId': str(pending_msg.id),
+                        'note': 'Message queued for Desktop App. Make sure Desktop App is running with WhatsApp connected!',
+                    }, status=status.HTTP_202_ACCEPTED)
+                    
+                except Exception as whatsapp_err:
+                    print(f'[send-message] WhatsApp queue failed: {whatsapp_err}')
+                    import traceback
+                    traceback.print_exc()
+                    return Response({
+                        'error': f'Failed to queue WhatsApp message: {str(whatsapp_err)}',
+                    }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            elif conversation.account.platform == 'discord':
+                # Discord: Use token-based adapter for sending DMs
+                from apps.platforms.adapters.discord import discord_adapter
+                try:
+                    sent_msg = await sync_to_async(discord_adapter.send_message)(
+                        account_id=str(conversation.account.id),
+                        conversation_id=conversation.platform_conversation_id,
+                        content=content
+                    )
+                except Exception as discord_err:
+                    print(f'[send-message] Discord send failed: {discord_err}')
+                    import traceback
+                    traceback.print_exc()
+                    return Response({
+                        'error': f'Failed to send message via Discord: {str(discord_err)}',
+                    }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
             else:
-                # Use adapter for other platforms
+                # Use adapter for other platforms (wrap in sync_to_async)
                 from apps.platforms.adapters.factory import get_adapter
                 adapter = get_adapter(conversation.account.platform)
-                sent_msg = adapter.send_message(
+                sent_msg = await sync_to_async(adapter.send_message)(
                     account_id=str(conversation.account.id),
                     conversation_id=conversation.platform_conversation_id,
                     content=content

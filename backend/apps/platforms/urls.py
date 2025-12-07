@@ -54,11 +54,15 @@ from .views.whatsapp import (
     WhatsAppMessagesView,
     WhatsAppSendMessageView,
     WhatsAppSyncFromDesktopView,
+    WhatsAppPendingMessagesView,
+    WhatsAppMessageSentView,
 )
 from .views.discord import (
     DiscordTokenSubmitView,
     DiscordVerifyTokenView,
+    DiscordSyncView,
     DiscordConversationsView,
+    DiscordConversationMessagesView,
     DiscordMessagesView,
     DiscordSendMessageView,
     DiscordRateLimitStatusView,
@@ -198,6 +202,12 @@ urlpatterns = [
     # POST /api/platforms/whatsapp/sync-from-desktop - Receive data from desktop app (whatsapp-web.js)
     path('whatsapp/sync-from-desktop', WhatsAppSyncFromDesktopView.as_view(), name='whatsapp-desktop-sync'),
     
+    # GET /api/platforms/whatsapp/pending - Get pending messages for Desktop App to send
+    path('whatsapp/pending', WhatsAppPendingMessagesView.as_view(), name='whatsapp-pending'),
+    
+    # POST /api/platforms/whatsapp/message-sent - Report message sent status from Desktop App
+    path('whatsapp/message-sent', WhatsAppMessageSentView.as_view(), name='whatsapp-message-sent'),
+    
     # Discord token-based endpoints
     # POST /api/platforms/discord/token - Submit token for authentication
     path('discord/token', DiscordTokenSubmitView.as_view(), name='discord-token'),
@@ -205,10 +215,16 @@ urlpatterns = [
     # GET /api/platforms/discord/verify/<account_id> - Verify token is valid
     path('discord/verify/<uuid:account_id>', DiscordVerifyTokenView.as_view(), name='discord-verify'),
     
+    # POST /api/platforms/discord/sync/<account_id> - Sync conversations and messages to database
+    path('discord/sync/<uuid:account_id>', DiscordSyncView.as_view(), name='discord-sync'),
+    
     # GET /api/platforms/discord/conversations/<account_id> - Get DM conversations
     path('discord/conversations/<uuid:account_id>', DiscordConversationsView.as_view(), name='discord-conversations'),
     
-    # GET /api/platforms/discord/messages/<account_id> - Get DM messages
+    # GET /api/platforms/discord/conversations/<account_id>/<conversation_id>/messages - Get messages for specific conversation
+    path('discord/conversations/<uuid:account_id>/<str:conversation_id>/messages', DiscordConversationMessagesView.as_view(), name='discord-conversation-messages'),
+    
+    # GET /api/platforms/discord/messages/<account_id> - Get DM messages (all conversations)
     path('discord/messages/<uuid:account_id>', DiscordMessagesView.as_view(), name='discord-messages'),
     
     # POST /api/platforms/discord/send/<account_id> - Send a DM

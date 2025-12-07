@@ -279,6 +279,21 @@ const Dashboard: React.FC = () => {
         // Data is synced via Desktop App directly to database
       }
       
+      // For Discord, trigger sync to fetch and save conversations/messages
+      if (platform === 'discord') {
+        try {
+          const account = connectedAccounts.find(acc => acc.platform === 'discord');
+          if (account) {
+            console.log('[discord] Triggering backend sync...');
+            await apiClient.post(`/api/platforms/discord/sync/${account.id}`, {}, {
+              timeout: 120000, // 2 minutes for sync
+            });
+          }
+        } catch (err) {
+          console.log('[discord] Sync error (will still load cached):', err);
+        }
+      }
+      
       loadConversationsForPlatform(platform);
     }
   };

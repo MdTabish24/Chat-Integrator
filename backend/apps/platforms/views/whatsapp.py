@@ -448,6 +448,15 @@ class WhatsAppSyncFromDesktopView(APIView):
             
             print(f'[whatsapp] Received sync from desktop: {len(conversations)} conversations')
             
+            # Helper function to sanitize text for MySQL (remove emojis and special chars)
+            def sanitize_text(text):
+                if not text:
+                    return ''
+                # Remove emojis and other 4-byte UTF characters that MySQL latin1 can't handle
+                import re
+                # Keep only BMP characters (Basic Multilingual Plane)
+                return ''.join(c for c in str(text) if ord(c) < 0x10000)
+            
             # Find or create WhatsApp account for this user
             account, created = ConnectedAccount.objects.update_or_create(
                 user_id=user_id,
@@ -480,6 +489,9 @@ class WhatsAppSyncFromDesktopView(APIView):
                     participant_name = conv_data.get('name', 'Unknown')
                     if not participant_name and participants:
                         participant_name = participants[0].get('name', 'Unknown')
+                    
+                    # Sanitize participant name for MySQL
+                    participant_name = sanitize_text(participant_name) or 'Unknown'
                     
                     participant_id = ''
                     if participants:
@@ -517,13 +529,17 @@ class WhatsAppSyncFromDesktopView(APIView):
                         if msg_type not in ['text', 'image', 'video', 'file']:
                             msg_type = 'text'  # Default to text for unknown types
                         
+                        # Sanitize content for MySQL
+                        msg_content = sanitize_text(msg_data.get('text', '')) or ''
+                        sender_name = sanitize_text(msg_data.get('senderName', '')) or ''
+                        
                         # Create new message
                         Message.objects.create(
                             conversation=conversation,
                             platform_message_id=msg_id,
                             sender_id=msg_data.get('senderId', '') or '',
-                            sender_name=msg_data.get('senderName', '') or '',
-                            content=msg_data.get('text', '') or '',
+                            sender_name=sender_name,
+                            content=msg_content,
                             message_type=msg_type,
                             is_outgoing=msg_data.get('isFromMe', False),
                             is_read=True,
@@ -563,6 +579,157 @@ class WhatsAppSyncFromDesktopView(APIView):
                 'error': {
                     'code': 'SYNC_FAILED',
                     'message': str(e) or 'Failed to sync WhatsApp messages',
+                    'retryable': True,
+                }
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class WhatsAppPendingMessagesView(APIView):
+    """
+    Get pending WhatsApp messages that need to be sent via Desktop App.
+    
+    GET /api/platforms/whatsapp/pending
+    """
+    permission_classes = [AllowAny]
+    
+    def get(self, request):
+        try:
+            if not hasattr(request, 'user_jwt') or not request.user_jwt:
+                return Response({
+                    'error': {
+                        'code': 'UNAUTHORIZED',
+                        'message': 'User not authenticated',
+                        'retryable': False,
+                    }
+                }, status=status.HTTP_401_UNAUTHORIZED)
+            
+            user_id = request.user_jwt['user_id']
+            
+            # Get pending messages for this user
+            from apps.messaging.models import PendingOutgoingMessage
+            
+            pending_messages = PendingOutgoingMessage.objects.filter(
+                user_id=user_id,
+                platform='whatsapp',
+                status='pending'
+            ).order_by('created_at')[:10]  # Limit to 10
+            
+            messages_data = []
+            for msg in pending_messages:
+                messages_data.append({
+                    'id': str(msg.id),
+                    'platformConversationId': msg.platform_conversation_id,
+                    'recipientId': msg.recipient_id,
+                    'content': msg.content,
+                    'createdAt': msg.created_at.isoformat(),
+                })
+            
+            return Response({
+                'pendingMessages': messages_data,
+                'count': len(messages_data),
+            })
+            
+        except Exception as e:
+            print(f'[whatsapp] Failed to get pending messages: {e}')
+            return Response({
+                'error': {
+                    'code': 'FETCH_FAILED',
+                    'message': str(e) or 'Failed to fetch pending messages',
+                    'retryable': True,
+                }
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class WhatsAppMessageSentView(APIView):
+    """
+    Report that a WhatsApp message was sent by the Desktop App.
+    
+    POST /api/platforms/whatsapp/message-sent
+    """
+    permission_classes = [AllowAny]
+    
+    def post(self, request):
+        try:
+            if not hasattr(request, 'user_jwt') or not request.user_jwt:
+                return Response({
+                    'error': {
+                        'code': 'UNAUTHORIZED',
+                        'message': 'User not authenticated',
+                        'retryable': False,
+                    }
+                }, status=status.HTTP_401_UNAUTHORIZED)
+            
+            pending_id = request.data.get('pending_id')
+            success = request.data.get('success', False)
+            error_msg = request.data.get('error', '')
+            platform_message_id = request.data.get('platform_message_id', '')
+            
+            if not pending_id:
+                return Response({
+                    'error': {
+                        'code': 'MISSING_PENDING_ID',
+                        'message': 'pending_id is required',
+                        'retryable': False,
+                    }
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            from apps.messaging.models import PendingOutgoingMessage, Message
+            
+            try:
+                pending_msg = PendingOutgoingMessage.objects.get(id=pending_id)
+            except PendingOutgoingMessage.DoesNotExist:
+                return Response({
+                    'error': {
+                        'code': 'NOT_FOUND',
+                        'message': 'Pending message not found',
+                        'retryable': False,
+                    }
+                }, status=status.HTTP_404_NOT_FOUND)
+            
+            if success:
+                # Create the actual message in the database
+                from apps.core.utils.crypto import encrypt
+                
+                Message.objects.create(
+                    conversation=pending_msg.conversation,
+                    platform_message_id=platform_message_id or f'wa_sent_{pending_id}',
+                    sender_id='me',
+                    sender_name='You',
+                    content=encrypt(pending_msg.content),
+                    message_type='text',
+                    is_outgoing=True,
+                    is_read=True,
+                    sent_at=timezone.now(),
+                )
+                
+                # Update conversation timestamp
+                pending_msg.conversation.last_message_at = timezone.now()
+                pending_msg.conversation.save(update_fields=['last_message_at', 'updated_at'])
+                
+                # Mark pending message as sent
+                pending_msg.status = 'sent'
+                pending_msg.save()
+                
+                print(f'[whatsapp] Message {pending_id} sent successfully')
+            else:
+                # Mark as failed
+                pending_msg.status = 'failed'
+                pending_msg.error_message = error_msg
+                pending_msg.save()
+                
+                print(f'[whatsapp] Message {pending_id} failed: {error_msg}')
+            
+            return Response({
+                'success': True,
+                'status': pending_msg.status,
+            })
+            
+        except Exception as e:
+            print(f'[whatsapp] Failed to update message status: {e}')
+            return Response({
+                'error': {
+                    'code': 'UPDATE_FAILED',
+                    'message': str(e) or 'Failed to update message status',
                     'retryable': True,
                 }
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
