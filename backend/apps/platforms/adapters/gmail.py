@@ -145,29 +145,33 @@ class GmailAdapter(BasePlatformAdapter):
             print(f'[gmail] Failed to refresh token: {e}')
             raise Exception(f'Failed to refresh Gmail access token: {e}')
     
-    def fetch_messages(self, account_id: str, since: Optional[datetime] = None) -> List[Dict]:
+    def fetch_messages(
+        self, 
+        account_id: str, 
+        since: Optional[datetime] = None,
+        max_results: int = 50,
+        page_token: Optional[str] = None,
+        unread_only: bool = False
+    ) -> Dict:
         """
-        Fetch unread emails from Primary category only.
-        
-        Requirements:
-        - 10.2: Retrieve only unread emails from Primary category
-        - 10.3: Show sender, subject, and preview
+        Fetch emails from Primary category (both read and unread).
         
         Args:
             account_id: Connected account ID
             since: Optional datetime to fetch messages since
+            max_results: Maximum number of emails to fetch (default 50)
+            page_token: Token for fetching next page of results
+            unread_only: If True, only fetch unread emails
             
         Returns:
-            List of email dictionaries
+            Dict with 'emails' list and 'nextPageToken' for pagination
         """
         def _fetch():
             token = self.get_access_token(account_id)
             account = ConnectedAccount.objects.get(id=account_id)
             
-            # Build query for unread Primary emails only
-            # Requirements 10.2: exclude Spam, Promotions, Social
+            # Build query for Primary emails (exclude spam, promotions, social)
             query_parts = [
-                'is:unread',
                 'category:primary',  # Only Primary category
                 '-in:spam',
                 '-in:trash',
@@ -175,6 +179,10 @@ class GmailAdapter(BasePlatformAdapter):
                 '-category:promotions',
                 '-category:forums',
             ]
+            
+            # Optionally filter for unread only
+            if unread_only:
+                query_parts.insert(0, 'is:unread')
             
             if since:
                 # Format date for Gmail query
@@ -186,17 +194,23 @@ class GmailAdapter(BasePlatformAdapter):
             # List messages matching query
             list_url = f'{self.BASE_URL}/users/me/messages'
             
+            params = {
+                'q': query,
+                'maxResults': max_results,
+            }
+            
+            # Add page token for pagination
+            if page_token:
+                params['pageToken'] = page_token
+            
             try:
-                print(f'[gmail] Fetching emails with query: {query}')
+                print(f'[gmail] Fetching emails with query: {query}, maxResults: {max_results}, pageToken: {page_token}')
                 print(f'[gmail] Using token (first 20 chars): {token[:20]}...')
                 
                 list_response = requests.get(
                     list_url,
                     headers={'Authorization': f'Bearer {token}'},
-                    params={
-                        'q': query,
-                        'maxResults': 50,
-                    },
+                    params=params,
                     timeout=self.timeout
                 )
                 list_response.raise_for_status()
@@ -218,7 +232,10 @@ class GmailAdapter(BasePlatformAdapter):
                     print('[gmail] User may need to disconnect and reconnect Gmail, granting all permissions.')
                 raise Exception(f'gmail API error: {e}')
             
-            messages_list = list_response.json().get('messages', [])
+            response_data = list_response.json()
+            messages_list = response_data.get('messages', [])
+            next_page_token = response_data.get('nextPageToken')
+            
             emails = []
             
             # Fetch full details for each message
@@ -231,7 +248,13 @@ class GmailAdapter(BasePlatformAdapter):
                     print(f'[gmail] Failed to fetch email {msg_ref["id"]}: {e}')
                     # Continue with other emails
             
-            return emails
+            print(f'[gmail] Fetched {len(emails)} emails, nextPageToken: {next_page_token is not None}')
+            
+            return {
+                'emails': emails,
+                'nextPageToken': next_page_token,
+                'hasMore': next_page_token is not None,
+            }
         
         return self.execute_with_retry(_fetch, account_id)
     
@@ -535,25 +558,46 @@ class GmailAdapter(BasePlatformAdapter):
             account_id: Connected account ID
             message_id: Gmail message ID
         """
+        if not message_id or not message_id.strip():
+            print(f'[gmail] Cannot mark as read - empty message ID')
+            return
+        
         def _mark():
             token = self.get_access_token(account_id)
             
             url = f'{self.BASE_URL}/users/me/messages/{message_id}/modify'
             
-            response = requests.post(
-                url,
-                headers={
-                    'Authorization': f'Bearer {token}',
-                    'Content-Type': 'application/json',
-                },
-                json={
-                    'removeLabelIds': ['UNREAD'],
-                },
-                timeout=self.timeout
-            )
-            response.raise_for_status()
-            
-            print(f'[gmail] Message {message_id} marked as read')
+            try:
+                response = requests.post(
+                    url,
+                    headers={
+                        'Authorization': f'Bearer {token}',
+                        'Content-Type': 'application/json',
+                    },
+                    json={
+                        'removeLabelIds': ['UNREAD'],
+                    },
+                    timeout=self.timeout
+                )
+                response.raise_for_status()
+                print(f'[gmail] Message {message_id} marked as read')
+            except requests.HTTPError as e:
+                error_msg = str(e)
+                if e.response is not None:
+                    try:
+                        error_data = e.response.json()
+                        error_msg = error_data.get('error', {}).get('message', str(e))
+                    except:
+                        pass
+                    
+                    if e.response.status_code == 403:
+                        print(f'[gmail] Cannot mark as read - missing gmail.modify scope. User needs to reconnect Gmail.')
+                        raise Exception('Missing gmail.modify permission. Please disconnect and reconnect Gmail.')
+                    elif e.response.status_code == 404:
+                        print(f'[gmail] Message {message_id} not found')
+                        raise Exception(f'Message not found: {message_id}')
+                
+                raise Exception(f'Failed to mark as read: {error_msg}')
         
         self.execute_with_retry(_mark, account_id)
     

@@ -160,11 +160,16 @@ class GmailThreadsView(APIView):
 
 class GmailEmailsView(APIView):
     """
-    Get unread emails from Primary category for a Gmail account.
+    Get emails from Primary category for a Gmail account.
     
     GET /api/platforms/gmail/emails/<account_id>
     
-    Requirements 10.2, 10.3: Retrieve unread Primary emails with sender, subject, preview
+    Query params:
+    - pageToken: Token for next page (from previous response)
+    - limit: Number of emails per page (default 50, max 100)
+    - unreadOnly: If 'true', only fetch unread emails (default: false - fetch all)
+    
+    Returns all Primary emails (both read and unread) with pagination.
     """
     permission_classes = [AllowAny]
     
@@ -198,15 +203,27 @@ class GmailEmailsView(APIView):
                     }
                 }, status=status.HTTP_404_NOT_FOUND)
             
-            # Fetch unread Primary emails
-            emails = gmail_adapter.fetch_messages(str(account_id))
+            # Get pagination params
+            page_token = request.query_params.get('pageToken', None)
+            limit = min(int(request.query_params.get('limit', 50)), 100)  # Max 100
+            unread_only = request.query_params.get('unreadOnly', 'false').lower() == 'true'
+            
+            # Fetch Primary emails with pagination
+            result = gmail_adapter.fetch_messages(
+                str(account_id),
+                max_results=limit,
+                page_token=page_token,
+                unread_only=unread_only
+            )
             
             return Response({
-                'emails': emails,
-                'count': len(emails),
+                'emails': result.get('emails', []),
+                'count': len(result.get('emails', [])),
+                'nextPageToken': result.get('nextPageToken'),
+                'hasMore': result.get('hasMore', False),
                 'filter': {
                     'category': 'primary',
-                    'is_read': False,
+                    'unreadOnly': unread_only,
                     'excluded': ['spam', 'trash', 'social', 'promotions', 'forums'],
                 },
             })
@@ -323,6 +340,8 @@ class GmailMarkReadView(APIView):
     Mark an email as read.
     
     POST /api/platforms/gmail/read/<account_id>
+    
+    Requires gmail.modify scope. If missing, user needs to reconnect Gmail.
     """
     permission_classes = [AllowAny]
     
@@ -357,7 +376,7 @@ class GmailMarkReadView(APIView):
                 }, status=status.HTTP_404_NOT_FOUND)
             
             # Get message ID
-            message_id = request.data.get('messageId')
+            message_id = request.data.get('messageId', '').strip()
             
             if not message_id:
                 return Response({
@@ -377,11 +396,23 @@ class GmailMarkReadView(APIView):
             })
         
         except Exception as e:
-            print(f'[gmail] Failed to mark email as read: {e}')
+            error_msg = str(e)
+            print(f'[gmail] Failed to mark email as read: {error_msg}')
+            
+            # Check for permission error
+            if 'gmail.modify' in error_msg.lower() or 'permission' in error_msg.lower():
+                return Response({
+                    'error': {
+                        'code': 'PERMISSION_DENIED',
+                        'message': 'Missing gmail.modify permission. Please disconnect and reconnect Gmail to grant this permission.',
+                        'retryable': False,
+                    }
+                }, status=status.HTTP_403_FORBIDDEN)
+            
             return Response({
                 'error': {
                     'code': 'MARK_READ_FAILED',
-                    'message': str(e) or 'Failed to mark email as read',
+                    'message': error_msg or 'Failed to mark email as read',
                     'retryable': True,
                 }
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

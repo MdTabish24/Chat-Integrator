@@ -2,7 +2,7 @@
 Gmail OAuth Service.
 Uses Google OAuth 2.0 with Gmail API for email access.
 
-Requirements: 10.1 - Authenticate via Google OAuth with gmail.readonly and gmail.send scopes
+Requirements: 10.1 - Authenticate via Google OAuth with gmail.readonly, gmail.send, and gmail.modify scopes
 """
 
 from typing import Dict, List, Optional
@@ -21,8 +21,9 @@ class GmailOAuthService(OAuthBaseService):
     Scopes:
     - gmail.readonly: Read emails
     - gmail.send: Send emails (for replies only)
+    - gmail.modify: Mark emails as read/unread
     
-    Requirements: 10.1 - Authenticate via Google OAuth with gmail.readonly and gmail.send scopes
+    Requirements: 10.1 - Authenticate via Google OAuth with gmail.readonly, gmail.send, and gmail.modify scopes
     """
     
     # Gmail API scopes required for email functionality
@@ -33,6 +34,7 @@ class GmailOAuthService(OAuthBaseService):
         'https://www.googleapis.com/auth/userinfo.profile',  # Get user profile
         'https://www.googleapis.com/auth/gmail.readonly',    # Read emails
         'https://www.googleapis.com/auth/gmail.send',        # Send emails (for replies)
+        'https://www.googleapis.com/auth/gmail.modify',      # Mark as read/unread (modify labels)
     ]
     
     def __init__(self):

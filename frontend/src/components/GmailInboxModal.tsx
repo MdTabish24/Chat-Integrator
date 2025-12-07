@@ -4,8 +4,8 @@ import LoadingSpinner from './LoadingSpinner';
 import { useToast } from '../contexts/ToastContext';
 
 interface Email {
-  id: string;
-  threadId: string;
+  id: string;         // Gmail message ID (for mark as read)
+  threadId: string;   // Gmail thread ID (for replies)
   from: string;
   fromEmail: string;
   subject: string;
@@ -13,6 +13,7 @@ interface Email {
   body?: string;
   date: string;
   isUnread: boolean;
+  isOutgoing?: boolean;  // To show sent replies
 }
 
 interface GmailInboxModalProps {
@@ -24,40 +25,62 @@ interface GmailInboxModalProps {
 const GmailInboxModal: React.FC<GmailInboxModalProps> = ({ isOpen, onClose, accountId }) => {
   const [emails, setEmails] = useState<Email[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedEmail, setSelectedEmail] = useState<Email | null>(null);
   const [replyContent, setReplyContent] = useState('');
   const [sending, setSending] = useState(false);
+  const [nextPageToken, setNextPageToken] = useState<string | null>(null);
+  const [hasMore, setHasMore] = useState(false);
   const { showSuccess, showError } = useToast();
+  
+  // Ref for scroll container to detect when user scrolls to bottom
+  const emailListRef = React.useRef<HTMLDivElement>(null);
 
-  const fetchEmails = useCallback(async () => {
+  // Map raw API email to our Email interface
+  const mapEmailData = (e: any): Email => {
+    const threadId = e.conversationId || e.threadId || e.thread_id || '';
+    const messageId = e.platformMessageId || e.platform_message_id || e.messageId || e.id || '';
+    
+    return {
+      id: messageId,
+      threadId: threadId,
+      from: e.senderName || e.sender_name || e.from || 'Unknown',
+      fromEmail: e.senderId || e.sender_id || e.senderEmail || e.fromEmail || '',
+      subject: e.subject || '(No Subject)',
+      snippet: e.snippet || e.preview || '',
+      body: e.body || e.content || '',
+      date: e.date || e.sentAt || e.sent_at || new Date().toISOString(),
+      isUnread: e.isUnread ?? e.is_unread ?? !e.isRead ?? !e.is_read ?? true,
+      isOutgoing: e.isOutgoing ?? e.is_outgoing ?? false,
+    };
+  };
+
+  const fetchEmails = useCallback(async (reset: boolean = true) => {
     if (!accountId) return;
     
     try {
-      setLoading(true);
+      if (reset) {
+        setLoading(true);
+        setEmails([]);
+        setNextPageToken(null);
+      }
       setError(null);
-      const response = await apiClient.get(`/api/platforms/gmail/emails/${accountId}`);
-      console.log('[gmail] Raw API response (first email):', response.data.emails?.[0]);
-      const emailData = (response.data.emails || []).map((e: any) => {
-        // Extract thread ID - could be in different fields depending on API response
-        const threadId = e.conversationId || e.threadId || e.thread_id || '';
-        // Extract message ID for mark as read
-        const messageId = e.platformMessageId || e.platform_message_id || e.id || e.messageId || '';
-        
-        return {
-          id: messageId,  // Gmail message ID for mark as read
-          threadId: threadId,  // Gmail thread ID for replies
-          from: e.senderName || e.sender_name || e.from || 'Unknown',
-          fromEmail: e.senderId || e.sender_id || e.senderEmail || e.fromEmail || '',
-          subject: e.subject || '(No Subject)',
-          snippet: e.snippet || e.preview || '',
-          body: e.body || e.content || '',
-          date: e.date || e.sentAt || e.sent_at || new Date().toISOString(),
-          isUnread: e.isUnread ?? e.is_unread ?? !e.isRead ?? !e.is_read ?? true,
-        };
+      
+      // Fetch first 50 emails (all, not just unread)
+      const response = await apiClient.get(`/api/platforms/gmail/emails/${accountId}`, {
+        params: { limit: 50 }
       });
+      
+      console.log('[gmail] Raw API response (first email):', response.data.emails?.[0]);
+      const emailData = (response.data.emails || []).map(mapEmailData);
       console.log('[gmail] Mapped email data (first):', emailData?.[0]);
+      
       setEmails(emailData);
+      setNextPageToken(response.data.nextPageToken || null);
+      setHasMore(response.data.hasMore || false);
+      
+      console.log('[gmail] Fetched', emailData.length, 'emails, hasMore:', response.data.hasMore);
     } catch (err: any) {
       const errMsg = err.response?.data?.error?.message || 'Failed to fetch emails';
       setError(errMsg);
@@ -67,19 +90,70 @@ const GmailInboxModal: React.FC<GmailInboxModalProps> = ({ isOpen, onClose, acco
     }
   }, [accountId, showError]);
 
+  // Load more emails when user scrolls to bottom
+  const loadMoreEmails = useCallback(async () => {
+    if (!accountId || !nextPageToken || loadingMore) return;
+    
+    try {
+      setLoadingMore(true);
+      
+      const response = await apiClient.get(`/api/platforms/gmail/emails/${accountId}`, {
+        params: { 
+          limit: 50,
+          pageToken: nextPageToken 
+        }
+      });
+      
+      const newEmails = (response.data.emails || []).map(mapEmailData);
+      
+      setEmails(prev => [...prev, ...newEmails]);
+      setNextPageToken(response.data.nextPageToken || null);
+      setHasMore(response.data.hasMore || false);
+      
+      console.log('[gmail] Loaded', newEmails.length, 'more emails, total:', emails.length + newEmails.length);
+    } catch (err: any) {
+      console.error('[gmail] Failed to load more emails:', err);
+      showError('Failed to load more emails');
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [accountId, nextPageToken, loadingMore, emails.length, showError]);
+
   useEffect(() => {
     if (isOpen && accountId) {
-      fetchEmails();
+      fetchEmails(true);
     }
   }, [isOpen, accountId, fetchEmails]);
+
+  // Scroll handler for infinite scroll
+  const handleScroll = useCallback(() => {
+    const container = emailListRef.current;
+    if (!container || loadingMore || !hasMore) return;
+    
+    // Check if user has scrolled near the bottom (within 100px)
+    const { scrollTop, scrollHeight, clientHeight } = container;
+    if (scrollTop + clientHeight >= scrollHeight - 100) {
+      loadMoreEmails();
+    }
+  }, [loadingMore, hasMore, loadMoreEmails]);
+
+  // Add scroll event listener
+  useEffect(() => {
+    const container = emailListRef.current;
+    if (container) {
+      container.addEventListener('scroll', handleScroll);
+      return () => container.removeEventListener('scroll', handleScroll);
+    }
+  }, [handleScroll]);
 
   const handleEmailClick = async (email: Email) => {
     setSelectedEmail(email);
     setReplyContent('');
     
-    // Mark as read
-    if (email.isUnread && accountId) {
+    // Mark as read (only if we have a valid message ID)
+    if (email.isUnread && accountId && email.id && email.id.trim()) {
       try {
+        console.log('[gmail] Marking as read:', { messageId: email.id });
         await apiClient.post(`/api/platforms/gmail/read/${accountId}`, {
           messageId: email.id,
         });
@@ -87,32 +161,50 @@ const GmailInboxModal: React.FC<GmailInboxModalProps> = ({ isOpen, onClose, acco
         setEmails(prev => prev.map(e => 
           e.id === email.id ? { ...e, isUnread: false } : e
         ));
-      } catch (err) {
-        console.error('Failed to mark as read:', err);
+        console.log('[gmail] Marked as read successfully');
+      } catch (err: any) {
+        // Don't show error to user, just log it (non-critical feature)
+        console.error('[gmail] Failed to mark as read:', err.response?.data || err);
       }
+    } else if (email.isUnread && !email.id) {
+      console.warn('[gmail] Cannot mark as read - no message ID available');
     }
   };
 
   const handleSendReply = async () => {
     if (!selectedEmail || !replyContent.trim() || !accountId) return;
     
+    const replyText = replyContent.trim();
+    
     console.log('[gmail] Sending reply:', {
       threadId: selectedEmail.threadId,
       emailId: selectedEmail.id,
-      content: replyContent.trim().substring(0, 50) + '...',
+      content: replyText.substring(0, 50) + '...',
     });
     
     try {
       setSending(true);
-      await apiClient.post(`/api/platforms/gmail/reply/${accountId}`, {
+      const response = await apiClient.post(`/api/platforms/gmail/reply/${accountId}`, {
         threadId: selectedEmail.threadId,
-        content: replyContent.trim(),
+        content: replyText,
       });
+      
       showSuccess('Reply sent successfully!');
+      
+      // Add the sent reply to the selected email's body so it shows immediately
+      const sentReplyText = `\n\n--- Your Reply (${new Date().toLocaleString()}) ---\n${replyText}`;
+      setSelectedEmail(prev => prev ? {
+        ...prev,
+        body: (prev.body || prev.snippet) + sentReplyText,
+      } : null);
+      
       setReplyContent('');
-      // Optionally refresh emails
-      fetchEmails();
+      
+      // Note: We don't refresh the full email list because our query only fetches 
+      // unread emails from others, and sent replies won't appear there
+      console.log('[gmail] Reply sent, response:', response.data);
     } catch (err: any) {
+      console.error('[gmail] Reply error:', err.response?.data || err);
       const errMsg = err.response?.data?.error?.message || 'Failed to send reply';
       showError(errMsg);
     } finally {
@@ -146,14 +238,15 @@ const GmailInboxModal: React.FC<GmailInboxModalProps> = ({ isOpen, onClose, acco
             <span className="text-2xl">📧</span>
             <h2 className="text-xl font-semibold text-white">Gmail Inbox</h2>
             <span className="bg-white bg-opacity-20 text-white text-xs px-2 py-1 rounded-full">
-              Primary Only
+              Primary
             </span>
           </div>
           <div className="flex items-center space-x-3">
             <button
-              onClick={fetchEmails}
+              onClick={() => fetchEmails(true)}
               className="text-white hover:bg-white hover:bg-opacity-20 p-2 rounded-full transition-colors"
               title="Refresh"
+              disabled={loading}
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
@@ -173,7 +266,10 @@ const GmailInboxModal: React.FC<GmailInboxModalProps> = ({ isOpen, onClose, acco
         {/* Content */}
         <div className="flex-1 flex overflow-hidden">
           {/* Email List */}
-          <div className={`${selectedEmail ? 'w-2/5' : 'w-full'} border-r overflow-y-auto transition-all`}>
+          <div 
+            ref={emailListRef}
+            className={`${selectedEmail ? 'w-2/5' : 'w-full'} border-r overflow-y-auto transition-all`}
+          >
             {loading ? (
               <div className="flex items-center justify-center h-full">
                 <LoadingSpinner size="lg" text="Loading emails..." />
@@ -183,7 +279,7 @@ const GmailInboxModal: React.FC<GmailInboxModalProps> = ({ isOpen, onClose, acco
                 <span className="text-red-500 text-lg mb-2">⚠️</span>
                 <p className="text-red-600 text-center">{error}</p>
                 <button
-                  onClick={fetchEmails}
+                  onClick={() => fetchEmails(true)}
                   className="mt-4 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600"
                 >
                   Retry
@@ -197,9 +293,9 @@ const GmailInboxModal: React.FC<GmailInboxModalProps> = ({ isOpen, onClose, acco
               </div>
             ) : (
               <div className="divide-y">
-                {emails.map((email) => (
+                {emails.map((email, index) => (
                   <button
-                    key={email.id}
+                    key={`${email.id}-${index}`}
                     onClick={() => handleEmailClick(email)}
                     className={`w-full px-4 py-3 text-left hover:bg-gray-50 transition-colors ${
                       selectedEmail?.id === email.id ? 'bg-blue-50 border-l-4 border-blue-500' : ''
@@ -228,6 +324,30 @@ const GmailInboxModal: React.FC<GmailInboxModalProps> = ({ isOpen, onClose, acco
                     </div>
                   </button>
                 ))}
+                
+                {/* Load More Indicator */}
+                {loadingMore && (
+                  <div className="flex items-center justify-center py-4">
+                    <LoadingSpinner size="sm" text="Loading more..." />
+                  </div>
+                )}
+                
+                {/* Load More Button (if auto-load didn't trigger) */}
+                {hasMore && !loadingMore && (
+                  <button
+                    onClick={loadMoreEmails}
+                    className="w-full py-3 text-center text-sm text-red-600 hover:bg-red-50 transition-colors"
+                  >
+                    Load more emails...
+                  </button>
+                )}
+                
+                {/* End of list indicator */}
+                {!hasMore && emails.length > 0 && (
+                  <div className="py-3 text-center text-xs text-gray-400">
+                    — End of emails —
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -302,8 +422,9 @@ const GmailInboxModal: React.FC<GmailInboxModalProps> = ({ isOpen, onClose, acco
         </div>
 
         {/* Footer Note */}
-        <div className="px-6 py-2 bg-gray-100 text-center text-xs text-gray-500 border-t">
-          📬 Showing Primary emails only • Spam, Promotions & Social tabs are excluded
+        <div className="px-6 py-2 bg-gray-100 text-center text-xs text-gray-500 border-t flex items-center justify-center space-x-2">
+          <span>📬 Primary inbox • {emails.length} emails loaded</span>
+          {hasMore && <span className="text-gray-400">• Scroll for more</span>}
         </div>
       </div>
     </div>
