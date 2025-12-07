@@ -22,11 +22,22 @@ let tray = null;
 let syncInterval = null;
 let instagramLoginWindow = null;
 
+// WhatsApp Web.js client
+let whatsappClient = null;
+let whatsappQRCode = null;
+let whatsappStatus = 'disconnected'; // disconnected, connecting, qr_ready, connected
+
 // Chat Orbitor API URL
 const API_BASE_URL = store.get('apiUrl') || 'https://chat-integrator.onrender.com';
 
 // Platform configurations
 const PLATFORMS = {
+  whatsapp: {
+    name: 'WhatsApp',
+    icon: '💬',
+    cookieFields: [],  // No cookies needed - uses QR code
+    apiEndpoint: '/api/platforms/whatsapp/sync-from-desktop'
+  },
   twitter: {
     name: 'Twitter/X',
     icon: '🐦',
@@ -164,6 +175,15 @@ async function syncAllPlatforms() {
   }
 
   for (const [platform, config] of Object.entries(PLATFORMS)) {
+    // WhatsApp uses special sync (whatsapp-web.js)
+    if (platform === 'whatsapp') {
+      if (whatsappStatus === 'connected') {
+        await syncWhatsAppMessages();
+      }
+      continue;
+    }
+    
+    // Other platforms use cookies
     const cookies = store.get(`${platform}_cookies`);
     if (cookies && Object.keys(cookies).length > 0) {
       await syncPlatform(platform, cookies, chatOrbitorToken);
@@ -186,6 +206,12 @@ async function syncPlatform(platform, cookies, token) {
     }
 
     const apiUrl = store.get('apiUrl') || API_BASE_URL;
+
+    // WhatsApp: Use whatsapp-web.js client (no cookies needed)
+    if (platform === 'whatsapp') {
+      await syncWhatsAppMessages();
+      return;
+    }
 
     // LinkedIn: Just submit cookies to backend (LinkedIn blocks direct API calls from desktop)
     if (platform === 'linkedin') {
@@ -978,8 +1004,375 @@ function parseFacebookResponse(data) {
   return conversations;
 }
 
+// ============ WHATSAPP (via whatsapp-web.js) ============
+// Initialize WhatsApp client
+async function initWhatsApp() {
+  // Check if already initializing or connected
+  if (whatsappStatus === 'connecting' || whatsappStatus === 'connected') {
+    console.log('[whatsapp] Already connecting/connected');
+    return;
+  }
+  
+  try {
+    // Dynamically require whatsapp-web.js (may not be installed yet)
+    const { Client, LocalAuth } = require('whatsapp-web.js');
+    const qrcode = require('qrcode');
+    
+    whatsappStatus = 'connecting';
+    console.log('[whatsapp] Initializing WhatsApp client...');
+    
+    // Notify UI
+    if (mainWindow) {
+      mainWindow.webContents.send('whatsapp-status', { 
+        status: 'connecting',
+        message: 'Initializing WhatsApp...'
+      });
+    }
+    
+    // Create WhatsApp client with local authentication (stores session)
+    whatsappClient = new Client({
+      authStrategy: new LocalAuth({
+        dataPath: path.join(app.getPath('userData'), 'whatsapp-session')
+      }),
+      puppeteer: {
+        headless: true,
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-accelerated-2d-canvas',
+          '--disable-gpu',
+          '--window-size=1280,800'
+        ]
+      }
+    });
+    
+    // QR Code event - user needs to scan
+    whatsappClient.on('qr', async (qr) => {
+      console.log('[whatsapp] QR code received');
+      whatsappStatus = 'qr_ready';
+      
+      // Convert QR to base64 image
+      try {
+        whatsappQRCode = await qrcode.toDataURL(qr, { width: 256 });
+        console.log('[whatsapp] QR code generated');
+        
+        // Notify UI
+        if (mainWindow) {
+          mainWindow.webContents.send('whatsapp-status', { 
+            status: 'qr_ready',
+            qrCode: whatsappQRCode,
+            message: 'Scan QR code with WhatsApp'
+          });
+        }
+      } catch (err) {
+        console.error('[whatsapp] QR generation error:', err);
+      }
+    });
+    
+    // Ready event - connected successfully
+    whatsappClient.on('ready', async () => {
+      console.log('[whatsapp] Connected successfully!');
+      whatsappStatus = 'connected';
+      whatsappQRCode = null;
+      
+      // Get user info
+      const info = whatsappClient.info;
+      const phoneNumber = info?.wid?.user || 'Unknown';
+      
+      // Store connected state
+      store.set('whatsapp_cookies', { connected: true, phoneNumber });
+      store.set('whatsapp_lastConnect', new Date().toISOString());
+      
+      // Notify UI
+      if (mainWindow) {
+        mainWindow.webContents.send('whatsapp-status', { 
+          status: 'connected',
+          phoneNumber,
+          message: 'WhatsApp connected!'
+        });
+      }
+      
+      // Initial sync
+      setTimeout(() => {
+        syncWhatsAppMessages();
+      }, 2000);
+    });
+    
+    // Authentication failure
+    whatsappClient.on('auth_failure', (msg) => {
+      console.error('[whatsapp] Authentication failed:', msg);
+      whatsappStatus = 'disconnected';
+      
+      if (mainWindow) {
+        mainWindow.webContents.send('whatsapp-status', { 
+          status: 'error',
+          message: 'Authentication failed. Please try again.'
+        });
+      }
+    });
+    
+    // Disconnected
+    whatsappClient.on('disconnected', (reason) => {
+      console.log('[whatsapp] Disconnected:', reason);
+      whatsappStatus = 'disconnected';
+      store.delete('whatsapp_cookies');
+      
+      if (mainWindow) {
+        mainWindow.webContents.send('whatsapp-status', { 
+          status: 'disconnected',
+          message: 'WhatsApp disconnected: ' + reason
+        });
+      }
+    });
+    
+    // Initialize the client
+    await whatsappClient.initialize();
+    
+  } catch (error) {
+    console.error('[whatsapp] Init error:', error.message);
+    whatsappStatus = 'disconnected';
+    
+    // Check if it's a missing dependency error
+    if (error.message.includes("Cannot find module 'whatsapp-web.js'")) {
+      if (mainWindow) {
+        mainWindow.webContents.send('whatsapp-status', { 
+          status: 'error',
+          message: 'WhatsApp module not installed. Restart app after npm install.'
+        });
+      }
+    } else {
+      if (mainWindow) {
+        mainWindow.webContents.send('whatsapp-status', { 
+          status: 'error',
+          message: 'WhatsApp init failed: ' + error.message
+        });
+      }
+    }
+  }
+}
+
+// Sync WhatsApp messages to backend
+async function syncWhatsAppMessages() {
+  if (!whatsappClient || whatsappStatus !== 'connected') {
+    console.log('[whatsapp] Not connected, skipping sync');
+    return [];
+  }
+  
+  const token = store.get('chatorbitor_token');
+  if (!token) {
+    console.log('[whatsapp] No Chat Orbitor token, skipping sync');
+    return [];
+  }
+  
+  try {
+    console.log('[whatsapp] Starting message sync...');
+    
+    if (mainWindow) {
+      mainWindow.webContents.send('sync-status', { 
+        platform: 'whatsapp', 
+        syncing: true 
+      });
+    }
+    
+    // Get all chats
+    const chats = await whatsappClient.getChats();
+    console.log(`[whatsapp] Found ${chats.length} chats`);
+    
+    const conversations = [];
+    
+    // Process each chat (limit to first 50 for performance)
+    for (const chat of chats.slice(0, 50)) {
+      try {
+        // Get last 20 messages from each chat
+        const messages = await chat.fetchMessages({ limit: 20 });
+        
+        const participants = [];
+        
+        // Get contact info
+        if (chat.isGroup) {
+          // Group chat - get participant info
+          const groupParticipants = chat.participants || [];
+          for (const p of groupParticipants.slice(0, 10)) {  // Limit participants
+            participants.push({
+              id: p.id?._serialized || p.id || '',
+              name: p.id?._serialized?.split('@')[0] || 'Group Member'
+            });
+          }
+        } else {
+          // Individual chat
+          const contact = await chat.getContact();
+          participants.push({
+            id: contact.id?._serialized || chat.id?._serialized || '',
+            name: contact.pushname || contact.name || contact.number || 'Unknown'
+          });
+        }
+        
+        const parsedMessages = messages.map(msg => ({
+          id: msg.id?._serialized || msg.id?.id || '',
+          text: msg.body || (msg.hasMedia ? '[Media]' : ''),
+          senderId: msg.from || '',
+          senderName: msg.fromMe ? 'You' : (msg._data?.notifyName || 'Contact'),
+          isFromMe: msg.fromMe,
+          createdAt: new Date(msg.timestamp * 1000).toISOString(),
+          type: msg.type || 'chat'
+        }));
+        
+        conversations.push({
+          id: chat.id?._serialized || '',
+          name: chat.name || 'Unknown Chat',
+          isGroup: chat.isGroup,
+          participants,
+          messages: parsedMessages,
+          unreadCount: chat.unreadCount || 0,
+          lastMessageAt: messages.length > 0 
+            ? new Date(messages[0].timestamp * 1000).toISOString() 
+            : null
+        });
+        
+      } catch (chatErr) {
+        console.error(`[whatsapp] Error processing chat: ${chatErr.message}`);
+      }
+    }
+    
+    console.log(`[whatsapp] Processed ${conversations.length} conversations`);
+    
+    // Send to backend
+    const apiUrl = store.get('apiUrl') || API_BASE_URL;
+    
+    await axios.post(
+      `${apiUrl}/api/platforms/whatsapp/sync-from-desktop`,
+      { conversations },
+      {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        timeout: 120000
+      }
+    );
+    
+    console.log('[whatsapp] Sync completed successfully');
+    store.set('whatsapp_lastSync', new Date().toISOString());
+    
+    if (mainWindow) {
+      mainWindow.webContents.send('sync-status', { 
+        platform: 'whatsapp', 
+        success: true,
+        message: `Synced ${conversations.length} conversations`,
+        lastSync: new Date().toISOString()
+      });
+    }
+    
+    return conversations;
+    
+  } catch (error) {
+    console.error('[whatsapp] Sync error:', error.message);
+    
+    if (mainWindow) {
+      mainWindow.webContents.send('sync-status', { 
+        platform: 'whatsapp', 
+        success: false,
+        message: error.message
+      });
+    }
+    
+    return [];
+  }
+}
+
+// Send WhatsApp message
+async function sendWhatsAppMessage(chatId, text) {
+  if (!whatsappClient || whatsappStatus !== 'connected') {
+    throw new Error('WhatsApp not connected');
+  }
+  
+  try {
+    // Find the chat
+    const chat = await whatsappClient.getChatById(chatId);
+    if (!chat) {
+      throw new Error('Chat not found');
+    }
+    
+    // Send message
+    const msg = await chat.sendMessage(text);
+    
+    console.log(`[whatsapp] Message sent to ${chatId}`);
+    
+    return {
+      success: true,
+      messageId: msg.id?._serialized || msg.id?.id || '',
+      timestamp: new Date().toISOString()
+    };
+    
+  } catch (error) {
+    console.error('[whatsapp] Send error:', error.message);
+    throw error;
+  }
+}
+
+// Disconnect WhatsApp
+async function disconnectWhatsApp() {
+  if (whatsappClient) {
+    try {
+      await whatsappClient.logout();
+      await whatsappClient.destroy();
+    } catch (e) {
+      console.log('[whatsapp] Cleanup error:', e.message);
+    }
+    whatsappClient = null;
+  }
+  
+  whatsappStatus = 'disconnected';
+  whatsappQRCode = null;
+  store.delete('whatsapp_cookies');
+  store.delete('whatsapp_lastSync');
+  
+  console.log('[whatsapp] Disconnected and cleaned up');
+  
+  if (mainWindow) {
+    mainWindow.webContents.send('whatsapp-status', { 
+      status: 'disconnected',
+      message: 'WhatsApp disconnected'
+    });
+  }
+}
+
+// Get WhatsApp status
+function getWhatsAppStatus() {
+  return {
+    status: whatsappStatus,
+    qrCode: whatsappQRCode,
+    connected: whatsappStatus === 'connected',
+    phoneNumber: store.get('whatsapp_cookies')?.phoneNumber || null
+  };
+}
+
 // ============ IPC HANDLERS ============
 ipcMain.handle('get-platforms', () => PLATFORMS);
+
+// WhatsApp IPC handlers
+ipcMain.handle('whatsapp-connect', async () => {
+  await initWhatsApp();
+  return getWhatsAppStatus();
+});
+
+ipcMain.handle('whatsapp-disconnect', async () => {
+  await disconnectWhatsApp();
+  return { success: true };
+});
+
+ipcMain.handle('whatsapp-status', () => {
+  return getWhatsAppStatus();
+});
+
+ipcMain.handle('whatsapp-sync', async () => {
+  return await syncWhatsAppMessages();
+});
+
+ipcMain.handle('whatsapp-send', async (event, { chatId, text }) => {
+  return await sendWhatsAppMessage(chatId, text);
+});
 
 ipcMain.handle('save-credentials', async (event, { platform, cookies, chatOrbitorToken }) => {
   if (chatOrbitorToken) {
@@ -1740,7 +2133,7 @@ function setupAutoLaunch() {
 }
 
 // App lifecycle
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   createWindow();
   createTray();
   startAutoSync();
@@ -1751,6 +2144,20 @@ app.whenReady().then(() => {
     setupAutoLaunch();
   } catch (err) {
     console.log('[app] Auto-launch not available:', err.message);
+  }
+  
+  // Check if WhatsApp was previously connected (LocalAuth will restore session)
+  const whatsappCookies = store.get('whatsapp_cookies');
+  if (whatsappCookies && whatsappCookies.connected) {
+    console.log('[whatsapp] Previous session found, attempting to restore...');
+    // Wait a bit for app to fully initialize
+    setTimeout(async () => {
+      try {
+        await initWhatsApp();
+      } catch (err) {
+        console.log('[whatsapp] Session restore failed:', err.message);
+      }
+    }, 3000);
   }
 });
 

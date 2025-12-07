@@ -53,6 +53,7 @@ from .views.whatsapp import (
     WhatsAppConversationsView,
     WhatsAppMessagesView,
     WhatsAppSendMessageView,
+    WhatsAppSyncFromDesktopView,
 )
 from .views.discord import (
     DiscordTokenSubmitView,
@@ -193,6 +194,9 @@ urlpatterns = [
     
     # POST /api/platforms/whatsapp/send/<account_id> - Send a message
     path('whatsapp/send/<uuid:account_id>', WhatsAppSendMessageView.as_view(), name='whatsapp-send'),
+    
+    # POST /api/platforms/whatsapp/sync-from-desktop - Receive data from desktop app (whatsapp-web.js)
+    path('whatsapp/sync-from-desktop', WhatsAppSyncFromDesktopView.as_view(), name='whatsapp-desktop-sync'),
     
     # Discord token-based endpoints
     # POST /api/platforms/discord/token - Submit token for authentication

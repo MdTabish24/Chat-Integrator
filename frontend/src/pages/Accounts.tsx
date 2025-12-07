@@ -10,6 +10,7 @@ import CookieInputModal, { CookieField } from '../components/CookieInputModal';
 import TwitterLoginModal from '../components/TwitterLoginModal';
 import InstagramLoginModal from '../components/InstagramLoginModal';
 import WhatsAppQRModal from '../components/WhatsAppQRModal';
+import DiscordTokenModal from '../components/DiscordTokenModal';
 import LoadingSpinner from '../components/LoadingSpinner';
 import ErrorDisplay from '../components/ErrorDisplay';
 
@@ -83,6 +84,8 @@ const Accounts: React.FC = () => {
   const [isSubmittingTwitter, setIsSubmittingTwitter] = useState(false);
   const [showInstagramLoginModal, setShowInstagramLoginModal] = useState(false);
   const [isSubmittingInstagram, setIsSubmittingInstagram] = useState(false);
+  const [showDiscordTokenModal, setShowDiscordTokenModal] = useState(false);
+  const [isSubmittingDiscord, setIsSubmittingDiscord] = useState(false);
 
   useEffect(() => {
     fetchConnectedAccounts();
@@ -167,6 +170,13 @@ const Accounts: React.FC = () => {
       // For Instagram, use username/password login (like Twitter)
       if (platform === 'instagram') {
         setShowInstagramLoginModal(true);
+        setConnectingPlatform(null);
+        return;
+      }
+      
+      // For Discord, use token-based authentication
+      if (platform === 'discord') {
+        setShowDiscordTokenModal(true);
         setConnectingPlatform(null);
         return;
       }
@@ -299,6 +309,37 @@ const Accounts: React.FC = () => {
   const handleInstagramLoginCancel = () => {
     setShowInstagramLoginModal(false);
     setIsSubmittingInstagram(false);
+  };
+
+  const handleDiscordTokenSubmit = async (data: { token: string; platform_user_id: string; platform_username: string }) => {
+    try {
+      setIsSubmittingDiscord(true);
+      console.log('🎮 [ACCOUNTS DEBUG] Submitting Discord token');
+      
+      await apiClient.post('/api/platforms/discord/token', {
+        token: data.token,
+        platform_user_id: data.platform_user_id,
+        platform_username: data.platform_username,
+      });
+      
+      console.log('✅ [ACCOUNTS DEBUG] Discord token submitted successfully');
+      showSuccess('Discord connected successfully');
+      setShowDiscordTokenModal(false);
+      
+      // Refresh the accounts list
+      await fetchConnectedAccounts();
+    } catch (err: any) {
+      console.error('❌ [ACCOUNTS DEBUG] Discord token error:', err);
+      const errorMessage = err.response?.data?.error?.message || err.response?.data?.error || 'Failed to connect Discord';
+      throw new Error(errorMessage);
+    } finally {
+      setIsSubmittingDiscord(false);
+    }
+  };
+
+  const handleDiscordTokenCancel = () => {
+    setShowDiscordTokenModal(false);
+    setIsSubmittingDiscord(false);
   };
 
   const handleDisconnectClick = (account: ConnectedAccount) => {
@@ -448,6 +489,15 @@ const Accounts: React.FC = () => {
             onSubmit={handleInstagramLoginSubmit}
             onCancel={handleInstagramLoginCancel}
             isSubmitting={isSubmittingInstagram}
+          />
+        )}
+
+        {/* Discord Token Modal */}
+        {showDiscordTokenModal && (
+          <DiscordTokenModal
+            onSubmit={handleDiscordTokenSubmit}
+            onCancel={handleDiscordTokenCancel}
+            isSubmitting={isSubmittingDiscord}
           />
         )}
       </div>

@@ -188,6 +188,7 @@
     
     // Platform login methods
     const loginMethods = {
+      whatsapp: 'qrcode', // Uses QR code scan (like actual WhatsApp Web)
       twitter: 'credentials', // Can use username/password
       linkedin: 'cookies',
       instagram: 'browser', // Can use browser login (opens Instagram)
@@ -214,6 +215,13 @@
       }
     };
     
+    // WhatsApp state
+    let whatsappState = {
+      status: 'disconnected',
+      qrCode: null,
+      phoneNumber: null
+    };
+    
     // Render platforms
     function renderPlatforms() {
       const container = document.getElementById('platforms-container');
@@ -227,6 +235,72 @@
         
         const card = document.createElement('div');
         card.className = 'platform-card';
+        
+        // WhatsApp has special QR code login
+        if (id === 'whatsapp') {
+          const isConnected = whatsappState.status === 'connected' || hasCookies;
+          card.innerHTML = `
+            <div class="platform-header">
+              <div class="platform-title">
+                <span>${config.icon}</span>
+                <span>${config.name}</span>
+              </div>
+              <span class="platform-status ${isConnected ? 'connected' : 'disconnected'}" id="status-${id}">
+                ${isConnected ? '✓ Connected' : whatsappState.status === 'qr_ready' ? '📱 Scan QR' : 'Not connected'}
+              </span>
+            </div>
+            ${lastSync ? `<div style="font-size:10px;color:#888;margin-bottom:8px;">Last sync: ${new Date(lastSync).toLocaleString()}</div>` : ''}
+            ${whatsappState.phoneNumber ? `<div style="font-size:11px;color:#25D366;margin-bottom:8px;">📱 ${whatsappState.phoneNumber}</div>` : ''}
+            
+            <div id="whatsapp-content">
+              ${whatsappState.status === 'qr_ready' && whatsappState.qrCode ? `
+                <div style="text-align:center;padding:15px;background:#f8f9fa;border-radius:8px;margin-bottom:12px;">
+                  <div style="font-size:12px;color:#333;margin-bottom:10px;font-weight:600;">
+                    📱 Scan with WhatsApp
+                  </div>
+                  <img src="${whatsappState.qrCode}" alt="WhatsApp QR Code" style="max-width:200px;border-radius:8px;"/>
+                  <div style="font-size:10px;color:#666;margin-top:8px;">
+                    Open WhatsApp → Settings → Linked Devices → Link a Device
+                  </div>
+                </div>
+              ` : whatsappState.status === 'connecting' ? `
+                <div style="text-align:center;padding:20px;background:#f0f7ff;border-radius:8px;margin-bottom:12px;">
+                  <div style="font-size:14px;color:#004085;">⏳ Initializing WhatsApp...</div>
+                  <div style="font-size:11px;color:#666;margin-top:5px;">This may take a moment</div>
+                </div>
+              ` : isConnected ? `
+                <div style="text-align:center;padding:15px;background:#d4edda;border-radius:8px;margin-bottom:12px;">
+                  <div style="font-size:14px;color:#155724;">✅ WhatsApp Connected!</div>
+                  <div style="font-size:11px;color:#155724;margin-top:5px;">Messages will sync automatically</div>
+                </div>
+              ` : `
+                <div style="background:#e8f5e9;padding:12px;border-radius:8px;margin-bottom:12px;">
+                  <div style="font-size:12px;color:#1b5e20;margin-bottom:8px;">
+                    <strong>💬 Connect WhatsApp</strong>
+                  </div>
+                  <div style="font-size:11px;color:#555;line-height:1.5;">
+                    1. Click "Connect WhatsApp" below<br>
+                    2. Scan QR code with your phone<br>
+                    3. Messages will sync to Chat Orbitor!
+                  </div>
+                </div>
+              `}
+            </div>
+            
+            <div class="platform-actions">
+              ${isConnected ? `
+                <button class="btn btn-secondary btn-sm" onclick="syncPlatform('whatsapp')">🔄 Sync Now</button>
+                <button class="btn btn-danger btn-sm" onclick="disconnectWhatsApp()">🔌 Disconnect</button>
+              ` : `
+                <button class="btn btn-primary btn-sm" onclick="connectWhatsApp()" id="whatsapp-connect-btn" style="background:#25D366;">
+                  ${whatsappState.status === 'connecting' ? '⏳ Connecting...' : whatsappState.status === 'qr_ready' ? '🔄 Refresh QR' : '📱 Connect WhatsApp'}
+                </button>
+              `}
+            </div>
+          `;
+          container.appendChild(card);
+          continue;
+        }
         
         // Twitter has special login option
         if (id === 'twitter') {
@@ -386,6 +460,60 @@
           `;
         }
         container.appendChild(card);
+      }
+    }
+    
+    // WhatsApp connect
+    async function connectWhatsApp() {
+      const btn = document.getElementById('whatsapp-connect-btn');
+      const status = document.getElementById('status-whatsapp');
+      
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = '⏳ Connecting...';
+      }
+      if (status) {
+        status.className = 'platform-status syncing';
+        status.textContent = '⏳ Connecting...';
+      }
+      
+      try {
+        whatsappState.status = 'connecting';
+        renderPlatforms(); // Re-render to show loading state
+        
+        const result = await window.electronAPI.whatsappConnect();
+        console.log('WhatsApp connect result:', result);
+        
+        // Update state
+        whatsappState = { ...whatsappState, ...result };
+        renderPlatforms();
+        
+      } catch (err) {
+        console.error('WhatsApp connect error:', err);
+        whatsappState.status = 'disconnected';
+        renderPlatforms();
+        alert('WhatsApp connect error: ' + err.message);
+      }
+    }
+    
+    // WhatsApp disconnect
+    async function disconnectWhatsApp() {
+      if (!confirm('Disconnect WhatsApp? You will need to scan QR code again.')) {
+        return;
+      }
+      
+      try {
+        await window.electronAPI.whatsappDisconnect();
+        whatsappState = {
+          status: 'disconnected',
+          qrCode: null,
+          phoneNumber: null
+        };
+        credentials = await window.electronAPI.getCredentials();
+        renderPlatforms();
+      } catch (err) {
+        console.error('WhatsApp disconnect error:', err);
+        alert('Error disconnecting: ' + err.message);
       }
     }
     
@@ -633,12 +761,73 @@
       }
     });
     
+    // Listen for WhatsApp status updates (QR code, connection, etc.)
+    window.electronAPI.onWhatsAppStatus((data) => {
+      console.log('WhatsApp status update:', data);
+      
+      // Update local state
+      whatsappState.status = data.status || whatsappState.status;
+      if (data.qrCode) {
+        whatsappState.qrCode = data.qrCode;
+      }
+      if (data.phoneNumber) {
+        whatsappState.phoneNumber = data.phoneNumber;
+      }
+      
+      // Update status badge
+      const status = document.getElementById('status-whatsapp');
+      if (status) {
+        if (data.status === 'connected') {
+          status.className = 'platform-status connected';
+          status.textContent = '✓ Connected';
+        } else if (data.status === 'qr_ready') {
+          status.className = 'platform-status syncing';
+          status.textContent = '📱 Scan QR';
+        } else if (data.status === 'connecting') {
+          status.className = 'platform-status syncing';
+          status.textContent = '⏳ Connecting...';
+        } else if (data.status === 'error') {
+          status.className = 'platform-status error';
+          status.textContent = '✗ Error';
+        } else {
+          status.className = 'platform-status disconnected';
+          status.textContent = 'Not connected';
+        }
+      }
+      
+      // Re-render to show QR code or updated state
+      renderPlatforms();
+      
+      // Refresh credentials if connected
+      if (data.status === 'connected') {
+        setTimeout(async () => {
+          credentials = await window.electronAPI.getCredentials();
+          renderPlatforms();
+        }, 1000);
+      }
+    });
+    
     // Initialize
     async function init() {
       try {
         platforms = await window.electronAPI.getPlatforms();
         credentials = await window.electronAPI.getCredentials();
         document.getElementById('chatorbitor-token').value = credentials.chatOrbitorToken || '';
+        
+        // Check WhatsApp status
+        try {
+          const waStatus = await window.electronAPI.whatsappStatus();
+          if (waStatus) {
+            whatsappState = {
+              status: waStatus.status || 'disconnected',
+              qrCode: waStatus.qrCode || null,
+              phoneNumber: waStatus.phoneNumber || null
+            };
+          }
+        } catch (e) {
+          console.log('WhatsApp status check failed:', e);
+        }
+        
         renderPlatforms();
       } catch (err) {
         console.error('Init error:', err);

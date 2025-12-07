@@ -407,6 +407,156 @@ class WhatsAppMessagesView(APIView):
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+class WhatsAppSyncFromDesktopView(APIView):
+    """
+    Receive WhatsApp messages synced from Desktop App.
+    
+    The Desktop App uses whatsapp-web.js to connect to WhatsApp
+    and sends the messages to this endpoint for storage.
+    
+    POST /api/platforms/whatsapp/sync-from-desktop
+    
+    Request body:
+    {
+        "conversations": [
+            {
+                "id": "chat_id",
+                "name": "Contact Name",
+                "isGroup": false,
+                "participants": [{"id": "...", "name": "..."}],
+                "messages": [{"id": "...", "text": "...", "senderId": "...", ...}],
+                "unreadCount": 0
+            }
+        ]
+    }
+    """
+    permission_classes = [AllowAny]
+    
+    def post(self, request):
+        try:
+            if not hasattr(request, 'user_jwt') or not request.user_jwt:
+                return Response({
+                    'error': {
+                        'code': 'UNAUTHORIZED',
+                        'message': 'User not authenticated',
+                        'retryable': False,
+                    }
+                }, status=status.HTTP_401_UNAUTHORIZED)
+            
+            user_id = request.user_jwt['user_id']
+            conversations = request.data.get('conversations', [])
+            
+            print(f'[whatsapp] Received sync from desktop: {len(conversations)} conversations')
+            
+            # Find or create WhatsApp account for this user
+            account, created = ConnectedAccount.objects.update_or_create(
+                user_id=user_id,
+                platform='whatsapp',
+                defaults={
+                    'platform_user_id': 'desktop_sync',
+                    'platform_username': 'WhatsApp (Desktop)',
+                    'is_active': True,
+                }
+            )
+            
+            if created:
+                print(f'[whatsapp] Created new account for user {user_id}')
+            
+            # Import models for storing conversations and messages
+            from apps.platforms.models import Conversation, Message
+            
+            total_messages = 0
+            new_messages = 0
+            
+            for conv_data in conversations:
+                try:
+                    conv_id = conv_data.get('id', '')
+                    if not conv_id:
+                        continue
+                    
+                    # Get participant info for display
+                    participants = conv_data.get('participants', [])
+                    participant_name = conv_data.get('name', 'Unknown')
+                    if not participant_name and participants:
+                        participant_name = participants[0].get('name', 'Unknown')
+                    
+                    participant_id = ''
+                    if participants:
+                        participant_id = participants[0].get('id', '')
+                    
+                    # Create or update conversation
+                    conversation, _ = Conversation.objects.update_or_create(
+                        account=account,
+                        platform_conversation_id=conv_id,
+                        defaults={
+                            'participant_name': participant_name,
+                            'participant_id': participant_id,
+                            'unread_count': conv_data.get('unreadCount', 0),
+                        }
+                    )
+                    
+                    # Process messages
+                    messages = conv_data.get('messages', [])
+                    for msg_data in messages:
+                        msg_id = msg_data.get('id', '')
+                        if not msg_id:
+                            continue
+                        
+                        total_messages += 1
+                        
+                        # Check if message already exists
+                        if Message.objects.filter(
+                            conversation=conversation,
+                            platform_message_id=msg_id
+                        ).exists():
+                            continue
+                        
+                        # Create new message
+                        Message.objects.create(
+                            conversation=conversation,
+                            platform_message_id=msg_id,
+                            sender_id=msg_data.get('senderId', ''),
+                            sender_name=msg_data.get('senderName', ''),
+                            content=msg_data.get('text', ''),
+                            message_type=msg_data.get('type', 'text'),
+                            is_outgoing=msg_data.get('isFromMe', False),
+                            is_read=True,
+                            sent_at=msg_data.get('createdAt') or timezone.now(),
+                        )
+                        new_messages += 1
+                    
+                    # Update last message info
+                    if messages:
+                        last_msg = messages[0]  # Assuming messages are ordered newest first
+                        conversation.last_message = last_msg.get('text', '')[:200]
+                        conversation.last_message_at = last_msg.get('createdAt')
+                        conversation.save()
+                        
+                except Exception as conv_err:
+                    print(f'[whatsapp] Error processing conversation: {conv_err}')
+                    continue
+            
+            print(f'[whatsapp] Sync complete: {new_messages} new messages out of {total_messages} total')
+            
+            return Response({
+                'success': True,
+                'account_id': str(account.id),
+                'conversations_processed': len(conversations),
+                'new_messages': new_messages,
+                'total_messages': total_messages,
+            })
+            
+        except Exception as e:
+            print(f'[whatsapp] Sync from desktop failed: {e}')
+            return Response({
+                'error': {
+                    'code': 'SYNC_FAILED',
+                    'message': str(e) or 'Failed to sync WhatsApp messages',
+                    'retryable': True,
+                }
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
 class WhatsAppSendMessageView(APIView):
     """
     Send a WhatsApp message.

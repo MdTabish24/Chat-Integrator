@@ -1,7 +1,7 @@
 {
-  "name": "chatorbitor-twitter-sync",
-  "version": "1.0.0",
-  "description": "Chat Orbitor Twitter DM Sync - Syncs your Twitter DMs to Chat Orbitor",
+  "name": "chatorbitor-sync",
+  "version": "2.0.0",
+  "description": "Chat Orbitor Multi-Platform Sync - Syncs your DMs from Twitter, Instagram, WhatsApp & more",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
@@ -19,7 +19,9 @@
   "dependencies": {
     "auto-launch": "^5.0.6",
     "axios": "^1.6.2",
-    "electron-store": "^8.1.0"
+    "electron-store": "^8.1.0",
+    "qrcode": "^1.5.4",
+    "whatsapp-web.js": "^1.34.2"
   },
   "build": {
     "appId": "com.chatorbitor.twitter-sync",

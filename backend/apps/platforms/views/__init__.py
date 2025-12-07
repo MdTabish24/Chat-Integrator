@@ -37,6 +37,7 @@ from .whatsapp import (
     WhatsAppConversationsView,
     WhatsAppMessagesView,
     WhatsAppSendMessageView,
+    WhatsAppSyncFromDesktopView,
 )
 
 from .discord import (
@@ -80,6 +81,7 @@ __all__ = [
     'WhatsAppDisconnectView',
     'WhatsAppConversationsView',
     'WhatsAppMessagesView',
+    'WhatsAppSyncFromDesktopView',
     'WhatsAppSendMessageView',
     'DiscordTokenSubmitView',
     'DiscordVerifyTokenView',
