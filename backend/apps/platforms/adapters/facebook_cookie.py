@@ -62,101 +62,25 @@ class FacebookCookieAdapter(BasePlatformAdapter):
     
     def _get_or_create_session(self, account_id: str) -> Any:
         """
-        Get or create an fbchat session for the account.
+        Get or create a session for the account.
+        
+        NOTE: fbchat is disabled because it doesn't work with E2EE chats.
+        Facebook messages are synced via Desktop App browser automation instead.
         
         Args:
             account_id: The connected account ID
             
         Returns:
-            Authenticated fbchat Session instance
-            
-        Requirements: 6.1
+            None - fbchat is disabled
         """
-        # Check if we have a cached session
-        if account_id in self._sessions:
-            return self._sessions[account_id]
-        
-        try:
-            from fbchat import Session
-            
-            # Get account and decrypt cookies
-            account = ConnectedAccount.objects.get(id=account_id, is_active=True)
-            
-            if not account.access_token:
-                raise PlatformAPIError(
-                    'No cookies stored for this account',
-                    'facebook',
-                    status_code=401,
-                    retryable=False
-                )
-            
-            # Cookies are stored as encrypted JSON in access_token field
-            cookies_json = decrypt(account.access_token)
-            cookies = json.loads(cookies_json)
-            
-            # Validate required cookies
-            c_user = cookies.get('c_user')
-            xs = cookies.get('xs')
-            
-            if not c_user or not xs:
-                raise PlatformAPIError(
-                    'Missing required cookies (c_user, xs)',
-                    'facebook',
-                    status_code=401,
-                    retryable=False
-                )
-            
-            # Create fbchat session from cookies
-            # fbchat expects cookies as a dict
-            session_cookies = {
-                'c_user': c_user,
-                'xs': xs,
-            }
-            
-            # Create session from cookies
-            session = Session.from_cookies(session_cookies)
-            
-            # Cache the session
-            self._sessions[account_id] = session
-            
-            return session
-            
-        except ConnectedAccount.DoesNotExist:
-            raise PlatformAPIError(
-                f'Account {account_id} not found or inactive',
-                'facebook',
-                status_code=404,
-                retryable=False
-            )
-        except json.JSONDecodeError:
-            raise PlatformAPIError(
-                'Invalid cookie format',
-                'facebook',
-                status_code=400,
-                retryable=False
-            )
-        except ImportError:
-            raise PlatformAPIError(
-                'fbchat library not installed. Install with: pip install fbchat',
-                'facebook',
-                status_code=500,
-                retryable=False
-            )
-        except Exception as e:
-            error_str = str(e).lower()
-            if 'invalid' in error_str or 'expired' in error_str:
-                raise PlatformAPIError(
-                    'Facebook cookies are invalid or expired',
-                    'facebook',
-                    status_code=401,
-                    retryable=False
-                )
-            raise PlatformAPIError(
-                f'Failed to create Facebook session: {e}',
-                'facebook',
-                retryable=True,
-                original_error=e
-            )
+        # fbchat is disabled - E2EE chats don't work with it
+        # Messages are synced via Desktop App browser automation
+        raise PlatformAPIError(
+            'Facebook messages are synced via Desktop App. Please use the Desktop App to sync Facebook messages.',
+            'facebook',
+            status_code=501,  # Not Implemented
+            retryable=False
+        )
     
     def _invalidate_session(self, account_id: str) -> None:
         """Remove cached session for account."""
