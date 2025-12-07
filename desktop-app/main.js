@@ -460,8 +460,8 @@ async function fetchLinkedInMessages(cookies, retryCount = 0) {
       }
       
       // Create browser window to fetch messages
-      // Set to TRUE to debug - will show the browser window
-      const DEBUG_SHOW_WINDOW = true;  // Enable to see what LinkedIn page looks like
+      // Set to FALSE for production - hidden window
+      const DEBUG_SHOW_WINDOW = false;  // Disabled - causes passkey prompts
       
       linkedinFetchWindow = new BrowserWindow({
         width: 1200,

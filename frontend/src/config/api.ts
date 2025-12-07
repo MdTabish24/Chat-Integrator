@@ -12,6 +12,19 @@ export const apiClient = axios.create({
   timeout: 180000, // 180 seconds (3 min) - needed for Twitter rate limiting + Telegram DC migration
 });
 
+// Lock to prevent multiple simultaneous refresh attempts
+let isRefreshing = false;
+let refreshSubscribers: ((token: string) => void)[] = [];
+
+const subscribeTokenRefresh = (cb: (token: string) => void) => {
+  refreshSubscribers.push(cb);
+};
+
+const onTokenRefreshed = (token: string) => {
+  refreshSubscribers.forEach(cb => cb(token));
+  refreshSubscribers = [];
+};
+
 // Request interceptor to add auth token
 apiClient.interceptors.request.use(
   (config) => {
@@ -62,7 +75,19 @@ apiClient.interceptors.response.use(
 
     // If token expired (401 or 403) for auth endpoints, try to refresh
     if ((error.response?.status === 401 || error.response?.status === 403) && !originalRequest._retry && isAuthEndpoint) {
+      
+      // If already refreshing, wait for the refresh to complete
+      if (isRefreshing) {
+        return new Promise((resolve) => {
+          subscribeTokenRefresh((token: string) => {
+            originalRequest.headers.Authorization = `Bearer ${token}`;
+            resolve(apiClient(originalRequest));
+          });
+        });
+      }
+      
       originalRequest._retry = true;
+      isRefreshing = true;
 
       try {
         const refreshToken = localStorage.getItem('refresh_token');
@@ -74,12 +99,23 @@ apiClient.interceptors.response.use(
           refreshToken,
         });
 
-        const { accessToken } = response.data;
+        // IMPORTANT: Save BOTH tokens - refresh tokens are rotated!
+        const { accessToken, refreshToken: newRefreshToken } = response.data.tokens || response.data;
         localStorage.setItem('access_token', accessToken);
+        if (newRefreshToken) {
+          localStorage.setItem('refresh_token', newRefreshToken);
+          console.log('[API] Tokens refreshed successfully');
+        }
 
+        isRefreshing = false;
+        onTokenRefreshed(accessToken);
+        
         originalRequest.headers.Authorization = `Bearer ${accessToken}`;
         return apiClient(originalRequest);
       } catch (refreshError) {
+        isRefreshing = false;
+        refreshSubscribers = [];
+        
         // Only redirect to login if refresh actually failed
         // And only if we're not already on login page
         console.log('[API] Token refresh failed, clearing session');
