@@ -387,6 +387,74 @@
           continue;
         }
         
+        // LinkedIn has browser login option (like Facebook/Instagram)
+        if (id === 'linkedin') {
+          card.innerHTML = `
+            <div class="platform-header">
+              <div class="platform-title">
+                <span>${config.icon}</span>
+                <span>${config.name}</span>
+              </div>
+              <span class="platform-status ${hasCookies ? 'connected' : 'disconnected'}" id="status-${id}">
+                ${hasCookies ? '✓ Connected' : 'Not connected'}
+              </span>
+            </div>
+            ${lastSync ? `<div style="font-size:10px;color:#888;margin-bottom:8px;">Last sync: ${new Date(lastSync).toLocaleString()}</div>` : ''}
+            
+            <div style="display:flex;gap:8px;margin-bottom:10px;">
+              <button class="toggle-btn" onclick="showLinkedInLogin()" id="linkedin-login-tab" style="font-weight:600;color:#0ea5e9;">
+                🔐 Login (Recommended)
+              </button>
+              <button class="toggle-btn" onclick="showLinkedInCookies()" id="linkedin-cookies-tab">
+                🍪 Cookies
+              </button>
+            </div>
+            
+            <!-- Browser Login (Recommended) -->
+            <div class="platform-fields show" id="linkedin-login-form">
+              <div style="background:#e7f3ff;padding:12px;border-radius:8px;margin-bottom:12px;">
+                <div style="font-size:12px;color:#0077B5;margin-bottom:8px;">
+                  <strong>🌐 Browser Login (Best Method)</strong>
+                </div>
+                <div style="font-size:11px;color:#555;line-height:1.5;">
+                  1. Click "Open LinkedIn Login" below<br>
+                  2. Login to LinkedIn normally in the popup<br>
+                  3. After login, cookies will be extracted automatically<br>
+                  4. Messages will sync to Chat Orbitor!
+                </div>
+              </div>
+              <div class="platform-actions">
+                <button class="btn btn-primary btn-sm" onclick="loginLinkedInBrowser()" id="linkedin-login-btn" style="background:#0077B5;">
+                  🔐 Open LinkedIn Login
+                </button>
+                <button class="btn btn-secondary btn-sm" onclick="syncPlatform('linkedin')">🔄 Sync</button>
+                <button class="btn btn-danger btn-sm" onclick="clearPlatform('linkedin')">🗑️</button>
+              </div>
+            </div>
+            
+            <!-- Cookies Form (Manual - hidden by default) -->
+            <div class="platform-fields" id="linkedin-cookies-form">
+              <div style="background:#fff3cd;padding:8px;border-radius:6px;margin-bottom:10px;font-size:10px;color:#856404;">
+                ⚠️ Manual method - Use Browser Login above if possible
+              </div>
+              ${config.cookieFields.map(field => `
+                <div class="form-group">
+                  <label>${field}</label>
+                  <input type="text" id="${id}-${field}" placeholder="${field}" value="${platformData.cookies?.[field] || ''}">
+                  <small>${cookieInstructions[id]?.[field] || ''}</small>
+                </div>
+              `).join('')}
+              <div class="platform-actions">
+                <button class="btn btn-primary btn-sm" onclick="savePlatform('${id}')">💾 Save</button>
+                <button class="btn btn-secondary btn-sm" onclick="syncPlatform('${id}')">🔄 Sync</button>
+                <button class="btn btn-danger btn-sm" onclick="clearPlatform('${id}')">🗑️</button>
+              </div>
+            </div>
+          `;
+          container.appendChild(card);
+          continue;
+        }
+        
         // Twitter has special login option
         if (id === 'twitter') {
           card.innerHTML = `
@@ -705,6 +773,61 @@
       document.getElementById('instagram-cookies-tab').style.color = '#0ea5e9';
     }
     
+    // LinkedIn tab switching
+    function showLinkedInLogin() {
+      document.getElementById('linkedin-login-form').classList.add('show');
+      document.getElementById('linkedin-cookies-form').classList.remove('show');
+      document.getElementById('linkedin-login-tab').style.fontWeight = '600';
+      document.getElementById('linkedin-login-tab').style.color = '#0ea5e9';
+      document.getElementById('linkedin-cookies-tab').style.fontWeight = 'normal';
+      document.getElementById('linkedin-cookies-tab').style.color = '#888';
+    }
+    
+    function showLinkedInCookies() {
+      document.getElementById('linkedin-login-form').classList.remove('show');
+      document.getElementById('linkedin-cookies-form').classList.add('show');
+      document.getElementById('linkedin-login-tab').style.fontWeight = 'normal';
+      document.getElementById('linkedin-login-tab').style.color = '#888';
+      document.getElementById('linkedin-cookies-tab').style.fontWeight = '600';
+      document.getElementById('linkedin-cookies-tab').style.color = '#0ea5e9';
+    }
+    
+    // LinkedIn browser login - opens LinkedIn in a popup window
+    async function loginLinkedInBrowser() {
+      const btn = document.getElementById('linkedin-login-btn');
+      const status = document.getElementById('status-linkedin');
+      
+      btn.disabled = true;
+      btn.textContent = '⏳ Opening LinkedIn...';
+      status.className = 'platform-status syncing';
+      status.textContent = '⏳ Opening login...';
+      
+      try {
+        const result = await window.electronAPI.loginLinkedInBrowser();
+        
+        if (result.success) {
+          status.className = 'platform-status connected';
+          status.textContent = '✓ Connected';
+          alert('LinkedIn connected successfully! Syncing messages...');
+          credentials = await window.electronAPI.getCredentials();
+          renderPlatforms();
+        } else {
+          status.className = 'platform-status error';
+          status.textContent = '✗ ' + (result.error || 'Login failed');
+          if (result.error && result.error !== 'Login window was closed') {
+            alert('Login failed: ' + result.error);
+          }
+        }
+      } catch (err) {
+        status.className = 'platform-status error';
+        status.textContent = '✗ Error';
+        alert('Login error: ' + err.message);
+      }
+      
+      btn.disabled = false;
+      btn.textContent = '🔐 Open LinkedIn Login';
+    }
+    
     // Facebook tab switching
     function showFacebookLogin() {
       document.getElementById('facebook-login-form').classList.add('show');
@@ -997,6 +1120,41 @@
         if (btn) {
           btn.disabled = false;
           btn.textContent = '🔐 Open Facebook Login';
+        }
+      }
+    });
+    
+    // Listen for LinkedIn login status updates
+    window.electronAPI.onLinkedInLoginStatus((data) => {
+      const status = document.getElementById('status-linkedin');
+      const btn = document.getElementById('linkedin-login-btn');
+      
+      if (!status) return;
+      
+      if (data.status === 'window_opened') {
+        status.className = 'platform-status syncing';
+        status.textContent = '⏳ Waiting for login...';
+        if (btn) {
+          btn.textContent = '⏳ Login in progress...';
+        }
+      } else if (data.status === 'success') {
+        status.className = 'platform-status connected';
+        status.textContent = '✓ Connected';
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = '🔐 Open LinkedIn Login';
+        }
+        // Refresh credentials
+        setTimeout(async () => {
+          credentials = await window.electronAPI.getCredentials();
+          renderPlatforms();
+        }, 500);
+      } else if (data.status === 'cancelled') {
+        status.className = 'platform-status disconnected';
+        status.textContent = 'Not connected';
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = '🔐 Open LinkedIn Login';
         }
       }
     });

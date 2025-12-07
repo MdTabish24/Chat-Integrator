@@ -423,6 +423,7 @@ function parseTwitterResponse(data) {
 
 // ============ LINKEDIN ============
 // LinkedIn login window reference
+let linkedinLoginWindow = null;
 let linkedinFetchWindow = null;
 
 // Track last LinkedIn fetch time
@@ -443,27 +444,14 @@ async function fetchLinkedInMessages(cookies, retryCount = 0) {
   console.log('[linkedin] JSESSIONID:', cookies.JSESSIONID ? 'present' : 'missing');
 
   if (!cookies.li_at || !cookies.JSESSIONID) {
-    throw new Error('LinkedIn session not found. Please provide li_at and JSESSIONID cookies.');
+    throw new Error('LinkedIn session not found. Please click "Open LinkedIn Login" to login.');
   }
 
   return new Promise(async (resolve, reject) => {
     try {
-      // Create a session for LinkedIn
-      const linkedinSession = session.fromPartition('linkedin-sync');
-      
-      // Set cookies in the session
-      const cookiesToSet = [
-        { url: 'https://www.linkedin.com', name: 'li_at', value: cookies.li_at, domain: '.linkedin.com', secure: true },
-        { url: 'https://www.linkedin.com', name: 'JSESSIONID', value: cookies.JSESSIONID.replace(/"/g, ''), domain: '.linkedin.com', secure: true },
-      ];
-      
-      for (const cookie of cookiesToSet) {
-        try {
-          await linkedinSession.cookies.set(cookie);
-        } catch (e) {
-          console.log('[linkedin] Cookie set warning:', e.message);
-        }
-      }
+      // Use the SAME session as the login window (like Facebook)
+      // This is critical - using separate session causes ERR_TOO_MANY_REDIRECTS
+      const linkedinSession = session.fromPartition('linkedin-login');
       
       // Close existing fetch window
       if (linkedinFetchWindow && !linkedinFetchWindow.isDestroyed()) {
@@ -2798,6 +2786,222 @@ ipcMain.handle('login-facebook-browser', async () => {
 ipcMain.handle('close-facebook-login', async () => {
   if (facebookLoginWindow && !facebookLoginWindow.isDestroyed()) {
     facebookLoginWindow.close();
+  }
+  return { success: true };
+});
+
+// LinkedIn browser-based login (opens LinkedIn in a window, extracts cookies after login)
+ipcMain.handle('login-linkedin-browser', async () => {
+  return new Promise((resolve) => {
+    try {
+      const token = store.get('chatorbitor_token');
+      if (!token) {
+        resolve({ success: false, error: 'Please save your Chat Orbitor token first' });
+        return;
+      }
+
+      // Close existing LinkedIn login window if open
+      if (linkedinLoginWindow && !linkedinLoginWindow.isDestroyed()) {
+        linkedinLoginWindow.close();
+      }
+
+      // Create a new session for LinkedIn login (isolated from main app)
+      const linkedinSession = session.fromPartition('linkedin-login');
+      
+      // Clear any existing cookies to start fresh
+      linkedinSession.clearStorageData({ storages: ['cookies'] });
+
+      // Create LinkedIn login window
+      linkedinLoginWindow = new BrowserWindow({
+        width: 500,
+        height: 700,
+        resizable: true,
+        title: 'Login to LinkedIn',
+        parent: mainWindow,
+        modal: false,
+        webPreferences: {
+          nodeIntegration: false,
+          contextIsolation: true,
+          session: linkedinSession
+        }
+      });
+
+      // Load LinkedIn login page
+      linkedinLoginWindow.loadURL('https://www.linkedin.com/login');
+
+      console.log('[linkedin] Login window opened');
+
+      // Notify main window that login window is open
+      if (mainWindow) {
+        mainWindow.webContents.send('linkedin-login-status', { status: 'window_opened' });
+      }
+
+      // Check for successful login by monitoring URL and cookies
+      let loginCheckInterval = null;
+      let isResolved = false;
+
+      const checkForLogin = async () => {
+        if (isResolved) return;
+        
+        try {
+          if (linkedinLoginWindow.isDestroyed()) {
+            clearInterval(loginCheckInterval);
+            if (!isResolved) {
+              isResolved = true;
+              resolve({ success: false, error: 'Login window was closed' });
+            }
+            return;
+          }
+
+          const currentURL = linkedinLoginWindow.webContents.getURL();
+          
+          // Check if user is logged in (URL changed to feed or home)
+          if (currentURL.includes('linkedin.com') && 
+              !currentURL.includes('/login') && 
+              !currentURL.includes('/checkpoint') &&
+              !currentURL.includes('/authwall') &&
+              !currentURL.includes('/uas/')) {
+            
+            // Get cookies from the session
+            const cookies = await linkedinSession.cookies.get({ domain: '.linkedin.com' });
+            
+            // Find required cookies
+            let li_at = '';
+            let JSESSIONID = '';
+            let lidc = '';
+            let bcookie = '';
+
+            for (const cookie of cookies) {
+              if (cookie.name === 'li_at') li_at = cookie.value;
+              if (cookie.name === 'JSESSIONID') JSESSIONID = cookie.value;
+              if (cookie.name === 'lidc') lidc = cookie.value;
+              if (cookie.name === 'bcookie') bcookie = cookie.value;
+            }
+
+            console.log('[linkedin] Checking cookies - li_at:', !!li_at, 'JSESSIONID:', !!JSESSIONID);
+
+            // If we have the required cookies, login was successful
+            if (li_at && JSESSIONID) {
+              clearInterval(loginCheckInterval);
+              isResolved = true;
+
+              console.log('[linkedin] Login successful! Extracting cookies...');
+              console.log('[linkedin] JSESSIONID:', JSESSIONID.substring(0, 20) + '...');
+
+              // Save cookies (clean JSESSIONID - remove quotes if present)
+              const cleanJSESSIONID = JSESSIONID.replace(/"/g, '');
+              const linkedinCookies = { 
+                li_at, 
+                JSESSIONID: cleanJSESSIONID,
+                lidc: lidc || '',
+                bcookie: bcookie || ''
+              };
+              store.set('linkedin_cookies', linkedinCookies);
+
+              // Close login window
+              if (!linkedinLoginWindow.isDestroyed()) {
+                linkedinLoginWindow.close();
+              }
+
+              // Notify main window
+              if (mainWindow) {
+                mainWindow.webContents.send('linkedin-login-status', { 
+                  status: 'success',
+                  message: 'Login successful!'
+                });
+              }
+
+              resolve({ success: true, cookies: linkedinCookies });
+              
+              // Register with backend and auto-sync after successful login
+              const chatToken = store.get('chatorbitor_token');
+              if (chatToken) {
+                setTimeout(async () => {
+                  try {
+                    // First, register/create the LinkedIn account in backend
+                    const apiUrl = store.get('apiUrl') || API_BASE_URL;
+                    await axios.post(
+                      `${apiUrl}/api/platforms/linkedin/cookies`,
+                      { 
+                        li_at: li_at,
+                        JSESSIONID: cleanJSESSIONID,
+                      },
+                      {
+                        headers: {
+                          'Authorization': `Bearer ${chatToken}`,
+                          'Content-Type': 'application/json'
+                        },
+                        timeout: 30000
+                      }
+                    );
+                    console.log('[linkedin] Account registered in backend');
+                    
+                    // Now sync
+                    syncPlatform('linkedin', linkedinCookies, chatToken);
+                  } catch (regError) {
+                    console.error('[linkedin] Backend registration error:', regError.message);
+                    // Still try to sync even if registration fails
+                    syncPlatform('linkedin', linkedinCookies, chatToken);
+                  }
+                }, 1000);
+              }
+            }
+          }
+        } catch (err) {
+          console.error('[linkedin] Error checking login status:', err.message);
+        }
+      };
+
+      // Start checking for login every 2 seconds
+      loginCheckInterval = setInterval(checkForLogin, 2000);
+
+      // Also check when page finishes loading
+      linkedinLoginWindow.webContents.on('did-finish-load', () => {
+        setTimeout(checkForLogin, 1000);
+      });
+
+      // Handle window close
+      linkedinLoginWindow.on('closed', () => {
+        clearInterval(loginCheckInterval);
+        linkedinLoginWindow = null;
+        
+        if (!isResolved) {
+          isResolved = true;
+          if (mainWindow) {
+            mainWindow.webContents.send('linkedin-login-status', { 
+              status: 'cancelled',
+              message: 'Login cancelled'
+            });
+          }
+          resolve({ success: false, error: 'Login window was closed' });
+        }
+      });
+
+      // Timeout after 5 minutes
+      setTimeout(() => {
+        if (!isResolved) {
+          clearInterval(loginCheckInterval);
+          isResolved = true;
+          
+          if (linkedinLoginWindow && !linkedinLoginWindow.isDestroyed()) {
+            linkedinLoginWindow.close();
+          }
+          
+          resolve({ success: false, error: 'Login timed out. Please try again.' });
+        }
+      }, 5 * 60 * 1000);
+
+    } catch (error) {
+      console.error('[linkedin] Login error:', error.message);
+      resolve({ success: false, error: error.message });
+    }
+  });
+});
+
+// Close LinkedIn login window
+ipcMain.handle('close-linkedin-login', async () => {
+  if (linkedinLoginWindow && !linkedinLoginWindow.isDestroyed()) {
+    linkedinLoginWindow.close();
   }
   return { success: true };
 });

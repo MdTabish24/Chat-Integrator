@@ -27,6 +27,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   loginFacebookBrowser: () => ipcRenderer.invoke('login-facebook-browser'),
   closeFacebookLogin: () => ipcRenderer.invoke('close-facebook-login'),
   
+  // LinkedIn browser-based login (opens LinkedIn website)
+  loginLinkedInBrowser: () => ipcRenderer.invoke('login-linkedin-browser'),
+  closeLinkedInLogin: () => ipcRenderer.invoke('close-linkedin-login'),
+  
   // WhatsApp operations (via whatsapp-web.js)
   whatsappConnect: () => ipcRenderer.invoke('whatsapp-connect'),
   whatsappDisconnect: () => ipcRenderer.invoke('whatsapp-disconnect'),
@@ -47,6 +51,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Facebook login status updates
   onFacebookLoginStatus: (callback) => {
     ipcRenderer.on('facebook-login-status', (event, data) => callback(data));
+  },
+  
+  // LinkedIn login status updates
+  onLinkedInLoginStatus: (callback) => {
+    ipcRenderer.on('linkedin-login-status', (event, data) => callback(data));
   },
   
   // WhatsApp status updates (QR code, connection, etc.)
