@@ -343,7 +343,10 @@ GOOGLE_CLIENT_ID = config('GOOGLE_CLIENT_ID', default='')
 GOOGLE_CLIENT_SECRET = config('GOOGLE_CLIENT_SECRET', default='')
 
 # Webhook Configuration
-WEBHOOK_BASE_URL = config('WEBHOOK_BASE_URL', default='https://chatintegrator.onrender.com')
+WEBHOOK_BASE_URL = config('WEBHOOK_BASE_URL', default='https://chat-integrator.onrender.com')
+
+# Frontend URL (for OAuth redirects after success/error)
+FRONTEND_URL = config('FRONTEND_URL', default='https://chatorbitor.onrender.com')
 
 # Rate Limiting Configuration
 # Migrated from backend/src/middleware/rateLimiter.ts

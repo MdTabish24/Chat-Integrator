@@ -120,6 +120,9 @@ const Dashboard: React.FC = () => {
 
       const newPlatformsData = new Map<Platform, PlatformData>();
       accounts.forEach((account: ConnectedAccount) => {
+        // Skip Gmail - it's shown in header modal, not sidebar
+        if (account.platform === 'gmail') return;
+        
         if (!newPlatformsData.has(account.platform)) {
           const config = PLATFORM_CONFIGS[account.platform];
           if (config) {
@@ -335,7 +338,14 @@ const Dashboard: React.FC = () => {
     );
   }
 
-  // No connected accounts
+  // Get Gmail account ID for header
+  const gmailAccount = connectedAccounts.find(acc => acc.platform === 'gmail' && acc.isActive !== false);
+  const gmailAccountId = gmailAccount?.id || null;
+
+  // Get non-Gmail accounts for sidebar
+  const nonGmailAccounts = connectedAccounts.filter(acc => acc.platform !== 'gmail');
+
+  // No connected accounts at all
   if (connectedAccounts.length === 0) {
     return (
       <div className="min-h-screen bg-gray-100 flex flex-col">
@@ -343,6 +353,7 @@ const Dashboard: React.FC = () => {
           user={user}
           totalUnread={0}
           gmailUnread={0}
+          gmailAccountId={null}
           isConnected={isConnected}
           isAuthenticated={isAuthenticated}
           onLogout={handleLogout}
@@ -371,6 +382,7 @@ const Dashboard: React.FC = () => {
         user={user}
         totalUnread={totalUnread}
         gmailUnread={gmailUnread}
+        gmailAccountId={gmailAccountId}
         isConnected={isConnected}
         isAuthenticated={isAuthenticated}
         onLogout={handleLogout}
@@ -378,10 +390,10 @@ const Dashboard: React.FC = () => {
 
       {/* Main Content */}
       <div className="flex-1 flex overflow-hidden">
-        {/* Sidebar */}
+        {/* Sidebar - exclude Gmail (Gmail is accessed via header icon) */}
         <Sidebar
           platformsData={platformsData}
-          connectedAccounts={connectedAccounts}
+          connectedAccounts={nonGmailAccounts}
           selectedConversationId={selectedConversationId}
           onPlatformExpand={handlePlatformExpand}
           onConversationClick={handleConversationClick}
