@@ -213,38 +213,36 @@ async function syncPlatform(platform, cookies, token) {
       return;
     }
 
-    // LinkedIn: Just submit cookies to backend (LinkedIn blocks direct API calls from desktop)
+    // LinkedIn: Use browser automation (same as Facebook)
     if (platform === 'linkedin') {
-      await axios.post(
-        `${apiUrl}/api/platforms/linkedin/cookies`,
-        { 
-          li_at: cookies.li_at,
-          JSESSIONID: cookies.JSESSIONID,
-        },
-        {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
+      // First, submit cookies to backend to register account
+      try {
+        await axios.post(
+          `${apiUrl}/api/platforms/linkedin/cookies`,
+          { 
+            li_at: cookies.li_at,
+            JSESSIONID: cookies.JSESSIONID,
           },
-          timeout: 60000,
-          maxRedirects: 0  // Don't follow redirects
-        }
-      );
-      console.log(`[linkedin] Cookies submitted to backend - use web app to sync messages`);
-      store.set(`${platform}_lastSync`, new Date().toISOString());
-      if (mainWindow) {
-        mainWindow.webContents.send('sync-status', { 
-          platform, 
-          success: true, 
-          message: 'Connected! Use web app to sync messages',
-          lastSync: new Date().toISOString()
-        });
+          {
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json'
+            },
+            timeout: 30000
+          }
+        );
+        console.log(`[linkedin] Cookies submitted to backend`);
+      } catch (cookieErr) {
+        console.log(`[linkedin] Cookie submission note:`, cookieErr.message);
       }
-      return;
     }
 
     let data;
     switch (platform) {
+      case 'linkedin':
+        // Use browser automation to fetch messages (like Facebook)
+        data = await fetchLinkedInMessages(cookies);
+        break;
       case 'twitter':
         data = await fetchTwitterDMs(cookies);
         break;
@@ -424,12 +422,433 @@ function parseTwitterResponse(data) {
 }
 
 // ============ LINKEDIN ============
-async function fetchLinkedInMessages(cookies) {
-  // LinkedIn blocks direct API calls from desktop apps (IP blocking)
-  // Just return empty - cookies will be submitted to backend which handles sync
-  console.log('[linkedin] Desktop fetch skipped - LinkedIn blocks direct API calls');
-  console.log('[linkedin] Cookies will be submitted to backend for sync');
-  return [];
+// LinkedIn login window reference
+let linkedinFetchWindow = null;
+
+// Track last LinkedIn fetch time
+let lastLinkedInFetch = 0;
+const LINKEDIN_MIN_INTERVAL = 60000; // 60 seconds minimum between fetches
+
+async function fetchLinkedInMessages(cookies, retryCount = 0) {
+  // Rate limit check
+  const now = Date.now();
+  const timeSinceLastFetch = now - lastLinkedInFetch;
+  if (timeSinceLastFetch < LINKEDIN_MIN_INTERVAL && retryCount === 0) {
+    console.log(`[linkedin] Rate limit: waiting ${Math.ceil((LINKEDIN_MIN_INTERVAL - timeSinceLastFetch) / 1000)}s`);
+    await new Promise(resolve => setTimeout(resolve, LINKEDIN_MIN_INTERVAL - timeSinceLastFetch));
+  }
+
+  console.log('[linkedin] Fetching messages with browser automation...');
+  console.log('[linkedin] li_at:', cookies.li_at ? 'present' : 'missing');
+  console.log('[linkedin] JSESSIONID:', cookies.JSESSIONID ? 'present' : 'missing');
+
+  if (!cookies.li_at || !cookies.JSESSIONID) {
+    throw new Error('LinkedIn session not found. Please provide li_at and JSESSIONID cookies.');
+  }
+
+  return new Promise(async (resolve, reject) => {
+    try {
+      // Create a session for LinkedIn
+      const linkedinSession = session.fromPartition('linkedin-sync');
+      
+      // Set cookies in the session
+      const cookiesToSet = [
+        { url: 'https://www.linkedin.com', name: 'li_at', value: cookies.li_at, domain: '.linkedin.com', secure: true },
+        { url: 'https://www.linkedin.com', name: 'JSESSIONID', value: cookies.JSESSIONID.replace(/"/g, ''), domain: '.linkedin.com', secure: true },
+      ];
+      
+      for (const cookie of cookiesToSet) {
+        try {
+          await linkedinSession.cookies.set(cookie);
+        } catch (e) {
+          console.log('[linkedin] Cookie set warning:', e.message);
+        }
+      }
+      
+      // Close existing fetch window
+      if (linkedinFetchWindow && !linkedinFetchWindow.isDestroyed()) {
+        linkedinFetchWindow.close();
+        linkedinFetchWindow = null;
+      }
+      
+      // Create browser window to fetch messages
+      const DEBUG_SHOW_WINDOW = false;  // Set true to debug
+      
+      linkedinFetchWindow = new BrowserWindow({
+        width: 1200,
+        height: 800,
+        show: DEBUG_SHOW_WINDOW,
+        webPreferences: {
+          nodeIntegration: false,
+          contextIsolation: true,
+          session: linkedinSession
+        }
+      });
+      
+      console.log('[linkedin] Loading LinkedIn Messaging...');
+      linkedinFetchWindow.loadURL('https://www.linkedin.com/messaging/');
+      
+      let isResolved = false;
+      let extractAttempts = 0;
+      const maxAttempts = 4;
+      
+      const extractConversations = async () => {
+        if (isResolved) return;
+        extractAttempts++;
+        
+        try {
+          if (!linkedinFetchWindow || linkedinFetchWindow.isDestroyed()) {
+            console.log('[linkedin] Window destroyed, returning empty');
+            if (!isResolved) {
+              isResolved = true;
+              resolve([]);
+            }
+            return;
+          }
+          
+          const currentURL = linkedinFetchWindow.webContents.getURL();
+          console.log('[linkedin] Current URL:', currentURL);
+          
+          // Check if redirected to login
+          if (currentURL.includes('/login') || currentURL.includes('/checkpoint') || currentURL.includes('/authwall')) {
+            isResolved = true;
+            if (linkedinFetchWindow && !linkedinFetchWindow.isDestroyed()) {
+              linkedinFetchWindow.close();
+            }
+            reject(new Error('LinkedIn session expired. Please update your cookies.'));
+            return;
+          }
+          
+          // Extract conversations using DOM scraping
+          const result = await linkedinFetchWindow.webContents.executeJavaScript(`
+            (function() {
+              try {
+                const conversations = [];
+                const seenIds = new Set();
+                
+                console.log('[LinkedIn Debug] Starting extraction...');
+                
+                // Method 1: Find conversation list items
+                const listItems = document.querySelectorAll('.msg-conversation-listitem, [data-control-name*="conversation"], li.msg-conversation-card');
+                console.log('[LinkedIn Debug] Found', listItems.length, 'list items via class');
+                
+                // Method 2: Find links to conversation threads
+                const threadLinks = document.querySelectorAll('a[href*="/messaging/thread/"]');
+                console.log('[LinkedIn Debug] Found', threadLinks.length, 'thread links');
+                
+                // Process thread links
+                threadLinks.forEach((link, index) => {
+                  if (conversations.length >= 15) return;
+                  
+                  try {
+                    const href = link.getAttribute('href') || '';
+                    const threadMatch = href.match(/\\/messaging\\/thread\\/([^/]+)/);
+                    if (!threadMatch) return;
+                    
+                    const threadId = threadMatch[1];
+                    if (seenIds.has(threadId)) return;
+                    seenIds.add(threadId);
+                    
+                    // Find container element
+                    const container = link.closest('li') || link.closest('[class*="conversation"]') || link.parentElement?.parentElement;
+                    
+                    // Get participant name
+                    let participantName = 'LinkedIn User';
+                    const nameEl = container?.querySelector('.msg-conversation-card__participant-names, .msg-conversation-listitem__participant-names, [class*="participant-name"]') ||
+                                  container?.querySelector('h3, h4, span.truncate') ||
+                                  link.querySelector('span');
+                    if (nameEl && nameEl.textContent?.trim()) {
+                      participantName = nameEl.textContent.trim().split('\\n')[0].trim();
+                    }
+                    
+                    // Get avatar URL
+                    let avatarUrl = '';
+                    const avatarImg = container?.querySelector('img.presence-entity__image, img[src*="profile"], img.msg-facepile-grid__img');
+                    if (avatarImg) {
+                      avatarUrl = avatarImg.src || '';
+                    }
+                    
+                    // Get last message preview
+                    let lastMessage = '';
+                    const previewEl = container?.querySelector('.msg-conversation-card__message-snippet, .msg-conversation-listitem__message-snippet, [class*="message-snippet"]');
+                    if (previewEl && previewEl.textContent?.trim()) {
+                      lastMessage = previewEl.textContent.trim();
+                    }
+                    
+                    // Get timestamp
+                    let timestamp = new Date().toISOString();
+                    const timeEl = container?.querySelector('.msg-conversation-card__time-stamp, .msg-conversation-listitem__time-stamp, time');
+                    if (timeEl) {
+                      const timeText = timeEl.getAttribute('datetime') || timeEl.textContent;
+                      if (timeText) {
+                        try {
+                          const parsed = new Date(timeText);
+                          if (!isNaN(parsed.getTime())) {
+                            timestamp = parsed.toISOString();
+                          }
+                        } catch (e) {}
+                      }
+                    }
+                    
+                    conversations.push({
+                      id: threadId,
+                      participants: [{
+                        id: threadId,
+                        name: participantName,
+                        avatar: avatarUrl
+                      }],
+                      messages: [], // We'll fetch messages separately or use preview
+                      avatarUrl: avatarUrl,
+                      lastPreview: lastMessage,
+                      lastActivityAt: timestamp
+                    });
+                    
+                    console.log('[LinkedIn Debug] Found conversation:', threadId, participantName);
+                  } catch (itemErr) {
+                    console.error('[LinkedIn Debug] Item error:', itemErr.message);
+                  }
+                });
+                
+                // Method 3: If no conversations found, try alternative selectors
+                if (conversations.length === 0) {
+                  console.log('[LinkedIn Debug] Trying alternative selectors...');
+                  
+                  // Find any list items in the messaging section
+                  const allListItems = document.querySelectorAll('ul li, [role="listitem"]');
+                  allListItems.forEach((item, index) => {
+                    if (conversations.length >= 15) return;
+                    
+                    const link = item.querySelector('a[href*="messaging"]');
+                    if (!link) return;
+                    
+                    const href = link.getAttribute('href') || '';
+                    let threadId = '';
+                    
+                    // Try to extract any ID from URL
+                    const idMatch = href.match(/thread\\/([^/]+)/) || href.match(/\\/([0-9]+)$/);
+                    if (idMatch) {
+                      threadId = idMatch[1];
+                    } else {
+                      threadId = 'conv_' + index;
+                    }
+                    
+                    if (seenIds.has(threadId)) return;
+                    seenIds.add(threadId);
+                    
+                    // Get name from any text
+                    let name = 'LinkedIn User';
+                    const texts = item.querySelectorAll('span, h3, h4');
+                    for (const t of texts) {
+                      const text = t.textContent?.trim();
+                      if (text && text.length > 2 && text.length < 50 && !text.includes('ago') && !text.includes('message')) {
+                        name = text;
+                        break;
+                      }
+                    }
+                    
+                    conversations.push({
+                      id: threadId,
+                      participants: [{ id: threadId, name: name }],
+                      messages: []
+                    });
+                  });
+                }
+                
+                // Debug output
+                console.log('[LinkedIn Debug] Total conversations found:', conversations.length);
+                console.log('[LinkedIn Debug] Page title:', document.title);
+                
+                return { 
+                  success: true, 
+                  conversations: conversations,
+                  debug: {
+                    title: document.title,
+                    url: window.location.href,
+                    listItemsFound: listItems.length,
+                    threadLinksFound: threadLinks.length
+                  }
+                };
+              } catch (e) {
+                console.error('[LinkedIn Debug] Error:', e);
+                return { success: false, error: e.message, conversations: [] };
+              }
+            })();
+          `);
+          
+          console.log('[linkedin] Extraction result:', JSON.stringify(result, null, 2));
+          
+          // If no conversations found and we haven't tried max times, wait and retry
+          if (result.conversations.length === 0 && extractAttempts < maxAttempts) {
+            console.log(`[linkedin] No conversations yet, retrying (${extractAttempts}/${maxAttempts})...`);
+            setTimeout(extractConversations, 3000);
+            return;
+          }
+          
+          lastLinkedInFetch = Date.now();
+          isResolved = true;
+          
+          // Now fetch messages for each conversation
+          if (result.success && result.conversations.length > 0) {
+            console.log(`[linkedin] Found ${result.conversations.length} conversations, fetching messages...`);
+            
+            // Fetch messages for top conversations
+            for (let i = 0; i < Math.min(result.conversations.length, 8); i++) {
+              const conv = result.conversations[i];
+              try {
+                const messages = await fetchLinkedInConversationMessages(linkedinFetchWindow, conv.id);
+                conv.messages = messages;
+                console.log(`[linkedin] Got ${messages.length} messages for ${conv.participants[0]?.name}`);
+                
+                // Small delay between fetches
+                await new Promise(r => setTimeout(r, 1000));
+              } catch (msgErr) {
+                console.log(`[linkedin] Failed to fetch messages for ${conv.id}:`, msgErr.message);
+              }
+            }
+          }
+          
+          // Close the window
+          if (linkedinFetchWindow && !linkedinFetchWindow.isDestroyed()) {
+            linkedinFetchWindow.close();
+          }
+          
+          if (result.success && result.conversations.length > 0) {
+            console.log(`[linkedin] Successfully extracted ${result.conversations.length} conversations`);
+            resolve(result.conversations);
+          } else {
+            console.log('[linkedin] No conversations found via browser');
+            resolve([]);
+          }
+          
+        } catch (err) {
+          console.error('[linkedin] Extraction error:', err.message);
+          if (extractAttempts < maxAttempts) {
+            console.log(`[linkedin] Error, retrying (${extractAttempts}/${maxAttempts})...`);
+            setTimeout(extractConversations, 3000);
+          } else if (!isResolved) {
+            isResolved = true;
+            if (linkedinFetchWindow && !linkedinFetchWindow.isDestroyed()) {
+              linkedinFetchWindow.close();
+            }
+            resolve([]);
+          }
+        }
+      };
+      
+      // Wait for page to load, then extract
+      linkedinFetchWindow.webContents.on('did-finish-load', () => {
+        console.log('[linkedin] Page loaded, waiting for React to render...');
+        setTimeout(extractConversations, 5000);
+      });
+      
+      // Timeout after 50 seconds
+      setTimeout(() => {
+        if (!isResolved) {
+          console.log('[linkedin] Timeout - returning empty');
+          isResolved = true;
+          if (linkedinFetchWindow && !linkedinFetchWindow.isDestroyed()) {
+            linkedinFetchWindow.close();
+          }
+          resolve([]);
+        }
+      }, 50000);
+      
+    } catch (error) {
+      console.error('[linkedin] Fetch error:', error.message);
+      reject(error);
+    }
+  });
+}
+
+// Fetch messages for a specific LinkedIn conversation
+async function fetchLinkedInConversationMessages(browserWindow, threadId) {
+  if (!browserWindow || browserWindow.isDestroyed()) {
+    return [];
+  }
+  
+  try {
+    // Navigate to the thread
+    await browserWindow.loadURL(`https://www.linkedin.com/messaging/thread/${threadId}/`);
+    
+    // Wait for page to load
+    await new Promise(resolve => setTimeout(resolve, 3000));
+    
+    // Extract messages
+    const messagesResult = await browserWindow.webContents.executeJavaScript(`
+      (function() {
+        try {
+          const messages = [];
+          
+          // Find message elements
+          const msgElements = document.querySelectorAll('.msg-s-event-listitem, .msg-s-message-list__event, [class*="message-event"]');
+          console.log('[LinkedIn Debug] Found', msgElements.length, 'message elements');
+          
+          msgElements.forEach((msgEl, index) => {
+            if (messages.length >= 20) return;
+            
+            try {
+              // Get message text
+              let text = '';
+              const textEl = msgEl.querySelector('.msg-s-event-listitem__body, .msg-s-event__content, [class*="message-body"], p');
+              if (textEl) {
+                text = textEl.textContent?.trim() || '';
+              }
+              
+              // Get sender name
+              let senderName = '';
+              const senderEl = msgEl.querySelector('.msg-s-event-listitem__actor-name, .msg-s-message-group__name, [class*="actor-name"]');
+              if (senderEl) {
+                senderName = senderEl.textContent?.trim() || '';
+              }
+              
+              // Get timestamp
+              let timestamp = new Date().toISOString();
+              const timeEl = msgEl.querySelector('time, [class*="time-stamp"]');
+              if (timeEl) {
+                const dt = timeEl.getAttribute('datetime') || timeEl.textContent;
+                if (dt) {
+                  try {
+                    const parsed = new Date(dt);
+                    if (!isNaN(parsed.getTime())) {
+                      timestamp = parsed.toISOString();
+                    }
+                  } catch (e) {}
+                }
+              }
+              
+              // Check if outgoing (sent by me)
+              const isOutgoing = msgEl.classList.contains('msg-s-event-listitem--outbound') ||
+                               msgEl.closest('[class*="outbound"]') !== null;
+              
+              if (text) {
+                messages.push({
+                  id: 'msg_' + index + '_' + Date.now(),
+                  text: text,
+                  senderId: isOutgoing ? 'me' : 'other',
+                  senderName: senderName || (isOutgoing ? 'You' : 'Other'),
+                  createdAt: timestamp,
+                  isOutgoing: isOutgoing
+                });
+              }
+            } catch (e) {
+              console.error('[LinkedIn Debug] Message parse error:', e.message);
+            }
+          });
+          
+          return messages;
+        } catch (e) {
+          console.error('[LinkedIn Debug] Messages extraction error:', e);
+          return [];
+        }
+      })();
+    `);
+    
+    return messagesResult || [];
+    
+  } catch (err) {
+    console.error('[linkedin] Failed to fetch messages for thread:', err.message);
+    return [];
+  }
 }
 
 function parseLinkedInResponse(data) {
