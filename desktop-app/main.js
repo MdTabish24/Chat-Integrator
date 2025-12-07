@@ -1145,19 +1145,17 @@ async function fetchFacebookMessages(cookies, retryCount = 0) {
                                      container?.querySelector('img[src*="fbcdn"]');
                     const avatarUrl = avatarImg?.src || '';
                     
+                    // DON'T include preview messages - they're not real messages!
+                    // Only sync conversations, let backend/fbchat fetch actual messages
                     conversations.push({
                       id: threadId,
                       participants: [{
                         id: threadId,
                         name: participantName
                       }],
-                      messages: lastMessage ? [{
-                        id: 'preview_' + threadId + '_' + Date.now(),
-                        text: lastMessage,
-                        senderId: '',
-                        createdAt: new Date().toISOString()
-                      }] : [],
-                      avatarUrl: avatarUrl
+                      messages: [], // Empty - don't save preview text as messages
+                      avatarUrl: avatarUrl,
+                      lastPreview: lastMessage // Keep for debugging only
                     });
                     
                     console.log('[FB Debug] Found conversation:', threadId, participantName);
@@ -1198,15 +1196,11 @@ async function fetchFacebookMessages(cookies, retryCount = 0) {
                       }
                     });
                     
+                    // DON'T include preview messages - they're not real messages!
                     conversations.push({
                       id: threadId,
                       participants: [{ id: threadId, name: name }],
-                      messages: preview ? [{
-                        id: 'preview_' + threadId,
-                        text: preview,
-                        senderId: '',
-                        createdAt: new Date().toISOString()
-                      }] : []
+                      messages: [] // Empty - don't save preview text as messages
                     });
                   });
                 }

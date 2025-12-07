@@ -741,21 +741,38 @@ class FacebookDesktopSyncView(APIView):
                 participant_name = participants[0].get('name', 'Facebook User') if participants else 'Facebook User'
                 participant_id = participants[0].get('id', '') if participants else ''
                 
+                # Use avatar from Desktop App if available, otherwise generate one
+                avatar_url = conv_data.get('avatarUrl', '')
+                if not avatar_url or not avatar_url.startswith('http'):
+                    avatar_url = f'https://ui-avatars.com/api/?name={participant_name}&background=1877F2&color=fff'
+                
                 conversation, _ = Conversation.objects.update_or_create(
                     account=account,
                     platform_conversation_id=conv_id,
                     defaults={
                         'participant_name': participant_name,
                         'participant_id': participant_id,
-                        'participant_avatar_url': f'https://ui-avatars.com/api/?name={participant_name}&background=1877F2&color=fff',
+                        'participant_avatar_url': avatar_url,
                         'last_message_at': timezone.now(),
                     }
                 )
                 saved_conversations += 1
                 
+                # Don't save preview messages from Desktop App - they're not real messages!
+                # Real messages should come from fbchat backend adapter
+                # Desktop App now sends empty messages array, so this loop won't run
                 for msg_data in conv_data.get('messages', []):
                     msg_id = msg_data.get('id')
                     if not msg_id:
+                        continue
+                    
+                    # Skip preview messages (they have IDs starting with 'preview_')
+                    if str(msg_id).startswith('preview_'):
+                        continue
+                    
+                    # Skip E2EE notice messages
+                    msg_text = msg_data.get('text', '')
+                    if 'end-to-end encryption' in msg_text.lower() or msg_text == '[End-to-end encrypted chat]':
                         continue
                     
                     from django.utils.dateparse import parse_datetime
@@ -766,7 +783,7 @@ class FacebookDesktopSyncView(APIView):
                         conversation=conversation,
                         platform_message_id=str(msg_id),
                         defaults={
-                            'content': encrypt(msg_data.get('text', '')),
+                            'content': encrypt(msg_text),
                             'sender_id': msg_data.get('senderId', ''),
                             'sender_name': participant_name if not is_outgoing else 'You',
                             'sent_at': sent_at,
