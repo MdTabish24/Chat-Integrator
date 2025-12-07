@@ -37,10 +37,47 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         try {
           const response = await apiClient.get('/api/auth/me');
           setUser(response.data);
-        } catch (error) {
-          // Token is invalid, clear it
-          localStorage.removeItem('access_token');
-          localStorage.removeItem('refresh_token');
+        } catch (error: any) {
+          console.log('[Auth] Init auth error:', error?.response?.status, error?.message);
+          
+          // Only clear tokens if it's definitely an auth error (401)
+          // Don't clear for network errors, timeouts, or server errors
+          if (error?.response?.status === 401) {
+            // Try to refresh token before giving up
+            const refreshToken = localStorage.getItem('refresh_token');
+            if (refreshToken) {
+              try {
+                const refreshResponse = await apiClient.post('/api/auth/refresh', { refreshToken });
+                const { accessToken } = refreshResponse.data;
+                localStorage.setItem('access_token', accessToken);
+                
+                // Retry getting user with new token
+                const retryResponse = await apiClient.get('/api/auth/me');
+                setUser(retryResponse.data);
+              } catch (refreshError) {
+                console.log('[Auth] Refresh failed, clearing tokens');
+                localStorage.removeItem('access_token');
+                localStorage.removeItem('refresh_token');
+              }
+            } else {
+              localStorage.removeItem('access_token');
+              localStorage.removeItem('refresh_token');
+            }
+          } else {
+            // For network errors or server errors, keep the token and set user as null
+            // The user can try again or the app will retry later
+            console.log('[Auth] Non-401 error during init, keeping token');
+            // Try to create a basic user object from the token
+            try {
+              const tokenParts = token.split('.');
+              if (tokenParts.length === 3) {
+                const payload = JSON.parse(atob(tokenParts[1]));
+                setUser({ id: payload.user_id || payload.sub, email: payload.email || '' });
+              }
+            } catch (e) {
+              // Token parsing failed, but don't clear it
+            }
+          }
         }
       }
       setIsLoading(false);
