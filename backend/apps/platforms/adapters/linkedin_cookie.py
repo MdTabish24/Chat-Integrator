@@ -62,7 +62,7 @@ class LinkedInCookieAdapter(BasePlatformAdapter):
         """Get cache key for linkedin-api client."""
         return f'linkedin:client:{account_id}'
     
-    def _extract_message_content(self, msg: Dict, msg_event: Dict) -> str:
+    def _extract_message_content(self, msg: Dict, msg_event: Dict, included_map: Dict = None) -> str:
         """
         Extract message content from LinkedIn API response.
         Handles multiple response formats that LinkedIn uses.
@@ -70,14 +70,33 @@ class LinkedInCookieAdapter(BasePlatformAdapter):
         Args:
             msg: The full message object from API
             msg_event: The MessageEvent content (may be empty dict)
+            included_map: Optional lookup map for normalized response references
             
         Returns:
             Message text content or fallback string
         """
         content = ''
         
-        # Path 1: eventContent.MessageEvent.attributedBody.text (most common)
-        if msg_event:
+        # Path 0: Direct text/body fields at root level (most common in newer API)
+        if not content:
+            # Check root level first - LinkedIn often puts it here directly
+            root_body = msg.get('body', '')
+            if isinstance(root_body, str) and root_body:
+                content = root_body
+            
+            root_text = msg.get('text', '')
+            if not content and isinstance(root_text, str) and root_text:
+                content = root_text
+                
+            # Check attributedBody at root level
+            root_attr = msg.get('attributedBody', {})
+            if not content and isinstance(root_attr, dict):
+                attr_text = root_attr.get('text', '')
+                if attr_text:
+                    content = attr_text
+        
+        # Path 1: eventContent.MessageEvent.attributedBody.text (classic format)
+        if not content and msg_event:
             attr_body = msg_event.get('attributedBody', {})
             if attr_body:
                 text = attr_body.get('text', '')
@@ -118,15 +137,37 @@ class LinkedInCookieAdapter(BasePlatformAdapter):
                             content = body
                             break
         
-        # Path 5: Root level body field
-        if not content:
-            body = msg.get('body', {})
-            if isinstance(body, dict):
-                content = body.get('text', '')
-            elif isinstance(body, str):
-                content = body
+        # Path 5: Check included_map for referenced message content
+        if not content and included_map:
+            # Look for message event reference in the message
+            event_urn = msg.get('*eventContent', '') or msg.get('eventContent', '')
+            if isinstance(event_urn, str) and event_urn.startswith('urn:'):
+                referenced = included_map.get(event_urn, {})
+                if referenced:
+                    ref_body = referenced.get('body', '') or referenced.get('attributedBody', {}).get('text', '')
+                    if ref_body:
+                        content = ref_body
+            
+            # Also check $id reference
+            msg_id = msg.get('$id', '') or msg.get('entityUrn', '')
+            if not content and msg_id:
+                for urn, item in included_map.items():
+                    if 'MessageEvent' in urn or item.get('$type', '').endswith('MessageEvent'):
+                        if item.get('$id', '').endswith(msg_id.split(':')[-1]) or urn.endswith(msg_id.split(':')[-1]):
+                            item_body = item.get('body', '') or item.get('attributedBody', {}).get('text', '')
+                            if item_body:
+                                content = item_body
+                                break
         
-        # Path 6: subContent for system messages (connections, shares, etc.)
+        # Path 6: Look in $recipeTypes for message content (new LinkedIn format)
+        if not content:
+            recipe_types = msg.get('$recipeTypes', [])
+            for recipe in recipe_types:
+                if isinstance(recipe, str) and 'message' in recipe.lower():
+                    # This message has content somewhere
+                    pass
+        
+        # Path 7: subContent for system messages (connections, shares, etc.)
         if not content:
             sub_content = msg.get('subContent', {})
             if sub_content:
@@ -134,53 +175,70 @@ class LinkedInCookieAdapter(BasePlatformAdapter):
                 if text:
                     content = f'[{text}]'
         
-        # Path 7: Check for reaction or other event types
+        # Path 8: Check for reaction or other event types
         if not content:
             event_content = msg.get('eventContent', {})
-            # Reaction event
-            if 'com.linkedin.voyager.messaging.event.ReactionEvent' in event_content:
-                reaction = event_content['com.linkedin.voyager.messaging.event.ReactionEvent']
-                emoji = reaction.get('emoji', '👍')
+            msg_type = msg.get('$type', '')
+            
+            # Check $type for event type
+            if 'Reaction' in msg_type:
+                emoji = msg.get('emoji', '👍')
                 content = f'[Reacted with {emoji}]'
-            # Participant change
-            elif 'com.linkedin.voyager.messaging.event.ParticipantChangeEvent' in event_content:
+            elif 'ParticipantChange' in msg_type:
                 content = '[Participant changed]'
-            # Read receipt
-            elif 'com.linkedin.voyager.messaging.event.ReadReceiptEvent' in event_content:
+            elif 'ReadReceipt' in msg_type:
                 content = '[Message read]'
-            # Conversation name change
-            elif 'com.linkedin.voyager.messaging.event.ConversationNameUpdateEvent' in event_content:
+            elif 'ConversationNameUpdate' in msg_type:
                 content = '[Conversation name updated]'
+            
+            # Also check eventContent for these types
+            if not content:
+                if 'com.linkedin.voyager.messaging.event.ReactionEvent' in event_content:
+                    reaction = event_content['com.linkedin.voyager.messaging.event.ReactionEvent']
+                    emoji = reaction.get('emoji', '👍')
+                    content = f'[Reacted with {emoji}]'
+                elif 'com.linkedin.voyager.messaging.event.ParticipantChangeEvent' in event_content:
+                    content = '[Participant changed]'
+                elif 'com.linkedin.voyager.messaging.event.ReadReceiptEvent' in event_content:
+                    content = '[Message read]'
+                elif 'com.linkedin.voyager.messaging.event.ConversationNameUpdateEvent' in event_content:
+                    content = '[Conversation name updated]'
         
-        # Path 8: Media attachments - check if there's media but no text
+        # Path 9: Media attachments - check if there's media but no text
         if not content:
-            if msg_event:
-                attachments = msg_event.get('attachments', [])
-                media_attachments = msg_event.get('mediaAttachments', [])
-                if attachments or media_attachments:
-                    # Check attachment types
-                    for att in (attachments + media_attachments):
-                        media_type = att.get('mediaType', '') or att.get('type', '')
-                        name = att.get('name', '')
-                        if 'image' in media_type.lower():
-                            content = f'[Image: {name}]' if name else '[Image]'
-                            break
-                        elif 'video' in media_type.lower():
-                            content = f'[Video: {name}]' if name else '[Video]'
-                            break
-                        elif 'audio' in media_type.lower():
-                            content = f'[Audio: {name}]' if name else '[Audio]'
-                            break
-                        elif name:
-                            content = f'[Attachment: {name}]'
-                            break
-                    if not content:
-                        content = '[Media attachment]'
+            attachments = msg.get('attachments', []) or (msg_event.get('attachments', []) if msg_event else [])
+            media_attachments = msg.get('mediaAttachments', []) or (msg_event.get('mediaAttachments', []) if msg_event else [])
+            if attachments or media_attachments:
+                # Check attachment types
+                for att in (attachments + media_attachments):
+                    media_type = att.get('mediaType', '') or att.get('type', '')
+                    name = att.get('name', '')
+                    if 'image' in str(media_type).lower():
+                        content = f'[Image: {name}]' if name else '[Image]'
+                        break
+                    elif 'video' in str(media_type).lower():
+                        content = f'[Video: {name}]' if name else '[Video]'
+                        break
+                    elif 'audio' in str(media_type).lower():
+                        content = f'[Audio: {name}]' if name else '[Audio]'
+                        break
+                    elif name:
+                        content = f'[Attachment: {name}]'
+                        break
+                if not content:
+                    content = '[Media attachment]'
         
-        # Path 9: For voice messages
+        # Path 10: For voice messages
         if not content:
-            if msg_event and msg_event.get('voiceMessage'):
+            if msg.get('voiceMessage') or (msg_event and msg_event.get('voiceMessage')):
                 content = '[Voice message]'
+        
+        # Path 11: Check messageBodyRenderFormat for text body
+        if not content:
+            render_format = msg.get('messageBodyRenderFormat', '')
+            body_text = msg.get('bodyText', '')
+            if body_text:
+                content = body_text
         
         # Final fallback - try to find any text in the message
         if not content:
@@ -634,6 +692,14 @@ class LinkedInCookieAdapter(BasePlatformAdapter):
                     
                     messages_data = msg_response.json()
                     
+                    # Build included map for this conversation
+                    conv_included = messages_data.get('included', [])
+                    conv_included_map = {}
+                    for item in conv_included:
+                        urn = item.get('entityUrn', '') or item.get('$id', '')
+                        if urn:
+                            conv_included_map[urn] = item
+                    
                     for msg in messages_data.get('elements', []):
                         # Get message timestamp
                         created_at = msg.get('createdAt', 0)
@@ -661,12 +727,13 @@ class LinkedInCookieAdapter(BasePlatformAdapter):
                         # Check if outgoing
                         is_outgoing = account.platform_user_id in sender_urn if sender_urn else False
                         
-                        # Extract message content using the comprehensive extraction method
-                        content = self._extract_message_content(msg, msg_event)
+                        # Extract message content using the comprehensive extraction method with included_map
+                        content = self._extract_message_content(msg, msg_event, conv_included_map)
                         
                         # Debug logging for troubleshooting
                         if content == '[No content]':
                             print(f'[linkedin] Warning: No content found in message. Keys: {list(msg.keys())}')
+                            print(f'[linkedin] Full msg: {json.dumps(msg, default=str)[:600]}')
                             if event_content:
                                 print(f'[linkedin] eventContent keys: {list(event_content.keys())}')
                         
@@ -998,13 +1065,26 @@ class LinkedInCookieAdapter(BasePlatformAdapter):
                 created_at = msg.get('createdAt', 0)
                 msg_datetime = datetime.fromtimestamp(created_at / 1000) if created_at else datetime.now()
                 
-                # Get sender info
+                # Get sender info - try multiple structures
                 event_content = msg.get('eventContent', {})
                 msg_event = event_content.get('com.linkedin.voyager.messaging.event.MessageEvent', {})
+                
+                # Also check for direct message event type
+                msg_type = msg.get('$type', '')
+                if not msg_event and 'MessageEvent' in msg_type:
+                    msg_event = msg  # Message itself is the event
                 
                 sender = msg.get('from', {})
                 sender_member = sender.get('com.linkedin.voyager.messaging.MessagingMember', {})
                 sender_profile = sender_member.get('miniProfile', {})
+                
+                # Also check for direct sender in message
+                if not sender_profile:
+                    sender_ref = msg.get('*from', '') or msg.get('from', '')
+                    if isinstance(sender_ref, str) and sender_ref in included_map:
+                        sender_data = included_map[sender_ref]
+                        sender_profile = sender_data.get('miniProfile', {}) or sender_data
+                
                 sender_urn = sender_profile.get('entityUrn', '')
                 sender_id = sender_urn.split(':')[-1] if sender_urn else ''
                 
@@ -1014,13 +1094,14 @@ class LinkedInCookieAdapter(BasePlatformAdapter):
                 
                 is_outgoing = account.platform_user_id in sender_urn if sender_urn else False
                 
-                # Extract message content using the comprehensive extraction method
-                content = self._extract_message_content(msg, msg_event)
+                # Extract message content using the comprehensive extraction method with included_map
+                content = self._extract_message_content(msg, msg_event, included_map)
                 
                 # Debug logging for messages with no content
                 if content == '[No content]':
                     print(f'[linkedin] Warning: No content in message {msg.get("entityUrn", "unknown")}')
                     print(f'[linkedin] Message keys: {list(msg.keys())}')
+                    print(f'[linkedin] Full message: {json.dumps(msg, default=str)[:800]}')
                     if event_content:
                         print(f'[linkedin] eventContent: {json.dumps(event_content, default=str)[:500]}')
                 

@@ -670,7 +670,7 @@ class LinkedInConversationMessagesView(APIView):
                 # Also save to database for caching (only if we got actual content)
                 from apps.conversations.models import Conversation
                 from apps.messaging.models import Message
-                from apps.core.utils.crypto import encrypt
+                from apps.core.utils.crypto import encrypt, decrypt
                 from django.utils.dateparse import parse_datetime
                 
                 try:
@@ -678,6 +678,17 @@ class LinkedInConversationMessagesView(APIView):
                         account=account,
                         platform_conversation_id=conversation_id
                     )
+                    
+                    # First, delete any stale "[No content]" messages for this conversation
+                    # This ensures fresh messages replace the placeholders
+                    stale_messages = Message.objects.filter(conversation=conversation)
+                    for stale_msg in stale_messages:
+                        try:
+                            decrypted = decrypt(stale_msg.content)
+                            if decrypted == '[No content]':
+                                stale_msg.delete()
+                        except:
+                            pass  # Skip if decryption fails
                     
                     for msg_data in messages:
                         content = msg_data.get('content', '')
