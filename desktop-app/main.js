@@ -471,7 +471,7 @@ async function fetchLinkedInMessages(cookies, retryCount = 0) {
       
       // Create browser window to fetch messages
       // Set to TRUE to debug what LinkedIn shows, FALSE for production
-      const DEBUG_SHOW_WINDOW = false;  // DISABLED - hidden window for production
+      const DEBUG_SHOW_WINDOW = true;  // ENABLED - you can see what's happening!
       
       linkedinFetchWindow = new BrowserWindow({
         width: 1200,
@@ -787,6 +787,14 @@ async function fetchLinkedInMessages(cookies, retryCount = 0) {
                       lastMessage = previewEl.textContent?.trim() || '';
                     }
                     
+                    // IMPORTANT: Check if this is a draft/unsent message
+                    // LinkedIn shows "You: <text>" for drafts but thread is empty
+                    const isDraft = lastMessage.toLowerCase().startsWith('you: ') && lastMessage.length < 100;
+                    if (isDraft) {
+                      console.log('[LinkedIn Debug] ⚠️ Possible DRAFT message detected:', lastMessage);
+                      console.log('[LinkedIn Debug] This may be unsent - will verify when opening thread');
+                    }
+                    
                     conversations.push({
                       id: threadId,
                       participants: [{
@@ -842,23 +850,39 @@ async function fetchLinkedInMessages(cookies, retryCount = 0) {
           lastLinkedInFetch = Date.now();
           isResolved = true;
           
-          // Now fetch messages for each conversation by CLICKING on them (not navigating to invalid URLs)
+          // SIMPLIFIED: Convert lastPreview to message format
+          // Full message extraction is too complex with LinkedIn's Ember.js routing
           if (result.success && result.conversations.length > 0) {
-            console.log(`[linkedin] Found ${result.conversations.length} conversations, fetching messages by clicking...`);
+            console.log(`[linkedin] Converting previews to messages for ${result.conversations.length} conversations...`);
             
-            // Fetch messages for top conversations by clicking on them
-            for (let i = 0; i < Math.min(result.conversations.length, 5); i++) {
-              const conv = result.conversations[i];
-              try {
-                // Click on conversation and extract messages
-                const messages = await fetchLinkedInMessagesByClicking(linkedinFetchWindow, i, conv.participants[0]?.name);
-                conv.messages = messages;
-                console.log(`[linkedin] Got ${messages.length} messages for ${conv.participants[0]?.name}`);
+            for (const conv of result.conversations) {
+              // If lastPreview exists, create a message from it
+              if (conv.lastPreview && conv.lastPreview.trim()) {
+                const preview = conv.lastPreview.trim();
                 
-                // Small delay between fetches
-                await new Promise(r => setTimeout(r, 1500));
-              } catch (msgErr) {
-                console.log(`[linkedin] Failed to fetch messages for ${conv.participants[0]?.name}:`, msgErr.message);
+                // Skip promotional/welcome messages
+                if (preview.includes('Welcome to LinkedIn') || 
+                    preview.includes('via LinkedIn') ||
+                    preview.length < 3) {
+                  console.log(`[linkedin] Skipping promotional message for ${conv.participants[0]?.name}`);
+                  continue;
+                }
+                
+                // Detect if it's an outgoing message (starts with "You:")
+                const isOutgoing = preview.startsWith('You:');
+                const messageText = isOutgoing ? preview.replace(/^You:\s*/, '') : preview;
+                
+                conv.messages = [{
+                  id: `msg_preview_${Date.now()}_${Math.random()}`,
+                  text: messageText,
+                  senderId: isOutgoing ? 'me' : 'other',
+                  senderName: isOutgoing ? 'You' : (conv.participants[0]?.name || 'Other'),
+                  createdAt: conv.lastActivityAt,
+                  isOutgoing: isOutgoing,
+                  isPreview: true  // Mark as preview-based
+                }];
+                
+                console.log(`[linkedin] ✅ Created message from preview for ${conv.participants[0]?.name}: "${messageText.substring(0, 50)}..."`);
               }
             }
           }
@@ -924,11 +948,155 @@ async function fetchLinkedInMessagesByClicking(browserWindow, conversationIndex,
   }
   
   try {
-    console.log(`[linkedin] Clicking on conversation ${conversationIndex} (${participantName})...`);
+    console.log(`[linkedin] Opening conversation ${conversationIndex} (${participantName})...`);
     
-    // Click on the conversation by index
+    // STRATEGY 1: Try to extract thread URL and navigate directly
+    console.log('[linkedin] STEP 1: Attempting to extract thread URL...');
+    
+    let threadUrl = null;
+    try {
+      threadUrl = await browserWindow.webContents.executeJavaScript(`
+      (function() {
+        try {
+          console.log('[LinkedIn] === THREAD URL EXTRACTION START ===');
+          const listContainers = document.querySelectorAll(
+            '.msg-conversations-container__conversations-list, ' +
+            '[class*="conversations-list"], ' +
+            '.scaffold-layout__list, ' +
+            'ul[class*="msg-"]'
+          );
+          
+          let allListItems = [];
+          listContainers.forEach(container => {
+            const items = container.querySelectorAll('li');
+            items.forEach(item => allListItems.push(item));
+          });
+          
+          const directItems = document.querySelectorAll(
+            'li.msg-conversation-listitem, ' +
+            'li.msg-conversation-card, ' +
+            'li[class*="msg-conversation"]'
+          );
+          directItems.forEach(item => {
+            if (!allListItems.includes(item)) allListItems.push(item);
+          });
+          
+          const targetItem = allListItems[${conversationIndex}];
+          if (!targetItem) {
+            console.log('[LinkedIn] ❌ Target item not found at index', ${conversationIndex});
+            return null;
+          }
+          
+          console.log('[LinkedIn] Found target item at index', ${conversationIndex});
+          
+          console.log('[LinkedIn] Searching for thread link in item...');
+          
+          // METHOD 1: Try direct thread link
+          let link = targetItem.querySelector('a[href*="/messaging/thread/"]');
+          if (link) {
+            const url = link.href || link.getAttribute('href');
+            console.log('[LinkedIn] ✅ Found thread URL (method 1):', url);
+            return url;
+          }
+          
+          // METHOD 2: Try any link with "messaging" in it
+          link = targetItem.querySelector('a[href*="/messaging/"]');
+          if (link) {
+            const url = link.href || link.getAttribute('href');
+            console.log('[LinkedIn] Found messaging URL (method 2):', url);
+            // Only use if it contains thread info
+            if (url.includes('/t/') || url.includes('thread')) {
+              console.log('[LinkedIn] ✅ Valid thread URL found');
+              return url;
+            }
+          }
+          
+          // METHOD 3: Check data attributes (all possible attributes)
+          const dataUrn = targetItem.getAttribute('data-control-id') || 
+                         targetItem.getAttribute('data-thread-urn') ||
+                         targetItem.getAttribute('data-control-name') ||
+                         targetItem.getAttribute('data-conversation-id') ||
+                         targetItem.querySelector('[data-control-id]')?.getAttribute('data-control-id') ||
+                         targetItem.querySelector('[data-control-name]')?.getAttribute('data-control-name');
+          
+          if (dataUrn) {
+            console.log('[LinkedIn] Found data attribute:', dataUrn);
+            // Try to extract thread ID and construct URL
+            const match = dataUrn.match(/thread[_-](\d+)/i) || 
+                         dataUrn.match(/conversation\.([A-Za-z0-9_-]+)/i);
+            if (match) {
+              const threadId = match[1];
+              const constructedUrl = 'https://www.linkedin.com/messaging/thread/' + threadId + '/';
+              console.log('[LinkedIn] ✅ Constructed thread URL from data:', constructedUrl);
+              return constructedUrl;
+            }
+          }
+          
+          // METHOD 4: Try to extract from onclick or other event handlers
+          const onClickAttr = targetItem.getAttribute('onclick') || 
+                             targetItem.querySelector('[onclick]')?.getAttribute('onclick');
+          if (onClickAttr && onClickAttr.includes('thread')) {
+            console.log('[LinkedIn] Found onclick with thread:', onClickAttr.substring(0, 100));
+            const threadMatch = onClickAttr.match(/thread\/([A-Za-z0-9_=-]+)/i);
+            if (threadMatch) {
+              const constructedUrl = 'https://www.linkedin.com/messaging/thread/' + threadMatch[1] + '/';
+              console.log('[LinkedIn] ✅ Constructed URL from onclick:', constructedUrl);
+              return constructedUrl;
+            }
+          }
+          
+          // METHOD 4: Log what we found for debugging
+          console.log('[LinkedIn] ❌ No thread URL found');
+          console.log('[LinkedIn] Item HTML (first 200 chars):', targetItem.innerHTML.substring(0, 200));
+          const allLinks = targetItem.querySelectorAll('a');
+          console.log('[LinkedIn] Total links in item:', allLinks.length);
+          allLinks.forEach((a, i) => {
+            const href = a.getAttribute('href');
+            console.log('[LinkedIn] Link', i + ':', href);
+          });
+          
+          return null;
+        } catch (e) {
+          console.error('[LinkedIn] ❌ Error finding thread URL:', e.message);
+          console.error('[LinkedIn] Stack:', e.stack);
+          return null;
+        }
+      })();
+    `);
+      console.log('[linkedin] Thread URL extraction completed. Result:', threadUrl || 'NULL');
+    } catch (extractError) {
+      console.error('[linkedin] ❌ FATAL: Thread URL extraction failed:', extractError.message);
+      threadUrl = null;
+    }
+    
+    if (threadUrl) {
+      console.log(`[linkedin] ✅ Navigating directly to thread URL: ${threadUrl}`);
+      await browserWindow.loadURL(threadUrl);
+      // Wait LONGER for navigation and thread to load
+      console.log('[linkedin] Waiting 8 seconds for thread to fully load...');
+      await new Promise(resolve => setTimeout(resolve, 8000));
+      
+      // Verify we're on thread page
+      const finalUrl = browserWindow.webContents.getURL();
+      console.log('[linkedin] Final URL after navigation:', finalUrl);
+      
+      if (finalUrl.includes('/thread/')) {
+        console.log('[linkedin] ✅ Successfully navigated to thread page!');
+        // Skip click method - we're already on thread
+        const clickResult = { success: true, directNav: true };
+      } else {
+        console.log('[linkedin] ⚠️ Navigation failed, URL still:', finalUrl);
+      }
+    } else {
+      console.log(`[linkedin] ⚠️ No thread URL found, will try click method`);
+    }
+    
+    // STRATEGY 2: Click on the conversation AND wait for thread panel to appear
+    console.log('[linkedin] STEP 2: Clicking conversation and waiting for thread panel...');
+    
     const clickResult = await browserWindow.webContents.executeJavaScript(`
       (function() {
+        return new Promise((resolve) => {
         try {
           // Find conversation list items - multiple selectors for different LinkedIn versions
           const listContainers = document.querySelectorAll(
@@ -978,26 +1146,164 @@ async function fetchLinkedInMessagesByClicking(browserWindow, conversationIndex,
             // Also dispatch click event
             clickable.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
             
-            return { success: true, clickedTag: clickable.tagName };
+            console.log('[LinkedIn Click] ✅ Clicked successfully on:', clickable.tagName);
+            // DON'T return here - let setTimeout resolve the promise
+          } else {
+            console.log('[LinkedIn Click] ❌ No clickable element found');
+            resolve({ success: false, error: 'No clickable element found' });
+            return;
           }
-          
-          return { success: false, error: 'No clickable element found' };
         } catch (e) {
-          return { success: false, error: e.message };
+          console.error('[LinkedIn Click] ❌ Error:', e.message);
+          resolve({ success: false, error: e.message });
+          return;
         }
+        
+        // After clicking, wait for thread panel to appear (LinkedIn uses virtual routing)
+        console.log('[LinkedIn Click] Waiting for thread panel to load...');
+        
+        setTimeout(() => {
+          // Check if thread panel appeared
+          const threadPanel = document.querySelector('.msg-s-message-list-content') ||
+                             document.querySelector('.msg-thread') ||
+                             document.querySelector('[class*="message-list"]');
+          
+          if (threadPanel) {
+            console.log('[LinkedIn Click] ✅ Thread panel detected!');
+            resolve({ success: true, panelDetected: true });
+          } else {
+            console.log('[LinkedIn Click] ⚠️ Thread panel not detected after click');
+            resolve({ success: true, panelDetected: false });
+          }
+        }, 3000); // Wait 3s for panel to appear
+        
       })();
     `);
     
     console.log('[linkedin] Click result:', clickResult);
+    
+    // CRITICAL FIX: Simulate Enter key press (LinkedIn Ember.js routing)
+    console.log('[linkedin] Simulating Enter key for Ember routing...');
+    try {
+      const enterResult = await browserWindow.webContents.executeJavaScript(`
+        (function() {
+          try {
+            // Find and focus the clickable div
+            const clickableDiv = document.querySelector('.msg-conversation-listitem__link[tabindex="0"]');
+            if (!clickableDiv) {
+              console.log('[LinkedIn] No clickable div with tabindex found');
+              return { success: false, reason: 'no-element' };
+            }
+            
+            console.log('[LinkedIn] Focusing clickable div...');
+            clickableDiv.focus();
+            
+            // Simulate Enter key (Ember.js routing trigger)
+            console.log('[LinkedIn] Dispatching Enter key events...');
+            clickableDiv.dispatchEvent(new KeyboardEvent('keydown', {
+              key: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true
+            }));
+            clickableDiv.dispatchEvent(new KeyboardEvent('keypress', {
+              key: 'Enter', keyCode: 13, which: 13, bubbles: true
+            }));
+            clickableDiv.dispatchEvent(new KeyboardEvent('keyup', {
+              key: 'Enter', keyCode: 13, which: 13, bubbles: true
+            }));
+            
+            console.log('[LinkedIn] ✅ Enter key simulated successfully');
+            return { success: true };
+          } catch (e) {
+            console.error('[LinkedIn] Enter key error:', e.message);
+            return { success: false, error: e.message };
+          }
+        })();
+      `);
+      
+      console.log('[linkedin] Enter key simulation result:', enterResult);
+    } catch (e) {
+      console.log('[linkedin] Enter key simulation failed (non-critical):', e.message);
+    }
+    
+    // Wait for Ember router to process
+    await new Promise(resolve => setTimeout(resolve, 3000));
     
     if (!clickResult.success) {
       console.log('[linkedin] Click failed:', clickResult.error);
       return [];
     }
     
-    // Wait longer for conversation to load - LinkedIn is VERY slow
+    // Wait MUCH longer for conversation to load - LinkedIn is VERY slow
     // Need to wait for the message thread panel to fully render
-    await new Promise(resolve => setTimeout(resolve, 6000));
+    console.log('[linkedin] Waiting 10 seconds for thread panel to render...');
+    await new Promise(resolve => setTimeout(resolve, 10000));
+    
+    // CRITICAL: Verify thread container exists before proceeding
+    const hasThreadContainer = await browserWindow.webContents.executeJavaScript(`
+      !!document.querySelector('.msg-s-message-list-content')
+    `);
+    
+    if (!hasThreadContainer) {
+      console.log('[linkedin] ❌ Thread container NOT found after 10s wait!');
+      console.log('[linkedin] Thread did not load properly. Aborting message extraction.');
+      return [];
+    }
+    
+    console.log('[linkedin] ✅ Thread container detected! Proceeding with extraction...');
+    
+    // CRITICAL FIX: Scroll to load messages! LinkedIn lazy-loads old messages
+    console.log('[linkedin] Scrolling message thread to load messages...');
+    try {
+      await browserWindow.webContents.executeJavaScript(`
+        (function() {
+          try {
+            // Find the message thread scroll container
+            const scrollContainers = [
+              document.querySelector('.msg-s-message-list-content'),
+              document.querySelector('.msg-s-message-list'),
+              document.querySelector('[class*="message-list"]'),
+              document.querySelector('.scaffold-layout__detail'),
+            ];
+            
+            const scrollContainer = scrollContainers.find(el => el !== null);
+            
+            if (scrollContainer) {
+              console.log('[LinkedIn Scroll] Found scroll container, scrolling to top...');
+              // Scroll to top to load older messages
+              scrollContainer.scrollTop = 0;
+              
+              // Wait a moment
+              return new Promise(resolve => {
+                setTimeout(() => {
+                  console.log('[LinkedIn Scroll] Scroll complete');
+                  resolve(true);
+                }, 2000);
+              });
+            } else {
+              console.log('[LinkedIn Scroll] No scroll container found');
+              return false;
+            }
+          } catch (e) {
+            console.error('[LinkedIn Scroll] Error:', e.message);
+            return false;
+          }
+        })();
+      `);
+      
+      console.log('[linkedin] Scroll completed, waiting 3s for messages to load...');
+      await new Promise(resolve => setTimeout(resolve, 3000));
+    } catch (scrollErr) {
+      console.log('[linkedin] Scroll error (non-critical):', scrollErr.message);
+    }
+    
+    // CRITICAL: Check current URL before extraction
+    const currentUrl = browserWindow.webContents.getURL();
+    console.log('[linkedin] Current URL before extraction:', currentUrl);
+    
+    // If still on inbox page (not on thread), abort
+    if (!currentUrl.includes('/thread/') && !currentUrl.includes('messaging/')) {
+      console.log('[linkedin] ⚠️ Not on thread page! URL:', currentUrl);
+      return [];
+    }
     
     // Extract messages from the opened conversation - IMPROVED VERSION
     const messagesResult = await browserWindow.webContents.executeJavaScript(`
@@ -1009,6 +1315,7 @@ async function fetchLinkedInMessagesByClicking(browserWindow, conversationIndex,
           console.log('[LinkedIn Debug] ========== MESSAGE EXTRACTION ==========');
           console.log('[LinkedIn Debug] Looking for messages in conversation with:', participantName);
           console.log('[LinkedIn Debug] Current URL:', window.location.href);
+          console.log('[LinkedIn Debug] Page title:', document.title);
           
           // Check if we're on a thread page (conversation opened successfully)
           const isThreadOpen = window.location.href.includes('/thread/') || 
@@ -1016,20 +1323,41 @@ async function fetchLinkedInMessagesByClicking(browserWindow, conversationIndex,
                               document.querySelector('.msg-thread') !== null;
           console.log('[LinkedIn Debug] Thread appears open:', isThreadOpen);
           
+          // CRITICAL CHECK: Is this the "No messages...yet!" placeholder?
+          const pageText = document.body.innerText;
+          const pageTextLower = pageText.toLowerCase();
+          
+          console.log('[LinkedIn Debug] === PLACEHOLDER CHECK ===');
+          console.log('[LinkedIn Debug] Page text contains "no messages":', pageTextLower.includes('no messages'));
+          console.log('[LinkedIn Debug] Page text contains "reach out":', pageTextLower.includes('reach out'));
+          console.log('[LinkedIn Debug] First 300 chars of page:', pageText.substring(0, 300));
+          
+          const isEmptyPlaceholder = pageTextLower.includes('no messages...yet') || 
+                                     (pageTextLower.includes('reach out and start a conversation') &&
+                                      pageTextLower.includes('great things might happen'));
+          
+          if (isEmptyPlaceholder) {
+            console.log('[LinkedIn Debug] ⚠️⚠️⚠️ CONFIRMED: Empty conversation placeholder detected!');
+            console.log('[LinkedIn Debug] ❌ This conversation has NO actual sent messages.');
+            console.log('[LinkedIn Debug] 🔍 The preview in list is likely a DRAFT or UNSENT message.');
+            console.log('[LinkedIn Debug] 💡 Please send an actual message on LinkedIn web and try again.');
+            return []; // Return empty - no messages to extract
+          }
+          
+          console.log('[LinkedIn Debug] ✅ No placeholder detected - proceeding with extraction...');
+          
           if (!isThreadOpen) {
             console.log('[LinkedIn Debug] WARNING: Thread may not have opened. Looking for any messages anyway...');
           }
           
           // FIRST: Find the message thread/conversation container
-          // LinkedIn has different containers depending on version
+          // ✅ VERIFIED: .msg-s-message-list-content is the CORRECT container
           const threadContainerSelectors = [
-            '.msg-s-message-list-content',
+            '.msg-s-message-list-content',                    // ✅ CONFIRMED WORKING!
             '.msg-s-message-list',
-            '[class*="message-list"]',
+            '[class*="message-list-content"]',
             '.msg-thread',
-            '.scaffold-layout__detail',
-            '[role="main"] [class*="thread"]',
-            '[role="main"]'
+            '.scaffold-layout__detail'
           ];
           
           let threadContainer = null;
@@ -1037,38 +1365,70 @@ async function fetchLinkedInMessagesByClicking(browserWindow, conversationIndex,
             const found = document.querySelector(sel);
             if (found) {
               threadContainer = found;
-              console.log('[LinkedIn Debug] Found thread container with:', sel);
+              console.log('[LinkedIn Debug] ✅ Found thread container with:', sel);
+              console.log('[LinkedIn Debug] Container tag:', found.tagName, '| Classes:', found.className.substring(0, 60));
               break;
+            } else {
+              console.log('[LinkedIn Debug] ⏭️ Container not found:', sel);
             }
           }
           
           if (!threadContainer) {
-            console.log('[LinkedIn Debug] No thread container found!');
-            // Try the whole main area
-            threadContainer = document.querySelector('.scaffold-layout__main') || document.body;
+            console.log('[LinkedIn Debug] ❌ NO thread container found!');
+            console.log('[LinkedIn Debug] This means conversation thread did NOT load properly');
+            return []; // Abort - no point continuing
           }
+          
+          // CRITICAL: Verify this is the MESSAGE thread, not conversation list!
+          // Conversation list also has 'msg' classes but we need the THREAD
+          const isActualThread = threadContainer.querySelector('.msg-s-event-listitem') !== null ||
+                                threadContainer.querySelector('.msg-s-message-group') !== null;
+          
+          if (!isActualThread) {
+            console.log('[LinkedIn Debug] ⚠️ Container found but appears to be conversation list, not thread!');
+            console.log('[LinkedIn Debug] Aborting extraction - thread not loaded');
+            return [];
+          }
+          
+          console.log('[LinkedIn Debug] ✅ Confirmed: This is the actual message thread container');
           
           // SECOND: Find message elements within the thread container
           // LinkedIn uses message groups that contain multiple messages from same sender
           // IMPORTANT: First try to find actual message BODY elements (most reliable)
+          
+          // ✅ VERIFIED WORKING SELECTOR from browser test!
           const bodySelectors = [
-            '.msg-s-event-listitem__body',
-            'p.msg-s-event-listitem__body',
-            '.msg-s-message-group__meta + div p',
-            '[class*="event-listitem__body"]'
+            '.msg-s-event-listitem__body',                    // ✅ CONFIRMED WORKING!
+            'p.msg-s-event-listitem__body',                   // Paragraph body
+            '.msg-s-message-group__meta + div p',             // Body after meta
+            '[class*="event-listitem__body"]',                // Any body class
           ];
           
           let msgGroups = [];
           
-          // First try body elements directly - these contain actual message text
+          // FIRST: Try to find message bodies directly (most reliable)
+          console.log('[LinkedIn Debug] === SEARCHING FOR MESSAGES ===');
+          console.log('[LinkedIn Debug] Thread container:', threadContainer.tagName, threadContainer.className.substring(0, 60));
+          console.log('[LinkedIn Debug] Searching ONLY within thread container (not whole page)...');
+          
           for (const sel of bodySelectors) {
-            const found = document.querySelectorAll(sel);
+            const found = threadContainer.querySelectorAll(sel);
             if (found.length > 0) {
               msgGroups = Array.from(found);
-              console.log('[LinkedIn Debug] Found', found.length, 'message BODY elements with:', sel);
+              console.log('[LinkedIn Debug] ✅✅✅ Found', found.length, 'message BODY elements with:', sel);
+              
+              // Log first 3 message texts for verification
+              for (let i = 0; i < Math.min(3, found.length); i++) {
+                const text = found[i].textContent?.trim().substring(0, 50);
+                console.log('[LinkedIn Debug]   Message', i + ':', text);
+              }
               break;
+            } else {
+              console.log('[LinkedIn Debug] ⏭️ Selector failed:', sel, '- found 0 elements');
             }
           }
+          
+          console.log('[LinkedIn Debug] Total messages to process:', msgGroups.length);
           
           // If no body elements, try message group containers
           if (msgGroups.length === 0) {
@@ -1093,28 +1453,40 @@ async function fetchLinkedInMessagesByClicking(browserWindow, conversationIndex,
           
           // If no groups found, try alternative approach - find all message bubbles
           if (msgGroups.length === 0) {
-            console.log('[LinkedIn Debug] Trying alternative message selectors...');
+            console.log('[LinkedIn Debug] ⚠️ No body elements found! Trying alternative selectors...');
             
-            // Look for message content directly in the document
+            // Look for message content directly in the document - EXPANDED LIST
             const altSelectors = [
-              '.msg-s-message-group__content',
-              '[class*="message-body"]',
-              '.msg-thread p'
+              '.msg-s-message-group__content',                // Message group content
+              '[class*="message-body"]',                      // Any message body
+              '.msg-thread p',                                 // Thread paragraphs
+              '.msg-s-event-listitem p',                      // Event list item paragraphs (NEW)
+              '[class*="msg-s-event"] p',                     // Any event paragraphs (NEW)
+              '.msg-overlay-conversation-bubble__message',    // Bubble message (NEW)
+              '[class*="conversation-bubble"] p',             // Conversation bubble (NEW)
             ];
             
             for (const sel of altSelectors) {
-              const found = document.querySelectorAll(sel);
+              const found = threadContainer.querySelectorAll(sel);
               if (found.length > 0) {
                 msgGroups = Array.from(found);
-                console.log('[LinkedIn Debug] Found', found.length, 'message elements with:', sel);
+                console.log('[LinkedIn Debug] ✅ Found', found.length, 'alternative message elements with:', sel);
                 break;
+              } else {
+                console.log('[LinkedIn Debug] ⏭️ Alternative selector failed:', sel);
               }
             }
           }
           
           // THIRD: If still nothing, try to get ANY text that looks like messages
           if (msgGroups.length === 0) {
-            console.log('[LinkedIn Debug] Trying paragraph fallback...');
+            console.log('[LinkedIn Debug] ⚠️⚠️ STILL NO MESSAGES! Trying paragraph fallback...');
+            console.log('[LinkedIn Debug] === DEBUGGING INFO ===');
+            console.log('[LinkedIn Debug] Thread container tag:', threadContainer.tagName);
+            console.log('[LinkedIn Debug] Thread container classes:', threadContainer.className);
+            console.log('[LinkedIn Debug] Total <p> tags in container:', threadContainer.querySelectorAll('p').length);
+            console.log('[LinkedIn Debug] Total divs with "msg" class:', threadContainer.querySelectorAll('[class*="msg"]').length);
+            console.log('[LinkedIn Debug] Page inner text (first 500 chars):', document.body.innerText.substring(0, 500));
             
             // LinkedIn's placeholder texts that are NOT messages
             const placeholderTexts = [
@@ -1252,31 +1624,61 @@ async function fetchLinkedInMessagesByClicking(browserWindow, conversationIndex,
               }
               
               // Determine if outgoing (sent by me)
-              const outboundSelectors = [
-                '.msg-s-message-group--outbound',
-                '.msg-s-event-listitem--outbound',
-                '[class*="outbound"]',
-                '[class*="sent"]'
-              ];
-              
+              // Browser test shows: Check parent chain for outbound class
               let isOutgoing = false;
               let checkEl = msgEl;
+              
+              // Check up to 5 parent levels
               for (let i = 0; i < 5 && checkEl; i++) {
-                for (const sel of outboundSelectors) {
-                  if (checkEl.matches && checkEl.matches(sel)) {
-                    isOutgoing = true;
-                    break;
-                  }
+                const classes = checkEl.className || '';
+                
+                // LinkedIn uses these classes for outgoing messages
+                if (classes.includes('msg-s-message-group--outbound') ||
+                    classes.includes('msg-s-event-listitem--outbound') ||
+                    classes.includes('outbound')) {
+                  isOutgoing = true;
+                  console.log('[LinkedIn Debug] ✅ Outbound detected at parent level', i);
+                  break;
                 }
-                if (isOutgoing) break;
+                
                 checkEl = checkEl.parentElement;
               }
               
-              // Get timestamp
+              // Additional check: If sender is "Safix Enterprises" (your company), it's outgoing
+              if (!isOutgoing && senderName && senderName.includes('Safix Enterprises')) {
+                isOutgoing = true;
+                console.log('[LinkedIn Debug] ✅ Outbound detected via sender name');
+              }
+              
+              // Get timestamp - Browser test shows time element may not be in message element
               let timestamp = new Date().toISOString();
-              const timeEl = msgEl.querySelector('time') || 
-                            msgEl.closest('.msg-s-message-group')?.querySelector('time') ||
-                            msgEl.closest('.msg-s-event-listitem')?.querySelector('time');
+              
+              // Search in multiple places for time element
+              let timeEl = msgEl.querySelector('time');
+              
+              if (!timeEl) {
+                // Check parent message group
+                const msgGroup = msgEl.closest('.msg-s-message-group');
+                if (msgGroup) {
+                  timeEl = msgGroup.querySelector('time');
+                }
+              }
+              
+              if (!timeEl) {
+                // Check parent event listitem
+                const eventItem = msgEl.closest('.msg-s-event-listitem');
+                if (eventItem) {
+                  timeEl = eventItem.querySelector('time');
+                }
+              }
+              
+              if (!timeEl) {
+                // Last resort: look for time in previous/next siblings
+                let sibling = msgEl.parentElement?.previousElementSibling;
+                if (sibling) {
+                  timeEl = sibling.querySelector('time');
+                }
+              }
               
               if (timeEl) {
                 const dt = timeEl.getAttribute('datetime') || timeEl.textContent;
@@ -1285,9 +1687,14 @@ async function fetchLinkedInMessagesByClicking(browserWindow, conversationIndex,
                     const parsed = new Date(dt);
                     if (!isNaN(parsed.getTime())) {
                       timestamp = parsed.toISOString();
+                      console.log('[LinkedIn Debug] ✅ Timestamp found:', timestamp);
                     }
-                  } catch (e) {}
+                  } catch (e) {
+                    console.log('[LinkedIn Debug] ⚠️ Timestamp parse error:', e.message);
+                  }
                 }
+              } else {
+                console.log('[LinkedIn Debug] ⚠️ No timestamp element found - using current time');
               }
               
               const msgObj = {
@@ -1322,7 +1729,22 @@ async function fetchLinkedInMessagesByClicking(browserWindow, conversationIndex,
       })();
     `);
     
-    console.log(`[linkedin] Extracted ${messagesResult?.length || 0} messages for ${participantName}`);
+    const messageCount = messagesResult?.length || 0;
+    console.log(`[linkedin] Extracted ${messageCount} messages for ${participantName}`);
+    
+    // DEBUGGING: If 0 messages extracted, keep window open for 5 more seconds to debug
+    if (messageCount === 0 && browserWindow && !browserWindow.isDestroyed()) {
+      console.log('[linkedin] ⚠️ 0 messages extracted! Keeping window open for debugging...');
+      
+      // Make window visible so you can see what's happening
+      browserWindow.show();
+      
+      // Wait 5 seconds then continue
+      await new Promise(resolve => setTimeout(resolve, 5000));
+      
+      console.log('[linkedin] Debug wait complete. Check if messages are visible in the window.');
+    }
+    
     return messagesResult || [];
     
   } catch (err) {
@@ -1331,130 +1753,9 @@ async function fetchLinkedInMessagesByClicking(browserWindow, conversationIndex,
   }
 }
 
-function parseLinkedInResponse(data) {
-  const conversations = [];
-  const elements = data.elements || [];
-  
-  // LinkedIn includes related data in 'included' array
-  const included = data.included || [];
-  const profilesMap = {};
-  const messagesMap = {};
-  
-  // Build lookup maps from included data
-  for (const item of included) {
-    if (item.$type === 'com.linkedin.voyager.identity.shared.MiniProfile' || item.firstName) {
-      const id = item.entityUrn?.split(':').pop() || item['*miniProfile']?.split(':').pop() || '';
-      if (id) {
-        profilesMap[id] = {
-          id,
-          name: `${item.firstName || ''} ${item.lastName || ''}`.trim() || 'LinkedIn User',
-          avatar: item.picture?.['com.linkedin.common.VectorImage']?.rootUrl || ''
-        };
-      }
-    }
-    if (item.$type === 'com.linkedin.voyager.messaging.event.MessageEvent' || item.body) {
-      const id = item.entityUrn?.split(':').pop() || '';
-      if (id) {
-        messagesMap[id] = {
-          id,
-          text: item.body || item.attributedBody?.text || '',
-          senderId: item['*from']?.split(':').pop() || '',
-          createdAt: item.createdAt ? new Date(item.createdAt).toISOString() : new Date().toISOString()
-        };
-      }
-    }
-  }
-  
-  for (const conv of elements) {
-    const convId = conv.entityUrn?.split(':').pop() || conv['*thread']?.split(':').pop() || '';
-    
-    // Get participants from conversation or included data
-    const participants = [];
-    const participantRefs = conv.participants || conv['*participants'] || [];
-    
-    for (const p of participantRefs) {
-      let profile = null;
-      
-      // Handle different participant formats
-      if (typeof p === 'string') {
-        const profileId = p.split(':').pop();
-        profile = profilesMap[profileId];
-      } else {
-        const member = p['com.linkedin.voyager.messaging.MessagingMember'] || p;
-        const miniProfile = member.miniProfile || {};
-        const profileId = miniProfile.entityUrn?.split(':').pop() || member['*miniProfile']?.split(':').pop() || '';
-        
-        profile = profilesMap[profileId] || {
-          id: profileId,
-          name: `${miniProfile.firstName || ''} ${miniProfile.lastName || ''}`.trim() || 'LinkedIn User',
-          avatar: miniProfile.picture?.['com.linkedin.common.VectorImage']?.rootUrl || ''
-        };
-      }
-      
-      if (profile) {
-        participants.push(profile);
-      }
-    }
-
-    // Get messages from events or included data
-    const messages = [];
-    const events = conv.events || [];
-    
-    for (const event of events) {
-      let msgText = '';
-      let msgId = '';
-      let senderId = '';
-      let createdAt = new Date().toISOString();
-      
-      // Handle different event formats
-      if (typeof event === 'string') {
-        const eventId = event.split(':').pop();
-        const msg = messagesMap[eventId];
-        if (msg) {
-          messages.push(msg);
-          continue;
-        }
-      }
-      
-      msgId = event.entityUrn?.split(':').pop() || event.dashEntityUrn?.split(':').pop() || '';
-      createdAt = event.createdAt ? new Date(event.createdAt).toISOString() : new Date().toISOString();
-      
-      // Try different paths for message body
-      const eventContent = event.eventContent || {};
-      const msgEvent = eventContent['com.linkedin.voyager.messaging.event.MessageEvent'] || eventContent;
-      msgText = msgEvent.body || msgEvent.attributedBody?.text || event.body || '';
-      
-      // Get sender
-      const fromMember = event.from?.['com.linkedin.voyager.messaging.MessagingMember'] || event.from || {};
-      senderId = fromMember.miniProfile?.entityUrn?.split(':').pop() || 
-                 fromMember['*miniProfile']?.split(':').pop() || 
-                 event['*from']?.split(':').pop() || '';
-      
-      if (msgId) {
-        messages.push({
-          id: msgId,
-          text: msgText || '[No content]',
-          senderId,
-          createdAt
-        });
-      }
-    }
-
-    if (convId) {
-      // Get last activity time
-      const lastActivity = conv.lastActivityAt || conv.lastReadAt || Date.now();
-      
-      conversations.push({
-        id: convId,
-        participants,
-        messages,
-        lastActivityAt: new Date(lastActivity).toISOString()
-      });
-    }
-  }
-  
-  return conversations;
-}
+// ===== OLD parseLinkedInResponse FUNCTION REMOVED =====
+// This function is no longer used - we now use browser automation
+// to extract messages directly from LinkedIn's DOM
 
 // ============ INSTAGRAM ============
 // Track last Instagram fetch time to avoid rate limiting
@@ -4125,10 +4426,10 @@ function sendLinkedInMessageViaBrowser(msg, cookies) {
       }
       
       // Create browser window - show=true for debugging send issues
-      const DEBUG_SEND = false;  // Set to true to see what's happening
+      const DEBUG_SEND = true;  // ENABLED to debug - see what LinkedIn is showing
       linkedinSendWindow = new BrowserWindow({
-        width: 1000,
-        height: 700,
+        width: 1200,
+        height: 800,
         show: DEBUG_SEND,
         webPreferences: {
           nodeIntegration: false,
@@ -4285,26 +4586,77 @@ function sendLinkedInMessageViaBrowser(msg, cookies) {
                     console.log('[LinkedIn Send] ⚠️ Using FIRST conversation:', firstName);
                   }
                   
-                  // Find clickable element
-                  const clickable = targetItem.querySelector('a') || 
-                                   targetItem.querySelector('[role="button"]') || 
-                                   targetItem.querySelector('[role="listitem"]') ||
-                                   targetItem;
+                  // Find the best clickable element - LinkedIn needs specific element clicks
+                  // Priority: anchor tag > div with role > clickable div > list item itself
+                  let clickTarget = null;
+                  let clickMethod = 'unknown';
                   
-                  if (clickable) {
-                    clickable.scrollIntoView({ behavior: 'instant', block: 'center' });
-                    
-                    // Multiple click methods for reliability
-                    clickable.click();
-                    clickable.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
-                    clickable.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
-                    clickable.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
-                    
-                    console.log('[LinkedIn Send] ✅ Clicked on:', matchedName);
-                    return { success: true, clicked: matchedName, targetName: targetName };
+                  // Try anchor first (most reliable)
+                  const anchor = targetItem.querySelector('a[href*="messaging"]') || targetItem.querySelector('a');
+                  if (anchor) {
+                    clickTarget = anchor;
+                    clickMethod = 'anchor';
                   }
                   
-                  return { success: false, error: 'Could not click on conversation element' };
+                  // Try the conversation card/container with click handlers
+                  if (!clickTarget) {
+                    const card = targetItem.querySelector('.msg-conversation-card__content') ||
+                                targetItem.querySelector('.msg-conversation-listitem__link') ||
+                                targetItem.querySelector('[class*="conversation-card"]') ||
+                                targetItem.querySelector('[class*="listitem__link"]');
+                    if (card) {
+                      clickTarget = card;
+                      clickMethod = 'card';
+                    }
+                  }
+                  
+                  // Try role-based
+                  if (!clickTarget) {
+                    const roleBtn = targetItem.querySelector('[role="button"]') ||
+                                   targetItem.querySelector('[role="link"]') ||
+                                   targetItem.querySelector('[tabindex="0"]');
+                    if (roleBtn) {
+                      clickTarget = roleBtn;
+                      clickMethod = 'role';
+                    }
+                  }
+                  
+                  // Fallback to list item itself
+                  if (!clickTarget) {
+                    clickTarget = targetItem;
+                    clickMethod = 'listitem';
+                  }
+                  
+                  console.log('[LinkedIn Send] Clicking via:', clickMethod, clickTarget.tagName);
+                  
+                  // Scroll into view
+                  clickTarget.scrollIntoView({ behavior: 'instant', block: 'center' });
+                  
+                  // Try multiple click approaches
+                  // Method 1: Direct click
+                  clickTarget.click();
+                  
+                  // Method 2: Focus then click
+                  clickTarget.focus();
+                  
+                  // Method 3: Mouse events
+                  const rect = clickTarget.getBoundingClientRect();
+                  const centerX = rect.left + rect.width / 2;
+                  const centerY = rect.top + rect.height / 2;
+                  
+                  clickTarget.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true, clientX: centerX, clientY: centerY }));
+                  clickTarget.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, clientX: centerX, clientY: centerY }));
+                  clickTarget.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: centerX, clientY: centerY, button: 0 }));
+                  clickTarget.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, clientX: centerX, clientY: centerY, button: 0 }));
+                  clickTarget.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, clientX: centerX, clientY: centerY, button: 0 }));
+                  
+                  // Method 4: If it's an anchor, try navigating
+                  if (clickMethod === 'anchor' && anchor.href) {
+                    console.log('[LinkedIn Send] Anchor href:', anchor.href);
+                  }
+                  
+                  console.log('[LinkedIn Send] ✅ Clicked on:', matchedName, 'via', clickMethod);
+                  return { success: true, clicked: matchedName, targetName: targetName, method: clickMethod };
                 } catch (e) {
                   console.error('[LinkedIn Send] Error:', e);
                   return { success: false, error: e.message };
@@ -4317,8 +4669,69 @@ function sendLinkedInMessageViaBrowser(msg, cookies) {
             if (clickResult.success) {
               conversationClicked = true;
               console.log('[linkedin] Send - Waiting for conversation thread to load...');
-              // Wait for conversation to load (LinkedIn needs more time)
-              await new Promise(r => setTimeout(r, 5000));
+              console.log('[linkedin] Send - Click method used:', clickResult.method);
+              
+              // Wait for conversation to load (LinkedIn needs MUCH more time)
+              await new Promise(r => setTimeout(r, 6000));
+              
+              // Verify thread panel is open by checking for message input
+              const threadCheck = await linkedinSendWindow.webContents.executeJavaScript(`
+                (function() {
+                  const contentEditables = document.querySelectorAll('[contenteditable="true"]');
+                  const forms = document.querySelectorAll('form');
+                  const msgForms = document.querySelectorAll('[class*="msg-form"]');
+                  const threadPanels = document.querySelectorAll('.msg-thread, .msg-s-message-list, [class*="thread"]');
+                  
+                  console.log('[LinkedIn Send] Thread check:');
+                  console.log('  - contentEditable elements:', contentEditables.length);
+                  console.log('  - forms:', forms.length);
+                  console.log('  - msg-form elements:', msgForms.length);
+                  console.log('  - thread panels:', threadPanels.length);
+                  
+                  return {
+                    contentEditables: contentEditables.length,
+                    forms: forms.length,
+                    msgForms: msgForms.length,
+                    threadPanels: threadPanels.length,
+                    hasInput: contentEditables.length > 0
+                  };
+                })();
+              `);
+              
+              console.log('[linkedin] Send - Thread check result:', JSON.stringify(threadCheck));
+              
+              if (!threadCheck.hasInput) {
+                console.log('[linkedin] Send - ⚠️ Thread panel may not have loaded!');
+                
+                // Try to find and navigate to the thread URL directly
+                const navResult = await linkedinSendWindow.webContents.executeJavaScript(`
+                  (function() {
+                    // Find any messaging thread link
+                    const threadLinks = document.querySelectorAll('a[href*="/messaging/thread/"]');
+                    console.log('[LinkedIn Send] Found', threadLinks.length, 'thread links');
+                    
+                    // Find the one that was just clicked or any available
+                    for (const link of threadLinks) {
+                      const href = link.href;
+                      if (href) {
+                        console.log('[LinkedIn Send] Found thread URL:', href);
+                        return { hasUrl: true, url: href };
+                      }
+                    }
+                    
+                    return { hasUrl: false };
+                  })();
+                `);
+                
+                if (navResult.hasUrl) {
+                  console.log('[linkedin] Send - Navigating directly to thread:', navResult.url);
+                  await linkedinSendWindow.loadURL(navResult.url);
+                  await new Promise(r => setTimeout(r, 5000));
+                } else {
+                  console.log('[linkedin] Send - No thread URL found, waiting more...');
+                  await new Promise(r => setTimeout(r, 3000));
+                }
+              }
             } else {
               console.log('[linkedin] Send - ❌ Failed to click conversation:', clickResult.error);
               if (retryCount < maxRetries) {
