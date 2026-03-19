@@ -28,10 +28,123 @@ let whatsappQRCode = null;
 let whatsappStatus = 'disconnected'; // disconnected, connecting, qr_ready, connected
 
 // Chat Orbitor API URL
-const API_BASE_URL = store.get('apiUrl') || 'https://chat-integrator.onrender.com';
+// Prefer current production URL, keep legacy URL as fallback for older deployments.
+const PRIMARY_API_BASE_URL = store.get('apiUrl') || 'https://chatorbitor.onrender.com';
+const LEGACY_API_BASE_URL = 'https://chat-integrator.onrender.com';
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function getApiCandidates() {
+  const configured = store.get('apiUrl');
+  const candidates = [configured, PRIMARY_API_BASE_URL, LEGACY_API_BASE_URL]
+    .filter(Boolean)
+    .map((url) => String(url).trim().replace(/\/$/, ''));
+  return [...new Set(candidates)];
+}
+
+function isRetryableBackendError(error) {
+  const status = error?.response?.status;
+  if ([429, 500, 502, 503, 504].includes(status)) return true;
+
+  const code = String(error?.code || '').toUpperCase();
+  if (['ECONNABORTED', 'ETIMEDOUT', 'ECONNRESET', 'EAI_AGAIN', 'ENOTFOUND'].includes(code)) {
+    return true;
+  }
+
+  const message = String(error?.message || '').toLowerCase();
+  return message.includes('timeout') || message.includes('socket hang up');
+}
+
+async function backendRequest(method, endpoint, { token, data, timeout = 30000, headers = {} } = {}) {
+  const candidates = getApiCandidates();
+  let lastError = null;
+
+  for (const baseUrl of candidates) {
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        const response = await axios({
+          method,
+          url: `${baseUrl}${endpoint}`,
+          data,
+          timeout,
+          headers: {
+            ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+            'Content-Type': 'application/json',
+            ...headers,
+          },
+        });
+
+        // Persist healthy URL so subsequent calls use the working backend.
+        if (store.get('apiUrl') !== baseUrl) {
+          store.set('apiUrl', baseUrl);
+        }
+
+        return response;
+      } catch (error) {
+        lastError = error;
+        if (!isRetryableBackendError(error)) {
+          break;
+        }
+
+        if (attempt < 2) {
+          await sleep(1200 * attempt);
+        }
+      }
+    }
+  }
+
+  throw lastError;
+}
+
+const API_BASE_URL = PRIMARY_API_BASE_URL;
+
+const LINKEDIN_PARTITION = 'persist:linkedin-login';
+const FACEBOOK_PARTITION = 'persist:facebook-login';
+
+async function restoreSessionCookies(electronSession, domain, cookiesMap) {
+  if (!electronSession || !cookiesMap || typeof cookiesMap !== 'object') {
+    return;
+  }
+
+  const tasks = [];
+  for (const [name, rawValue] of Object.entries(cookiesMap)) {
+    if (!name || rawValue === undefined || rawValue === null) {
+      continue;
+    }
+
+    const value = String(rawValue).trim();
+    if (!value) {
+      continue;
+    }
+
+    tasks.push(
+      electronSession.cookies.set({
+        url: `https://${domain}`,
+        name,
+        value,
+        domain: `.${domain}`,
+        path: '/',
+        secure: true,
+      }).catch((err) => {
+        console.log(`[session] Cookie restore skipped for ${name}: ${err.message}`);
+      })
+    );
+  }
+
+  if (tasks.length > 0) {
+    await Promise.all(tasks);
+  }
+}
 
 function getUserFriendlySyncError(platform, error) {
   const message = error?.message || 'Unknown error';
+  const statusCode = error?.response?.status;
+
+  if (statusCode === 503 || statusCode === 502 || statusCode === 504) {
+    return 'Server temporarily unavailable (Render warm-up/restart). Auto-retry will continue in background.';
+  }
 
   if (platform === 'linkedin' && (message.includes('ETIMEDOUT') || message.includes('ECONNRESET') || message.includes('socket hang up'))) {
     return 'LinkedIn network timeout. Please check VPN/firewall/proxy and try again.';
@@ -219,8 +332,6 @@ async function syncPlatform(platform, cookies, token) {
       });
     }
 
-    const apiUrl = store.get('apiUrl') || API_BASE_URL;
-
     // WhatsApp: Use whatsapp-web.js client (no cookies needed)
     if (platform === 'whatsapp') {
       await syncWhatsAppMessages();
@@ -231,20 +342,14 @@ async function syncPlatform(platform, cookies, token) {
     if (platform === 'linkedin') {
       // First, submit cookies to backend to register account
       try {
-        await axios.post(
-          `${apiUrl}/api/platforms/linkedin/cookies`,
-          { 
+        await backendRequest('post', '/api/platforms/linkedin/cookies', {
+          token,
+          data: {
             li_at: cookies.li_at,
             JSESSIONID: cookies.JSESSIONID,
           },
-          {
-            headers: {
-              'Authorization': `Bearer ${token}`,
-              'Content-Type': 'application/json'
-            },
-            timeout: 30000
-          }
-        );
+          timeout: 30000,
+        });
         console.log(`[linkedin] Cookies submitted to backend`);
       } catch (cookieErr) {
         console.log(`[linkedin] Cookie submission note:`, cookieErr.message);
@@ -268,22 +373,16 @@ async function syncPlatform(platform, cookies, token) {
         // For Facebook, first ensure account is registered in backend
         try {
           console.log('[facebook] Ensuring account is registered in backend...');
-          await axios.post(
-            `${apiUrl}/api/platforms/facebook/cookies`,
-            { 
+          await backendRequest('post', '/api/platforms/facebook/cookies', {
+            token,
+            data: {
               c_user: cookies.c_user,
               xs: cookies.xs,
               platform_user_id: cookies.c_user,  // c_user IS the Facebook user ID
               platform_username: `Facebook User ${cookies.c_user.substring(0, 6)}`
             },
-            {
-              headers: {
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json'
-              },
-              timeout: 30000
-            }
-          );
+            timeout: 30000,
+          });
           console.log('[facebook] Account registration complete');
         } catch (regErr) {
           // If already registered, that's fine - continue with sync
@@ -298,20 +397,14 @@ async function syncPlatform(platform, cookies, token) {
     }
 
     // Send to backend (include cookies for auto-account creation)
-    await axios.post(
-      `${apiUrl}${config.apiEndpoint}`,
-      { 
+    await backendRequest('post', config.apiEndpoint, {
+      token,
+      data: {
         conversations: data,
         cookies: cookies  // Send cookies so backend can auto-create account if needed
       },
-      {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        timeout: 120000 // 2 minutes for slow server
-      }
-    );
+      timeout: 120000, // 2 minutes for slow server
+    });
 
     console.log(`[${platform}] Sync completed: ${data.length} conversations`);
     store.set(`${platform}_lastSync`, new Date().toISOString());
@@ -394,23 +487,33 @@ function parseTwitterResponse(data) {
   const conversations = [];
   const users = data.inbox_initial_state?.users || {};
   const conversationMap = data.inbox_initial_state?.conversations || {};
+  const explicitAccountUserId = String(
+    data?.inbox_initial_state?.for_user_id ||
+    data?.inbox_initial_state?.account_id ||
+    data?.inbox_initial_state?.user_id ||
+    ''
+  ).trim() || null;
 
   // Infer account user id as the participant appearing in the most conversations.
   // This avoids treating self as the peer when backend receives desktop payload.
   const participantFrequency = new Map();
   for (const conv of Object.values(conversationMap)) {
     const participants = conv?.participants || [];
+    const uniqueParticipantIds = new Set();
     for (const participant of participants) {
-      const userId = participant?.user_id;
+      const userId = String(participant?.user_id || '').trim();
       if (!userId) continue;
+      uniqueParticipantIds.add(userId);
+    }
+    for (const userId of uniqueParticipantIds) {
       participantFrequency.set(userId, (participantFrequency.get(userId) || 0) + 1);
     }
   }
 
-  const inferredAccountUserId = [...participantFrequency.entries()]
+  const inferredAccountUserId = explicitAccountUserId || [...participantFrequency.entries()]
     .sort((a, b) => b[1] - a[1])[0]?.[0] || null;
 
-  const pickPeerFromMessages = (messages) => {
+  const pickPeerFromMessages = (messages, participantIds = []) => {
     const senderFrequency = new Map();
     for (const message of messages) {
       const senderId = String(message?.senderId || '').trim();
@@ -419,7 +522,17 @@ function parseTwitterResponse(data) {
       senderFrequency.set(senderId, (senderFrequency.get(senderId) || 0) + 1);
     }
 
-    return [...senderFrequency.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || null;
+    const rankedSenders = [...senderFrequency.entries()].sort((a, b) => b[1] - a[1]);
+    if (rankedSenders.length === 0) return null;
+
+    // Prefer sender IDs that are also present in the participant list.
+    for (const [senderId] of rankedSenders) {
+      if (participantIds.length === 0 || participantIds.includes(senderId)) {
+        return senderId;
+      }
+    }
+
+    return rankedSenders[0][0] || null;
   };
   
   if (data.inbox_initial_state && data.inbox_initial_state.conversations) {
@@ -446,13 +559,22 @@ function parseTwitterResponse(data) {
       const participantIds = (conv.participants?.map(p => String(p.user_id || '').trim()) || [])
         .filter(Boolean);
 
-      let peerUserId = participantIds.find((userId) => {
-        if (!inferredAccountUserId) return true;
-        return userId !== inferredAccountUserId;
-      }) || null;
+      // Prefer peer inferred from incoming message senders.
+      let peerUserId = pickPeerFromMessages(messages, participantIds);
 
-      // Some payloads miss proper participants ordering and end up selecting self.
-      // In that case infer peer from message senders.
+      if (!peerUserId) {
+        peerUserId = participantIds.find((userId) => {
+          if (!inferredAccountUserId) return true;
+          return userId !== inferredAccountUserId;
+        }) || null;
+      }
+
+      // Hard guardrail: if self still got selected, try any known non-self participant.
+      if (peerUserId && inferredAccountUserId && peerUserId === inferredAccountUserId) {
+        peerUserId = participantIds.find((userId) => userId !== inferredAccountUserId) || null;
+      }
+
+      // Final fallback from messages even when participant metadata is incomplete.
       if (!peerUserId) {
         peerUserId = pickPeerFromMessages(messages);
       }
@@ -518,7 +640,7 @@ async function fetchLinkedInMessages(cookies, retryCount = 0) {
   console.log('[linkedin] li_at:', cookies.li_at ? 'present' : 'missing');
   console.log('[linkedin] JSESSIONID:', cookies.JSESSIONID ? 'present' : 'missing');
 
-  if (!cookies.li_at || !cookies.JSESSIONID) {
+  if (!cookies.li_at) {
     throw new Error('LinkedIn session not found. Please click "Open LinkedIn Login" to login.');
   }
 
@@ -526,7 +648,15 @@ async function fetchLinkedInMessages(cookies, retryCount = 0) {
     try {
       // Use the SAME session as the login window (like Facebook)
       // This is critical - using separate session causes ERR_TOO_MANY_REDIRECTS
-      const linkedinSession = session.fromPartition('linkedin-login');
+      const linkedinSession = session.fromPartition(LINKEDIN_PARTITION);
+
+      // Restore saved cookies into session to keep login state stable across restarts.
+      await restoreSessionCookies(linkedinSession, 'linkedin.com', {
+        li_at: cookies.li_at,
+        JSESSIONID: cookies.JSESSIONID,
+        bcookie: cookies.bcookie,
+        lidc: cookies.lidc,
+      });
       
       // Block WebAuthn/Passkey prompts globally for LinkedIn session
       linkedinSession.setPermissionRequestHandler((webContents, permission, callback) => {
@@ -2282,7 +2412,15 @@ async function fetchFacebookMessages(cookies, retryCount = 0) {
   return new Promise(async (resolve, reject) => {
     try {
       // Use the same session as the login window
-      const facebookSession = session.fromPartition('facebook-login');
+      const facebookSession = session.fromPartition(FACEBOOK_PARTITION);
+
+      // Restore saved cookies into session so Facebook does not ask login repeatedly.
+      await restoreSessionCookies(facebookSession, 'facebook.com', {
+        c_user: cookies.c_user,
+        xs: cookies.xs,
+        datr: cookies.datr,
+        fr: cookies.fr,
+      });
       
       // Close existing fetch window
       if (facebookFetchWindow && !facebookFetchWindow.isDestroyed()) {
@@ -3118,21 +3256,15 @@ async function sendWhatsAppPendingMessage(msg, token, apiUrl) {
     const result = await sendWhatsAppMessage(msg.platformConversationId, msg.content);
     
     // Report success to backend
-    await axios.post(
-      `${apiUrl}/api/platforms/whatsapp/message-sent`,
-      {
+    await backendRequest('post', '/api/platforms/whatsapp/message-sent', {
+      token,
+      data: {
         pending_id: msg.id,
         success: true,
         platform_message_id: result.messageId || `wa_sent_${Date.now()}`
       },
-      {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        timeout: 30000
-      }
-    );
+      timeout: 30000,
+    });
     
     console.log(`[whatsapp] Pending message ${msg.id} sent successfully!`);
     
@@ -3150,21 +3282,15 @@ async function sendWhatsAppPendingMessage(msg, token, apiUrl) {
     
     // Report failure to backend
     try {
-      await axios.post(
-        `${apiUrl}/api/platforms/whatsapp/message-sent`,
-        {
+      await backendRequest('post', '/api/platforms/whatsapp/message-sent', {
+        token,
+        data: {
           pending_id: msg.id,
           success: false,
           error: errorMsg
         },
-        {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          },
-          timeout: 30000
-        }
-      );
+        timeout: 30000,
+      });
     } catch (reportErr) {
       console.error('[whatsapp] Failed to report error:', reportErr.message);
     }
@@ -3549,7 +3675,7 @@ ipcMain.handle('login-facebook-browser', async () => {
       }
 
       // Create a new session for Facebook login (isolated from main app)
-      const facebookSession = session.fromPartition('facebook-login');
+      const facebookSession = session.fromPartition(FACEBOOK_PARTITION);
       
       // Clear any existing cookies to start fresh
       facebookSession.clearStorageData({ storages: ['cookies'] });
@@ -3768,7 +3894,7 @@ ipcMain.handle('login-linkedin-browser', async () => {
       }
 
       // Create a new session for LinkedIn login (isolated from main app)
-      const linkedinSession = session.fromPartition('linkedin-login');
+      const linkedinSession = session.fromPartition(LINKEDIN_PARTITION);
       
       // Clear any existing cookies to start fresh
       await linkedinSession.clearStorageData({ storages: ['cookies'] });
@@ -4029,6 +4155,7 @@ function startAutoSync() {
 
 // ============ INSTAGRAM SEND MESSAGE (via Desktop App) ============
 let pendingMessageInterval = null;
+let pendingPollInFlight = false;
 
 // Start polling for pending Instagram messages
 function startPendingMessagePoll() {
@@ -4036,10 +4163,11 @@ function startPendingMessagePoll() {
     clearInterval(pendingMessageInterval);
   }
   
-  // Poll every 5 seconds for pending messages
+  // Poll less aggressively to avoid overloading Render/free instances.
+  // Frequent 5s polling caused repeated 503 storms across platforms.
   pendingMessageInterval = setInterval(async () => {
     await checkAndSendPendingMessages();
-  }, 5000);
+  }, 45000);
   
   // Also check immediately
   setTimeout(async () => {
@@ -4049,26 +4177,25 @@ function startPendingMessagePoll() {
 
 // Check for pending messages and send them (Instagram + WhatsApp + Facebook)
 async function checkAndSendPendingMessages() {
+  if (pendingPollInFlight) {
+    return;
+  }
+  pendingPollInFlight = true;
+
   const token = store.get('chatorbitor_token');
   if (!token) {
+    pendingPollInFlight = false;
     return; // No token
   }
   
-  const apiUrl = store.get('apiUrl') || API_BASE_URL;
-  
-  // Check WhatsApp pending messages
-  if (whatsappStatus === 'connected' && whatsappClient) {
-    try {
-      const waResponse = await axios.get(
-        `${apiUrl}/api/platforms/whatsapp/pending`,
-        {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          },
-          timeout: 30000
-        }
-      );
+  try {
+    // Check WhatsApp pending messages
+    if (whatsappStatus === 'connected' && whatsappClient) {
+      try {
+        const waResponse = await backendRequest('get', '/api/platforms/whatsapp/pending', {
+          token,
+          timeout: 30000,
+        });
       
       const waPendingMessages = waResponse.data.pendingMessages || [];
       
@@ -4080,27 +4207,21 @@ async function checkAndSendPendingMessages() {
           await new Promise(resolve => setTimeout(resolve, 2000));
         }
       }
-    } catch (waError) {
-      if (waError.response?.status !== 401) {
-        console.error('[whatsapp] Error checking pending messages:', waError.message);
+      } catch (waError) {
+        if (waError.response?.status !== 401) {
+          console.error('[whatsapp] Error checking pending messages:', waError.message);
+        }
       }
     }
-  }
-  
-  // Check Facebook pending messages
-  const facebookCookies = store.get('facebook_cookies');
-  if (facebookCookies && facebookCookies.c_user && facebookCookies.xs) {
-    try {
-      const fbResponse = await axios.get(
-        `${apiUrl}/api/platforms/facebook/pending`,
-        {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          },
-          timeout: 30000
-        }
-      );
+
+    // Check Facebook pending messages
+    const facebookCookies = store.get('facebook_cookies');
+    if (facebookCookies && facebookCookies.c_user && facebookCookies.xs) {
+      try {
+        const fbResponse = await backendRequest('get', '/api/platforms/facebook/pending', {
+          token,
+          timeout: 30000,
+        });
       
       const fbPendingMessages = fbResponse.data.pendingMessages || [];
       
@@ -4112,27 +4233,21 @@ async function checkAndSendPendingMessages() {
           await new Promise(resolve => setTimeout(resolve, 3000)); // Longer delay for Facebook
         }
       }
-    } catch (fbError) {
-      if (fbError.response?.status !== 401) {
-        console.error('[facebook] Error checking pending messages:', fbError.message);
+      } catch (fbError) {
+        if (fbError.response?.status !== 401) {
+          console.error('[facebook] Error checking pending messages:', fbError.message);
+        }
       }
     }
-  }
-  
-  // Check LinkedIn pending messages
-  const linkedinCookies = store.get('linkedin_cookies');
-  if (linkedinCookies && linkedinCookies.li_at && linkedinCookies.JSESSIONID) {
-    try {
-      const liResponse = await axios.get(
-        `${apiUrl}/api/platforms/linkedin/pending`,
-        {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          },
-          timeout: 30000
-        }
-      );
+
+    // Check LinkedIn pending messages
+    const linkedinCookies = store.get('linkedin_cookies');
+    if (linkedinCookies && linkedinCookies.li_at && linkedinCookies.JSESSIONID) {
+      try {
+        const liResponse = await backendRequest('get', '/api/platforms/linkedin/pending', {
+          token,
+          timeout: 30000,
+        });
       
       const liPendingMessages = liResponse.data.pendingMessages || [];
       
@@ -4150,33 +4265,24 @@ async function checkAndSendPendingMessages() {
           await new Promise(resolve => setTimeout(resolve, 3000)); // Longer delay for LinkedIn
         }
       }
-    } catch (liError) {
-      if (liError.response?.status !== 401 && liError.response?.status !== 404) {
-        console.error('[linkedin] Error checking pending messages:', liError.message);
+      } catch (liError) {
+        if (liError.response?.status !== 401 && liError.response?.status !== 404) {
+          console.error('[linkedin] Error checking pending messages:', liError.message);
+        }
       }
     }
-  }
-  
-  // Check Instagram pending messages
-  const instagramCookies = store.get('instagram_cookies');
-  if (!instagramCookies || !instagramCookies.sessionid) {
-    return; // No Instagram session
-  }
-  
-  // apiUrl already declared above
-  
-  try {
+
+    // Check Instagram pending messages
+    const instagramCookies = store.get('instagram_cookies');
+    if (!instagramCookies || !instagramCookies.sessionid) {
+      return; // No Instagram session
+    }
+    
     // Fetch pending messages from backend
-    const response = await axios.get(
-      `${apiUrl}/api/platforms/instagram/pending`,
-      {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        timeout: 30000
-      }
-    );
+    const response = await backendRequest('get', '/api/platforms/instagram/pending', {
+      token,
+      timeout: 30000,
+    });
     
     const pendingMessages = response.data.pendingMessages || [];
     
@@ -4195,6 +4301,8 @@ async function checkAndSendPendingMessages() {
     if (error.response?.status !== 401) {
       console.error('[instagram] Error checking pending messages:', error.message);
     }
+  } finally {
+    pendingPollInFlight = false;
   }
 }
 
@@ -4224,21 +4332,15 @@ async function sendFacebookPendingMessage(msg, cookies, token, apiUrl) {
     
     if (result.success) {
       // Report success to backend
-      await axios.post(
-        `${apiUrl}/api/platforms/facebook/message-sent`,
-        {
+      await backendRequest('post', '/api/platforms/facebook/message-sent', {
+        token,
+        data: {
           pending_id: msg.id,
           success: true,
           platform_message_id: result.messageId || `fb_sent_${Date.now()}`
         },
-        {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          },
-          timeout: 30000
-        }
-      );
+        timeout: 30000,
+      });
       
       console.log(`[facebook] Message ${msg.id} sent successfully!`);
       sendingMessages.delete(msg.id);
@@ -4262,21 +4364,15 @@ async function sendFacebookPendingMessage(msg, cookies, token, apiUrl) {
     
     // Report failure to backend
     try {
-      await axios.post(
-        `${apiUrl}/api/platforms/facebook/message-sent`,
-        {
+      await backendRequest('post', '/api/platforms/facebook/message-sent', {
+        token,
+        data: {
           pending_id: msg.id,
           success: false,
           error: errorMsg
         },
-        {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          },
-          timeout: 30000
-        }
-      );
+        timeout: 30000,
+      });
     } catch (reportErr) {
       console.error('[facebook] Failed to report error:', reportErr.message);
     }
@@ -4296,7 +4392,14 @@ function sendFacebookMessageViaBrowser(msg, cookies) {
   return new Promise(async (resolve) => {
     try {
       // Use the same session as the login window
-      const facebookSession = session.fromPartition('facebook-login');
+      const facebookSession = session.fromPartition(FACEBOOK_PARTITION);
+
+      await restoreSessionCookies(facebookSession, 'facebook.com', {
+        c_user: cookies.c_user,
+        xs: cookies.xs,
+        datr: cookies.datr,
+        fr: cookies.fr,
+      });
       
       // Close existing send window
       if (facebookSendWindow && !facebookSendWindow.isDestroyed()) {
@@ -4535,21 +4638,15 @@ async function sendLinkedInPendingMessage(msg, cookies, token, apiUrl) {
       console.log(`[linkedin] ✅ Browser automation succeeded, reporting to backend...`);
       
       // Report success to backend
-      await axios.post(
-        `${apiUrl}/api/platforms/linkedin/message-sent`,
-        {
+      await backendRequest('post', '/api/platforms/linkedin/message-sent', {
+        token,
+        data: {
           pending_id: msg.id,
           success: true,
           platform_message_id: result.messageId || `li_sent_${Date.now()}`
         },
-        {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          },
-          timeout: 30000
-        }
-      );
+        timeout: 30000,
+      });
       
       console.log(`[linkedin] ✅✅ Message ${msg.id} FULLY SENT and reported to backend!`);
       sendingMessages.delete(msg.id);
@@ -4576,21 +4673,15 @@ async function sendLinkedInPendingMessage(msg, cookies, token, apiUrl) {
     // Report failure to backend
     try {
       console.log(`[linkedin] Reporting failure to backend...`);
-      await axios.post(
-        `${apiUrl}/api/platforms/linkedin/message-sent`,
-        {
+      await backendRequest('post', '/api/platforms/linkedin/message-sent', {
+        token,
+        data: {
           pending_id: msg.id,
           success: false,
           error: errorMsg
         },
-        {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          },
-          timeout: 30000
-        }
-      );
+        timeout: 30000,
+      });
       console.log(`[linkedin] Failure reported to backend`);
     } catch (reportErr) {
       console.error('[linkedin] Failed to report error to backend:', reportErr.message);
@@ -4611,7 +4702,14 @@ function sendLinkedInMessageViaBrowser(msg, cookies) {
   return new Promise(async (resolve) => {
     try {
       // Use the same session as the login window
-      const linkedinSession = session.fromPartition('linkedin-login');
+      const linkedinSession = session.fromPartition(LINKEDIN_PARTITION);
+
+      await restoreSessionCookies(linkedinSession, 'linkedin.com', {
+        li_at: cookies.li_at,
+        JSESSIONID: cookies.JSESSIONID,
+        bcookie: cookies.bcookie,
+        lidc: cookies.lidc,
+      });
       
       // Block WebAuthn/Passkey prompts
       linkedinSession.setPermissionRequestHandler((webContents, permission, callback) => {
@@ -5268,21 +5366,15 @@ async function sendInstagramMessage(msg, cookies, token, apiUrl) {
     
     if (result.success) {
       // Report success to backend
-      await axios.post(
-        `${apiUrl}/api/platforms/instagram/message-sent`,
-        {
+      await backendRequest('post', '/api/platforms/instagram/message-sent', {
+        token,
+        data: {
           pending_id: msg.id,
           success: true,
           platform_message_id: result.messageId || `sent_${Date.now()}`
         },
-        {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          },
-          timeout: 30000
-        }
-      );
+        timeout: 30000,
+      });
       
       console.log(`[instagram] Message ${msg.id} sent successfully!`);
       sendingMessages.delete(msg.id);
@@ -5308,21 +5400,15 @@ async function sendInstagramMessage(msg, cookies, token, apiUrl) {
     
     // Report failure to backend
     try {
-      await axios.post(
-        `${apiUrl}/api/platforms/instagram/message-sent`,
-        {
+      await backendRequest('post', '/api/platforms/instagram/message-sent', {
+        token,
+        data: {
           pending_id: msg.id,
           success: false,
           error: errorMsg
         },
-        {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          },
-          timeout: 30000
-        }
-      );
+        timeout: 30000,
+      });
     } catch (reportErr) {
       console.error('[instagram] Failed to report error:', reportErr.message);
     }
