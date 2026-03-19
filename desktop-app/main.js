@@ -393,6 +393,34 @@ async function fetchTwitterDMs(cookies, retryCount = 0) {
 function parseTwitterResponse(data) {
   const conversations = [];
   const users = data.inbox_initial_state?.users || {};
+  const conversationMap = data.inbox_initial_state?.conversations || {};
+
+  // Infer account user id as the participant appearing in the most conversations.
+  // This avoids treating self as the peer when backend receives desktop payload.
+  const participantFrequency = new Map();
+  for (const conv of Object.values(conversationMap)) {
+    const participants = conv?.participants || [];
+    for (const participant of participants) {
+      const userId = participant?.user_id;
+      if (!userId) continue;
+      participantFrequency.set(userId, (participantFrequency.get(userId) || 0) + 1);
+    }
+  }
+
+  const inferredAccountUserId = [...participantFrequency.entries()]
+    .sort((a, b) => b[1] - a[1])[0]?.[0] || null;
+
+  const pickPeerFromMessages = (messages) => {
+    const senderFrequency = new Map();
+    for (const message of messages) {
+      const senderId = String(message?.senderId || '').trim();
+      if (!senderId) continue;
+      if (inferredAccountUserId && senderId === inferredAccountUserId) continue;
+      senderFrequency.set(senderId, (senderFrequency.get(senderId) || 0) + 1);
+    }
+
+    return [...senderFrequency.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || null;
+  };
   
   if (data.inbox_initial_state && data.inbox_initial_state.conversations) {
     for (const [convId, conv] of Object.entries(data.inbox_initial_state.conversations)) {
@@ -415,8 +443,31 @@ function parseTwitterResponse(data) {
       }
       
       // Get participant details from users object
-      const participantIds = conv.participants?.map(p => p.user_id) || [];
-      const participantsWithNames = participantIds.map(userId => {
+      const participantIds = (conv.participants?.map(p => String(p.user_id || '').trim()) || [])
+        .filter(Boolean);
+
+      let peerUserId = participantIds.find((userId) => {
+        if (!inferredAccountUserId) return true;
+        return userId !== inferredAccountUserId;
+      }) || null;
+
+      // Some payloads miss proper participants ordering and end up selecting self.
+      // In that case infer peer from message senders.
+      if (!peerUserId) {
+        peerUserId = pickPeerFromMessages(messages);
+      }
+
+      const orderedParticipantIds = [];
+      if (peerUserId) {
+        orderedParticipantIds.push(peerUserId);
+      }
+      for (const userId of participantIds) {
+        if (!orderedParticipantIds.includes(userId)) {
+          orderedParticipantIds.push(userId);
+        }
+      }
+
+      const participantsWithNames = orderedParticipantIds.map(userId => {
         const user = users[userId] || {};
         return {
           user_id: userId,
@@ -425,10 +476,19 @@ function parseTwitterResponse(data) {
           profile_image_url: user.profile_image_url_https || ''
         };
       });
+
+      // Final safety: move inferred account id to the end if present.
+      const sortedParticipants = [...participantsWithNames].sort((a, b) => {
+        if (!inferredAccountUserId) return 0;
+        if (a.user_id === inferredAccountUserId && b.user_id !== inferredAccountUserId) return 1;
+        if (b.user_id === inferredAccountUserId && a.user_id !== inferredAccountUserId) return -1;
+        return 0;
+      });
       
       conversations.push({
         id: convId,
-        participants: participantsWithNames,
+        participants: sortedParticipants,
+        account_user_id: inferredAccountUserId,
         messages
       });
     }
@@ -484,9 +544,8 @@ async function fetchLinkedInMessages(cookies, retryCount = 0) {
         linkedinFetchWindow = null;
       }
       
-      // Create browser window to fetch messages
-      // Set to TRUE to debug what LinkedIn shows, FALSE for production
-      const DEBUG_SHOW_WINDOW = true;  // ENABLED - you can see what's happening!
+      // Keep LinkedIn sync in background so the window does not pop up every sync.
+      const DEBUG_SHOW_WINDOW = false;
       
       linkedinFetchWindow = new BrowserWindow({
         width: 1200,
@@ -2856,8 +2915,56 @@ async function syncWhatsAppMessages() {
       });
     }
     
-    // Get all chats
-    const chats = await whatsappClient.getChats();
+    // Get all chats. If whatsapp-web.js model parsing fails on new WA Web builds,
+    // fall back to direct Store extraction and hydrate chats by id.
+    let chats = [];
+    try {
+      chats = await whatsappClient.getChats();
+    } catch (getChatsError) {
+      const fallbackError = String(getChatsError?.message || getChatsError || '');
+      console.warn('[whatsapp] getChats failed, trying fallback extraction:', fallbackError);
+
+      const shouldUseFallback =
+        fallbackError.includes("Cannot read properties of undefined (reading 'update')") ||
+        fallbackError.includes('getChatModel') ||
+        fallbackError.includes('WWebJS');
+
+      if (!shouldUseFallback) {
+        throw getChatsError;
+      }
+
+      const chatSnapshots = await whatsappClient.pupPage.evaluate(() => {
+        const store = window.Store || {};
+        const getModels = store.Chat?.getModelsArray || (() => []);
+        const models = getModels.call(store.Chat) || [];
+
+        return models
+          .filter((chat) => {
+            const serialized = chat?.id?._serialized;
+            if (!serialized) return false;
+
+            // Ignore status/broadcast/system chats that frequently break model conversion.
+            if (serialized.includes('@broadcast') || serialized.includes('status@broadcast')) return false;
+            if (chat?.isGroup === false && serialized.endsWith('@newsletter')) return false;
+
+            return true;
+          })
+          .slice(0, 30)
+          .map((chat) => ({
+            id: chat.id._serialized,
+          }));
+      });
+
+      for (const snapshot of chatSnapshots) {
+        try {
+          const hydratedChat = await whatsappClient.getChatById(snapshot.id);
+          if (hydratedChat) chats.push(hydratedChat);
+        } catch (hydrateErr) {
+          console.warn('[whatsapp] Skipping chat hydrate failure:', snapshot.id, hydrateErr.message);
+        }
+      }
+    }
+
     console.log(`[whatsapp] Found ${chats.length} chats`);
     
     const conversations = [];
@@ -3694,6 +3801,7 @@ ipcMain.handle('login-linkedin-browser', async () => {
       // Check for successful login by monitoring URL and cookies
       let loginCheckInterval = null;
       let isResolved = false;
+      let isValidatingLinkedInSession = false;
 
       const checkForLogin = async () => {
         if (isResolved) return;
@@ -3735,70 +3843,114 @@ ipcMain.handle('login-linkedin-browser', async () => {
 
             console.log('[linkedin] Checking cookies - li_at:', !!li_at, 'JSESSIONID:', !!JSESSIONID);
 
-            // If we have the required cookies, login was successful
+            // If we have the required cookies, validate actual messaging access before closing.
             if (li_at && JSESSIONID) {
-              clearInterval(loginCheckInterval);
-              isResolved = true;
-
-              console.log('[linkedin] Login successful! Extracting cookies...');
-              console.log('[linkedin] JSESSIONID:', JSESSIONID.substring(0, 20) + '...');
-
-              // Save cookies (clean JSESSIONID - remove quotes if present)
-              const cleanJSESSIONID = JSESSIONID.replace(/"/g, '');
-              const linkedinCookies = { 
-                li_at, 
-                JSESSIONID: cleanJSESSIONID,
-                lidc: lidc || '',
-                bcookie: bcookie || ''
-              };
-              store.set('linkedin_cookies', linkedinCookies);
-
-              // Close login window
-              if (!linkedinLoginWindow.isDestroyed()) {
-                linkedinLoginWindow.close();
+              if (isValidatingLinkedInSession) {
+                return;
               }
 
-              // Notify main window
+              isValidatingLinkedInSession = true;
+              console.log('[linkedin] Candidate login detected. Validating messaging access before closing...');
+
               if (mainWindow) {
-                mainWindow.webContents.send('linkedin-login-status', { 
-                  status: 'success',
-                  message: 'Login successful!'
+                mainWindow.webContents.send('linkedin-login-status', {
+                  status: 'processing',
+                  message: 'Validating LinkedIn session...'
                 });
               }
 
-              resolve({ success: true, cookies: linkedinCookies });
-              
-              // Register with backend and auto-sync after successful login
-              const chatToken = store.get('chatorbitor_token');
-              if (chatToken) {
-                setTimeout(async () => {
-                  try {
-                    // First, register/create the LinkedIn account in backend
-                    const apiUrl = store.get('apiUrl') || API_BASE_URL;
-                    await axios.post(
-                      `${apiUrl}/api/platforms/linkedin/cookies`,
-                      { 
-                        li_at: li_at,
-                        JSESSIONID: cleanJSESSIONID,
-                      },
-                      {
-                        headers: {
-                          'Authorization': `Bearer ${chatToken}`,
-                          'Content-Type': 'application/json'
-                        },
-                        timeout: 30000
-                      }
-                    );
-                    console.log('[linkedin] Account registered in backend');
-                    
-                    // Now sync
-                    syncPlatform('linkedin', linkedinCookies, chatToken);
-                  } catch (regError) {
-                    console.error('[linkedin] Backend registration error:', regError.message);
-                    // Still try to sync even if registration fails
-                    syncPlatform('linkedin', linkedinCookies, chatToken);
+              try {
+                await linkedinLoginWindow.loadURL('https://www.linkedin.com/messaging/');
+                await new Promise((r) => setTimeout(r, 2500));
+
+                if (linkedinLoginWindow.isDestroyed()) {
+                  return;
+                }
+
+                const postValidationURL = linkedinLoginWindow.webContents.getURL();
+                const isMessagingReady =
+                  postValidationURL.includes('linkedin.com/messaging') &&
+                  !postValidationURL.includes('/uas/login') &&
+                  !postValidationURL.includes('/checkpoint') &&
+                  !postValidationURL.includes('/authwall');
+
+                if (!isMessagingReady) {
+                  console.log('[linkedin] Validation failed, keeping window open for manual completion:', postValidationURL);
+                  if (mainWindow) {
+                    mainWindow.webContents.send('linkedin-login-status', {
+                      status: 'window_opened',
+                      message: 'Please complete LinkedIn login/challenge in popup'
+                    });
                   }
-                }, 1000);
+                  isValidatingLinkedInSession = false;
+                  return;
+                }
+
+                clearInterval(loginCheckInterval);
+                isResolved = true;
+
+                console.log('[linkedin] Login successful! Extracting cookies...');
+                console.log('[linkedin] JSESSIONID:', JSESSIONID.substring(0, 20) + '...');
+
+                // Save cookies (clean JSESSIONID - remove quotes if present)
+                const cleanJSESSIONID = JSESSIONID.replace(/"/g, '');
+                const linkedinCookies = {
+                  li_at,
+                  JSESSIONID: cleanJSESSIONID,
+                  lidc: lidc || '',
+                  bcookie: bcookie || ''
+                };
+                store.set('linkedin_cookies', linkedinCookies);
+
+                // Close login window
+                if (!linkedinLoginWindow.isDestroyed()) {
+                  linkedinLoginWindow.close();
+                }
+
+                // Notify main window
+                if (mainWindow) {
+                  mainWindow.webContents.send('linkedin-login-status', {
+                    status: 'success',
+                    message: 'Login successful!'
+                  });
+                }
+
+                resolve({ success: true, cookies: linkedinCookies });
+              
+                // Register with backend and auto-sync after successful login
+                const chatToken = store.get('chatorbitor_token');
+                if (chatToken) {
+                  setTimeout(async () => {
+                    try {
+                      // First, register/create the LinkedIn account in backend
+                      const apiUrl = store.get('apiUrl') || API_BASE_URL;
+                      await axios.post(
+                        `${apiUrl}/api/platforms/linkedin/cookies`,
+                        {
+                          li_at: li_at,
+                          JSESSIONID: cleanJSESSIONID,
+                        },
+                        {
+                          headers: {
+                            'Authorization': `Bearer ${chatToken}`,
+                            'Content-Type': 'application/json'
+                          },
+                          timeout: 30000
+                        }
+                      );
+                      console.log('[linkedin] Account registered in backend');
+
+                      // Now sync
+                      syncPlatform('linkedin', linkedinCookies, chatToken);
+                    } catch (regError) {
+                      console.error('[linkedin] Backend registration error:', regError.message);
+                      // Still try to sync even if registration fails
+                      syncPlatform('linkedin', linkedinCookies, chatToken);
+                    }
+                  }, 1000);
+                }
+              } finally {
+                isValidatingLinkedInSession = false;
               }
             }
           }
