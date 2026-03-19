@@ -124,7 +124,7 @@ export const TelegramPhoneAuth = () => {
               value={phoneNumber}
               onChange={(e) => setPhoneNumber(e.target.value)}
               placeholder="+1234567890"
-              className="w-full px-4 py-2 border rounded-lg mb-4"
+              className="w-full px-4 py-2 border rounded-lg mb-4 text-gray-900 placeholder-gray-400 bg-white"
               required
             />
             <button
@@ -145,7 +145,7 @@ export const TelegramPhoneAuth = () => {
               value={phoneCode}
               onChange={(e) => setPhoneCode(e.target.value)}
               placeholder="12345"
-              className="w-full px-4 py-2 border rounded-lg mb-4"
+              className="w-full px-4 py-2 border rounded-lg mb-4 text-gray-900 placeholder-gray-400 bg-white"
               required
             />
             <button
@@ -173,7 +173,7 @@ export const TelegramPhoneAuth = () => {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="Password"
-              className="w-full px-4 py-2 border rounded-lg mb-4"
+              className="w-full px-4 py-2 border rounded-lg mb-4 text-gray-900 placeholder-gray-400 bg-white"
               required
             />
             <button

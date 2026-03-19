@@ -30,6 +30,20 @@ let whatsappStatus = 'disconnected'; // disconnected, connecting, qr_ready, conn
 // Chat Orbitor API URL
 const API_BASE_URL = store.get('apiUrl') || 'https://chat-integrator.onrender.com';
 
+function getUserFriendlySyncError(platform, error) {
+  const message = error?.message || 'Unknown error';
+
+  if (platform === 'linkedin' && (message.includes('ETIMEDOUT') || message.includes('ECONNRESET') || message.includes('socket hang up'))) {
+    return 'LinkedIn network timeout. Please check VPN/firewall/proxy and try again.';
+  }
+
+  if (platform === 'instagram' && (message.includes('redirect') || message.includes('Maximum'))) {
+    return 'Instagram session expired. Auto-relogin triggered - please complete login in popup.';
+  }
+
+  return message;
+}
+
 // Platform configurations
 const PLATFORMS = {
   whatsapp: {
@@ -313,11 +327,12 @@ async function syncPlatform(platform, cookies, token) {
 
   } catch (error) {
     console.error(`[${platform}] Sync failed:`, error.message);
+    const userMessage = getUserFriendlySyncError(platform, error);
     if (mainWindow) {
       mainWindow.webContents.send('sync-status', { 
         platform, 
         success: false, 
-        message: error.message 
+        message: userMessage 
       });
     }
   }
@@ -2008,12 +2023,11 @@ async function fetchInstagramDMs(cookies, retryCount = 0) {
   };
 
   try {
-    const response = await axios.get(
+    const response = await instagramAxios.get(
       'https://www.instagram.com/api/v1/direct_v2/inbox/',
       { 
         headers, 
         timeout: 60000,
-        maxRedirects: 0, // Don't follow redirects - if redirected, session is invalid
         validateStatus: function (status) {
           return status < 400 || status === 302 || status === 301;
         }
@@ -2059,10 +2073,11 @@ async function fetchInstagramDMs(cookies, retryCount = 0) {
     console.error('[instagram] Fetch error:', error.message);
     
     // Check if it's a redirect error (session expired)
-    if (error.message.includes('redirect') || error.message.includes('Maximum')) {
-      // Clear cookies and ask for re-login
-      console.log('[instagram] Session appears to be expired. Please re-login.');
-      throw new Error('Instagram session expired. Please click "Open Instagram Login" to re-login.');
+    if (error.message.includes('redirect') || error.message.includes('Maximum') || error.code === 'ERR_FR_TOO_MANY_REDIRECTS') {
+      // Session likely expired or looping in redirects. Open relogin window automatically.
+      console.log('[instagram] Session appears to be expired. Triggering auto-relogin...');
+      triggerInstagramAutoRelogin();
+      throw new Error('Instagram session expired. Auto-relogin triggered - please complete login in popup.');
     }
     
     // Retry on SSL/connection errors (max 3 retries with exponential backoff)

@@ -785,6 +785,9 @@ class TwitterDesktopSyncView(APIView):
             # Process and save conversations
             saved_conversations = 0
             saved_messages = 0
+
+            account_user_id = str(account.platform_user_id or '').strip()
+            account_username = (account.platform_username or '').strip().lstrip('@').lower()
             
             for conv_data in conversations_data:
                 conv_id = conv_data.get('id')
@@ -795,18 +798,46 @@ class TwitterDesktopSyncView(APIView):
                 participants = conv_data.get('participants', [])
                 participant_name = 'Twitter User'
                 participant_id = ''
-                
-                # Find the other participant (not the current user)
+
+                # Find the other participant (not the logged-in Twitter account)
                 participant_avatar = ''
+
+                def _is_current_account(participant):
+                    p_id = str(participant.get('user_id', participant.get('id', ''))).strip()
+                    p_screen = str(participant.get('screen_name', '')).strip().lstrip('@').lower()
+                    p_name = str(participant.get('name', '')).strip().lower()
+
+                    if account_user_id and p_id and p_id == account_user_id:
+                        return True
+                    if account_username and p_screen and p_screen == account_username:
+                        return True
+                    # Some payloads only include display name, so keep this as a fallback match.
+                    if account_username and p_name and p_name == account_username:
+                        return True
+                    return False
+
+                selected_participant = None
                 for p in participants:
-                    p_id = str(p.get('user_id', p.get('id', '')))
-                    if p_id and p_id != str(account.platform_user_id):
-                        # Strip emojis from name to avoid MySQL encoding issues
-                        raw_name = p.get('name', p.get('screen_name', 'Twitter User'))
-                        participant_name = strip_emojis(raw_name) or p.get('screen_name', 'Twitter User')
-                        participant_id = p_id
-                        participant_avatar = p.get('profile_image_url', '')
-                        break
+                    p_id = str(p.get('user_id', p.get('id', ''))).strip()
+                    if not p_id:
+                        continue
+                    if _is_current_account(p):
+                        continue
+
+                    selected_participant = p
+                    break
+
+                # Fallback: if all participants looked like self or metadata was incomplete,
+                # choose the first participant to avoid blank names.
+                if selected_participant is None and participants:
+                    selected_participant = participants[0]
+
+                if selected_participant is not None:
+                    p_id = str(selected_participant.get('user_id', selected_participant.get('id', ''))).strip()
+                    raw_name = selected_participant.get('name', selected_participant.get('screen_name', 'Twitter User'))
+                    participant_name = strip_emojis(raw_name) or selected_participant.get('screen_name', 'Twitter User')
+                    participant_id = p_id
+                    participant_avatar = selected_participant.get('profile_image_url', '')
                 
                 # Use Twitter profile image or fallback to generated avatar
                 avatar_url = participant_avatar if participant_avatar else f'https://ui-avatars.com/api/?name={participant_name}&background=1DA1F2&color=fff'
