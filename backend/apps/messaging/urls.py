@@ -9,6 +9,7 @@ from .views import (
     MessagesListView,
     ConversationMessagesView,
     SendMessageView,
+    ChatAIAssistView,
     MarkMessageReadView,
     MarkConversationReadView,
     UnreadCountView,
@@ -32,6 +33,10 @@ urlpatterns = [
     # POST /api/messages/:conversationId/send
     # Send a message in a conversation
     path('<uuid:conversation_id>/send', SendMessageView.as_view(), name='send'),
+
+    # POST /api/messages/:conversationId/ai-assist
+    # Generate AI suggestions or custom drafted reply for current chat
+    path('<uuid:conversation_id>/ai-assist', ChatAIAssistView.as_view(), name='ai_assist'),
     
     # PATCH /api/messages/:messageId/read
     # Mark a message as read

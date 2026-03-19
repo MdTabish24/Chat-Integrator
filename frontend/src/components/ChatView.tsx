@@ -13,6 +13,8 @@ interface ChatViewProps {
   conversationId: string | null;
   platform: Platform | null;
   onMessageSent?: () => void;
+  prefillText?: string;
+  prefillTrigger?: number;
   openTabs?: ChatTab[];
   onTabClick?: (tab: ChatTab) => void;
   onTabClose?: (tabId: string, e: React.MouseEvent) => void;
@@ -22,6 +24,8 @@ const ChatView: React.FC<ChatViewProps> = ({
   conversationId,
   platform,
   onMessageSent,
+  prefillText = '',
+  prefillTrigger = 0,
   openTabs = [],
   onTabClick,
   onTabClose,
@@ -525,6 +529,7 @@ const ChatView: React.FC<ChatViewProps> = ({
             )}
           </div>
         </div>
+
       </div>
 
       {/* Messages Container */}
@@ -598,6 +603,8 @@ const ChatView: React.FC<ChatViewProps> = ({
         onSendMessage={handleSendMessage} 
         disabled={isLoading || !!error} 
         placeholder="Type a message..." 
+        prefillText={prefillText}
+        prefillTrigger={prefillTrigger}
       />
     </div>
   );

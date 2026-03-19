@@ -4,7 +4,11 @@ Message views (controllers) for message operations.
 Migrated from backend/src/controllers/messageController.ts
 """
 
+import json
+
+import httpx
 from django.db.models import Q
+from django.conf import settings
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
@@ -13,6 +17,7 @@ from rest_framework.permissions import AllowAny
 from .models import Message
 from apps.conversations.models import Conversation
 from apps.oauth.models import ConnectedAccount
+from apps.core.utils.crypto import decrypt, is_encrypted
 from .serializers import MessageSerializer, SendMessageSerializer, MarkAsReadSerializer
 
 
@@ -471,6 +476,180 @@ class SendMessageView(AsyncAPIView):
                 'error': 'Failed to send message',
                 'message': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class ChatAIAssistView(APIView):
+    """
+    AI helper for the currently open conversation.
+
+    POST /api/messages/:conversationId/ai-assist
+    Body:
+    {
+        "action": "suggest" | "custom",
+        "prompt": "optional custom instruction"
+    }
+    """
+
+    permission_classes = [AllowAny]
+    CONTEXT_MESSAGE_LIMIT = 30
+
+    def post(self, request, conversation_id):
+        try:
+            if not hasattr(request, 'user_jwt') or not request.user_jwt:
+                return Response({'error': 'Unauthorized'}, status=status.HTTP_401_UNAUTHORIZED)
+
+            if not settings.OPENAI_API_KEY:
+                return Response({
+                    'error': 'OPENAI_API_KEY is not configured on server'
+                }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+
+            user_id = request.user_jwt['user_id']
+            action = (request.data.get('action') or 'suggest').strip().lower()
+            custom_prompt = (request.data.get('prompt') or '').strip()
+
+            if action not in ['suggest', 'custom']:
+                return Response({
+                    'error': 'Invalid action. Use "suggest" or "custom"'
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            if action == 'custom' and not custom_prompt:
+                return Response({
+                    'error': 'Prompt is required for custom action'
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            try:
+                conversation = Conversation.objects.select_related('account').get(
+                    id=conversation_id,
+                    account__user_id=user_id
+                )
+            except Conversation.DoesNotExist:
+                return Response(
+                    {'error': 'Conversation not found or access denied'},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+
+            recent_messages = list(
+                Message.objects.filter(conversation=conversation)
+                .order_by('-sent_at')[:self.CONTEXT_MESSAGE_LIMIT]
+            )
+            recent_messages.reverse()
+
+            if not recent_messages:
+                return Response({
+                    'error': 'No messages found in this conversation'
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            context_lines = []
+            for msg in recent_messages:
+                content = msg.content or ''
+                if is_encrypted(content):
+                    try:
+                        content = decrypt(content)
+                    except Exception:
+                        pass
+
+                content = (content or '').strip()
+                if not content:
+                    continue
+
+                sender = 'You' if msg.is_outgoing else (msg.sender_name or 'Contact')
+                context_lines.append(f'{sender}: {content}')
+
+            if not context_lines:
+                return Response({
+                    'error': 'No text messages available for AI analysis'
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            context_text = '\n'.join(context_lines)
+
+            if action == 'suggest':
+                ai_text = self._call_openai(
+                    system_prompt=(
+                        'You are a chat assistant. Generate 3 concise reply options to the latest user message. '
+                        'Keep replies practical and human-sounding. Return ONLY valid JSON with this schema: '
+                        '{"suggestions": ["reply1", "reply2", "reply3"]}.'
+                    ),
+                    user_prompt=(
+                        f'Conversation platform: {conversation.account.platform}.\n'
+                        f'Conversation history (oldest to latest):\n{context_text}\n\n'
+                        'Generate 3 strong reply options for the latest message.'
+                    ),
+                    temperature=0.6,
+                )
+
+                suggestions = self._parse_suggestions(ai_text)
+                return Response({
+                    'action': 'suggest',
+                    'suggestions': suggestions,
+                    'count': len(suggestions),
+                })
+
+            ai_text = self._call_openai(
+                system_prompt=(
+                    'You are a writing assistant for chat replies. Generate message text that the user can directly send. '
+                    'Do not include explanations. Return only the final message content.'
+                ),
+                user_prompt=(
+                    f'Conversation platform: {conversation.account.platform}.\n'
+                    f'Conversation history (oldest to latest):\n{context_text}\n\n'
+                    f'User instruction: {custom_prompt}\n\n'
+                    'Generate the message now.'
+                ),
+                temperature=0.7,
+            )
+
+            return Response({
+                'action': 'custom',
+                'prefill': ai_text.strip(),
+            })
+
+        except Exception as e:
+            print(f'Error in AI assist: {e}')
+            return Response({
+                'error': 'Failed to generate AI response',
+                'message': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def _call_openai(self, system_prompt: str, user_prompt: str, temperature: float = 0.7) -> str:
+        payload = {
+            'model': settings.OPENAI_MODEL,
+            'messages': [
+                {'role': 'system', 'content': system_prompt},
+                {'role': 'user', 'content': user_prompt},
+            ],
+            'temperature': temperature,
+        }
+
+        with httpx.Client(timeout=40.0) as client:
+            response = client.post(
+                'https://api.openai.com/v1/chat/completions',
+                headers={
+                    'Authorization': f'Bearer {settings.OPENAI_API_KEY}',
+                    'Content-Type': 'application/json',
+                },
+                json=payload,
+            )
+
+        if response.status_code >= 400:
+            raise Exception(f'OpenAI API error {response.status_code}: {response.text}')
+
+        data = response.json()
+        return data['choices'][0]['message']['content']
+
+    def _parse_suggestions(self, ai_text: str):
+        try:
+            payload = json.loads(ai_text)
+            suggestions = payload.get('suggestions', [])
+            cleaned = [str(s).strip() for s in suggestions if str(s).strip()]
+            if cleaned:
+                return cleaned[:3]
+        except Exception:
+            pass
+
+        # Fallback for non-JSON output
+        lines = [line.strip(' -1234567890.)') for line in ai_text.splitlines() if line.strip()]
+        cleaned = [line for line in lines if line]
+        return cleaned[:3]
 
 
 class MarkMessageReadView(APIView):

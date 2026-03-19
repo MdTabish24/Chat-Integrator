@@ -1,16 +1,20 @@
-import React, { useState, useRef, KeyboardEvent } from 'react';
+import React, { useState, useRef, KeyboardEvent, useEffect } from 'react';
 import { useTheme } from '../contexts/ThemeContext';
 
 interface MessageInputProps {
   onSendMessage: (content: string) => Promise<void>;
   disabled?: boolean;
   placeholder?: string;
+  prefillText?: string;
+  prefillTrigger?: number;
 }
 
 const MessageInput: React.FC<MessageInputProps> = ({
   onSendMessage,
   disabled = false,
   placeholder = 'Type a message...',
+  prefillText = '',
+  prefillTrigger = 0,
 }) => {
   const [message, setMessage] = useState('');
   const [isSending, setIsSending] = useState(false);
@@ -54,6 +58,19 @@ const MessageInput: React.FC<MessageInputProps> = ({
       textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 120)}px`;
     }
   };
+
+  useEffect(() => {
+    if (!prefillText) return;
+
+    setMessage(prefillText);
+
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 120)}px`;
+      textareaRef.current.focus();
+      textareaRef.current.setSelectionRange(prefillText.length, prefillText.length);
+    }
+  }, [prefillText, prefillTrigger]);
 
   return (
     <div className={`border-t p-3 ${isDark ? 'border-gray-700 bg-slate-800' : 'border-gray-200 bg-white'}`}>

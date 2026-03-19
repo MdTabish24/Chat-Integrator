@@ -263,6 +263,10 @@ X_FRAME_OPTIONS = 'DENY'
 # Migrated from backend/src/config/redis.ts
 REDIS_URL = _get_env('REDIS_URL', default='redis://localhost:6379/0')
 
+# AI Configuration
+OPENAI_API_KEY = _get_env('OPENAI_API_KEY', default='')
+OPENAI_MODEL = _get_env('OPENAI_MODEL', default='gpt-4o-mini')
+
 # Configure cache with SSL support for Upstash
 CACHE_OPTIONS = {
     'CLIENT_CLASS': 'django_redis.client.DefaultClient',

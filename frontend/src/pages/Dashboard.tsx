@@ -60,6 +60,8 @@ const Dashboard: React.FC = () => {
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
   const [selectedPlatform, setSelectedPlatform] = useState<Platform | null>(null);
   const [openTabs, setOpenTabs] = useState<ChatTab[]>([]);
+  const [aiPrefillText, setAiPrefillText] = useState('');
+  const [aiPrefillTrigger, setAiPrefillTrigger] = useState(0);
 
 
   // WebSocket callbacks
@@ -376,6 +378,13 @@ const Dashboard: React.FC = () => {
     loadUnreadCounts();
   };
 
+  const handleAIPrefill = (text: string) => {
+    const cleaned = text?.trim();
+    if (!cleaned) return;
+    setAiPrefillText(cleaned);
+    setAiPrefillTrigger((prev) => prev + 1);
+  };
+
   const handleLogout = () => {
     logout();
     navigate('/login');
@@ -416,6 +425,8 @@ const Dashboard: React.FC = () => {
           totalUnread={0}
           gmailUnread={0}
           gmailAccountId={null}
+          currentConversationId={selectedConversationId}
+          onAIPrefill={handleAIPrefill}
           isConnected={isConnected}
           isAuthenticated={isAuthenticated}
           onLogout={handleLogout}
@@ -445,6 +456,8 @@ const Dashboard: React.FC = () => {
         totalUnread={totalUnread}
         gmailUnread={gmailUnread}
         gmailAccountId={gmailAccountId}
+        currentConversationId={selectedConversationId}
+        onAIPrefill={handleAIPrefill}
         isConnected={isConnected}
         isAuthenticated={isAuthenticated}
         onLogout={handleLogout}
@@ -466,6 +479,8 @@ const Dashboard: React.FC = () => {
           conversationId={selectedConversationId}
           platform={selectedPlatform}
           onMessageSent={handleMessageSent}
+          prefillText={aiPrefillText}
+          prefillTrigger={aiPrefillTrigger}
           openTabs={openTabs}
           onTabClick={handleTabClick}
           onTabClose={handleTabClose}
