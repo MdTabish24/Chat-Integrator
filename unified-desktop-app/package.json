@@ -1,0 +1,178 @@
+{
+  "name": "chat-orbitor-desktop",
+  "version": "1.0.0",
+  "description": "Multi-Platform DM Hub - Desktop Application",
+  "main": "dist/main/main/bootstrap.js",
+  "type": "module",
+  "scripts": {
+    "setup": "node -e \"const {execSync}=require('child_process');const isWin=process.platform==='win32';execSync(isWin?'powershell -ExecutionPolicy Bypass -File setup.ps1':'bash setup.sh',{stdio:'inherit'})\"",
+    "setup:win": "powershell -ExecutionPolicy Bypass -File setup.ps1",
+    "setup:unix": "bash setup.sh",
+    "dev": "concurrently \"npm run dev:vite\" \"npm run dev:electron\"",
+    "dev:vite": "vite",
+    "dev:electron": "tsc -p tsconfig.main.json && electron .",
+    "build": "npm run build:vite && npm run build:electron",
+    "build:vite": "vite build",
+    "build:electron": "tsc -p tsconfig.main.json && tsc -p tsconfig.preload.json && npm run rename-preload",
+    "rename-preload": "node -e \"const fs=require('fs');const path=require('path');const preloads=[['dist/preload/preload/preload.js','dist/preload/preload/preload.cjs'],['dist/preload/preload/TeamsPreload.js','dist/preload/preload/TeamsPreload.cjs']];preloads.forEach(([src,dest])=>{if(fs.existsSync(dest))fs.unlinkSync(dest);if(fs.existsSync(src))fs.renameSync(src,dest)});console.log('Preloads renamed to .cjs')\"",
+    "start": "electron .",
+    "package": "npm run build && electron-builder",
+    "package:win": "npm run build && electron-builder --win",
+    "package:mac": "npm run build && electron-builder --mac",
+    "package:linux": "npm run build && electron-builder --linux",
+    "package:all": "npm run build && electron-builder --win --mac --linux",
+    "lint": "eslint . --ext ts,tsx",
+    "type-check": "tsc --noEmit",
+    "icons": "powershell -File scripts/generate-icons.ps1"
+  },
+  "dependencies": {
+    "@tanstack/react-query": "^5.14.2",
+    "@types/qrcode": "^1.5.6",
+    "@types/uuid": "^10.0.0",
+    "@types/ws": "^8.18.1",
+    "@whiskeysockets/baileys": "^7.0.0-rc.9",
+    "auto-launch": "^5.0.6",
+    "axios": "^1.6.2",
+    "electron-store": "^8.1.0",
+    "pino": "^8.21.0",
+    "puppeteer-core": "^21.6.1",
+    "qrcode": "^1.5.4",
+    "qrcode-terminal": "^0.12.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-router-dom": "^6.20.1",
+    "telegram": "^2.19.9",
+    "uuid": "^13.0.0",
+    "whatsapp-web.js": "^1.23.0",
+    "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "@types/auto-launch": "^5.0.5",
+    "@types/node": "^20.10.5",
+    "@types/react": "^18.2.45",
+    "@types/react-dom": "^18.2.18",
+    "@typescript-eslint/eslint-plugin": "^6.15.0",
+    "@typescript-eslint/parser": "^6.15.0",
+    "@vitejs/plugin-react": "^4.2.1",
+    "autoprefixer": "^10.4.16",
+    "concurrently": "^8.2.2",
+    "electron": "^28.0.0",
+    "electron-builder": "^24.9.1",
+    "eslint": "^8.56.0",
+    "eslint-plugin-react-hooks": "^4.6.0",
+    "eslint-plugin-react-refresh": "^0.4.5",
+    "postcss": "^8.4.32",
+    "tailwindcss": "^3.3.6",
+    "typescript": "^5.3.3",
+    "vite": "^5.0.8"
+  },
+  "build": {
+    "appId": "com.chatorbitor.desktop",
+    "productName": "Chat Orbitor",
+    "copyright": "Copyright © 2024 Chat Orbitor",
+    "directories": {
+      "output": "release",
+      "buildResources": "assets"
+    },
+    "files": [
+      "dist/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "assets/",
+        "to": "assets/",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "./instagram-sidecar/",
+        "to": "instagram-sidecar/",
+        "filter": [
+          "**/*",
+          "!**/__pycache__/**",
+          "!**/*.pyc",
+          "!**/.git/**"
+        ]
+      },
+      {
+        "from": "./facebook-sidecar/",
+        "to": "facebook-sidecar/",
+        "filter": [
+          "**/*",
+          "!**/__pycache__/**",
+          "!**/*.pyc",
+          "!**/.git/**"
+        ]
+      }
+    ],
+    "asar": true,
+    "compression": "maximum",
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "assets/icon.ico",
+      "publisherName": "Chat Orbitor",
+      "artifactName": "${productName}-Setup-${version}.${ext}"
+    },
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "icon": "assets/icon.icns",
+      "category": "public.app-category.social-networking",
+      "artifactName": "${productName}-${version}.${ext}"
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "icon": "assets/icon.png",
+      "category": "Network",
+      "artifactName": "${productName}-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Chat Orbitor",
+      "installerIcon": "assets/icon.ico",
+      "uninstallerIcon": "assets/icon.ico",
+      "installerHeaderIcon": "assets/icon.ico"
+    },
+    "portable": {
+      "artifactName": "${productName}-Portable-${version}.exe"
+    },
+    "dmg": {
+      "contents": [
+        {
+          "x": 130,
+          "y": 220
+        },
+        {
+          "x": 410,
+          "y": 220,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ]
+    },
+    "appImage": {
+      "artifactName": "${productName}-${version}.AppImage"
+    }
+  }
+}

@@ -6,11 +6,45 @@ Migrated from Node.js/Express backend
 import os
 from pathlib import Path
 from datetime import timedelta
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 import dj_database_url
 from decouple import config
 
 # Build paths inside the project
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+
+def _clean_env_value(value):
+    """Normalize env var values copied from dashboards/CLI exports."""
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        return value
+
+    cleaned = value.strip().strip('"').strip("'")
+    # Handle accidental literal newline suffixes like "...:6379\n"
+    cleaned = cleaned.replace('\\n', '').replace('\\r', '')
+    return cleaned
+
+
+def _get_env(name, default=None):
+    return _clean_env_value(config(name, default=default))
+
+
+def _normalize_database_url(db_url):
+    """Fix common MySQL URL mistakes (e.g. missing ssl-mode value)."""
+    if not db_url:
+        return db_url
+
+    parts = urlsplit(db_url)
+    query = dict(parse_qsl(parts.query, keep_blank_values=True))
+
+    if parts.scheme.startswith('mysql'):
+        if query.get('ssl-mode', '') == '':
+            query['ssl-mode'] = 'REQUIRED'
+
+    normalized_query = urlencode(query)
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, normalized_query, parts.fragment))
 
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = config('SECRET_KEY', default='django-insecure-change-this-in-production')
@@ -96,18 +130,19 @@ ASGI_APPLICATION = 'config.asgi.application'
 
 # Database (MySQL)
 # Migrated from backend/src/config/database.ts
+DATABASE_URL = _normalize_database_url(_get_env('DATABASE_URL', default=None))
 DATABASES = {
     'default': dj_database_url.config(
-        default=config('DATABASE_URL', default=None),
+        default=DATABASE_URL,
         conn_max_age=600,
         conn_health_checks=True,
-    ) if config('DATABASE_URL', default=None) else {
+    ) if DATABASE_URL else {
         'ENGINE': 'django.db.backends.mysql',
-        'NAME': config('DB_NAME', default='messaging_hub'),
-        'USER': config('DB_USER', default='root'),
-        'PASSWORD': config('DB_PASSWORD', default=''),
-        'HOST': config('DB_HOST', default='localhost'),
-        'PORT': config('DB_PORT', default='3306'),
+        'NAME': _get_env('DB_NAME', default='messaging_hub'),
+        'USER': _get_env('DB_USER', default='root'),
+        'PASSWORD': _get_env('DB_PASSWORD', default=''),
+        'HOST': _get_env('DB_HOST', default='localhost'),
+        'PORT': _get_env('DB_PORT', default='3306'),
         'OPTIONS': {
             'charset': 'utf8mb4',
             'init_command': "SET sql_mode='STRICT_TRANS_TABLES'",
@@ -226,7 +261,7 @@ X_FRAME_OPTIONS = 'DENY'
 
 # Redis Configuration
 # Migrated from backend/src/config/redis.ts
-REDIS_URL = config('REDIS_URL', default='redis://localhost:6379/0')
+REDIS_URL = _get_env('REDIS_URL', default='redis://localhost:6379/0')
 
 # Configure cache with SSL support for Upstash
 CACHE_OPTIONS = {

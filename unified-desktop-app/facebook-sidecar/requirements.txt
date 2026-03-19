@@ -1,0 +1,6 @@
+# fbchat for Facebook Messenger Private API
+# Using PyPI version with monkey-patch for fb_dtsg extraction fix
+fbchat>=1.9.7
+fastapi>=0.100.0
+uvicorn[standard]>=0.20.0
+requests>=2.28.0
