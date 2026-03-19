@@ -2579,9 +2579,49 @@ async function initWhatsApp() {
         ]
       }
     });
+
+    let connectionFinalized = false;
+    const finalizeWhatsAppConnected = async () => {
+      if (connectionFinalized) {
+        return;
+      }
+      connectionFinalized = true;
+
+      console.log('[whatsapp] Connected successfully!');
+      whatsappStatus = 'connected';
+      whatsappQRCode = null;
+
+      // Get user info (may not be immediately available in some auth flows)
+      const info = whatsappClient.info;
+      const phoneNumber = info?.wid?.user || store.get('whatsapp_cookies')?.phoneNumber || 'Unknown';
+
+      // Store connected state for restore on next app launch
+      store.set('whatsapp_cookies', { connected: true, phoneNumber });
+      store.set('whatsapp_lastConnect', new Date().toISOString());
+
+      // Notify UI
+      if (mainWindow) {
+        mainWindow.webContents.send('whatsapp-status', {
+          status: 'connected',
+          phoneNumber,
+          message: 'WhatsApp connected!'
+        });
+      }
+
+      // Initial sync
+      setTimeout(() => {
+        syncWhatsAppMessages();
+      }, 2000);
+    };
     
     // QR Code event - user needs to scan
     whatsappClient.on('qr', async (qr) => {
+      // Ignore new QR events once a session is already finalized as connected.
+      if (connectionFinalized || whatsappStatus === 'connected') {
+        console.log('[whatsapp] Ignoring QR event because session is already connected');
+        return;
+      }
+
       console.log('[whatsapp] QR code received');
       whatsappStatus = 'qr_ready';
       
@@ -2605,31 +2645,36 @@ async function initWhatsApp() {
     
     // Ready event - connected successfully
     whatsappClient.on('ready', async () => {
-      console.log('[whatsapp] Connected successfully!');
-      whatsappStatus = 'connected';
+      await finalizeWhatsAppConnected();
+    });
+
+    // Some environments authenticate but delay/skip `ready` event.
+    // Handle that path so UI does not remain stuck at QR state.
+    whatsappClient.on('authenticated', async () => {
+      console.log('[whatsapp] Authenticated event received');
+
+      // Clear QR immediately after successful scan/auth.
       whatsappQRCode = null;
-      
-      // Get user info
-      const info = whatsappClient.info;
-      const phoneNumber = info?.wid?.user || 'Unknown';
-      
-      // Store connected state
-      store.set('whatsapp_cookies', { connected: true, phoneNumber });
-      store.set('whatsapp_lastConnect', new Date().toISOString());
-      
-      // Notify UI
-      if (mainWindow) {
-        mainWindow.webContents.send('whatsapp-status', { 
-          status: 'connected',
-          phoneNumber,
-          message: 'WhatsApp connected!'
-        });
+
+      // Show transitional state while client fully settles.
+      if (whatsappStatus !== 'connected') {
+        whatsappStatus = 'connecting';
+        if (mainWindow) {
+          mainWindow.webContents.send('whatsapp-status', {
+            status: 'connecting',
+            message: 'Authenticated. Finalizing connection...'
+          });
+        }
       }
-      
-      // Initial sync
-      setTimeout(() => {
-        syncWhatsAppMessages();
-      }, 2000);
+
+      // Give the client a moment, then finalize if not already finalized by `ready`.
+      setTimeout(async () => {
+        try {
+          await finalizeWhatsAppConnected();
+        } catch (err) {
+          console.log('[whatsapp] Authenticated finalize note:', err.message);
+        }
+      }, 3000);
     });
     
     // ======== REAL-TIME MESSAGE LISTENERS ========
@@ -3600,7 +3645,7 @@ ipcMain.handle('close-facebook-login', async () => {
 
 // LinkedIn browser-based login (opens LinkedIn in a window, extracts cookies after login)
 ipcMain.handle('login-linkedin-browser', async () => {
-  return new Promise((resolve) => {
+  return new Promise(async (resolve) => {
     try {
       const token = store.get('chatorbitor_token');
       if (!token) {
@@ -3608,16 +3653,18 @@ ipcMain.handle('login-linkedin-browser', async () => {
         return;
       }
 
-      // Close existing LinkedIn login window if open
+      // If a login window is already open, keep it and focus instead of closing/recreating it.
       if (linkedinLoginWindow && !linkedinLoginWindow.isDestroyed()) {
-        linkedinLoginWindow.close();
+        linkedinLoginWindow.focus();
+        resolve({ success: false, error: 'LinkedIn login window already open' });
+        return;
       }
 
       // Create a new session for LinkedIn login (isolated from main app)
       const linkedinSession = session.fromPartition('linkedin-login');
       
       // Clear any existing cookies to start fresh
-      linkedinSession.clearStorageData({ storages: ['cookies'] });
+      await linkedinSession.clearStorageData({ storages: ['cookies'] });
 
       // Create LinkedIn login window
       linkedinLoginWindow = new BrowserWindow({
@@ -3785,19 +3832,8 @@ ipcMain.handle('login-linkedin-browser', async () => {
         }
       });
 
-      // Timeout after 5 minutes
-      setTimeout(() => {
-        if (!isResolved) {
-          clearInterval(loginCheckInterval);
-          isResolved = true;
-          
-          if (linkedinLoginWindow && !linkedinLoginWindow.isDestroyed()) {
-            linkedinLoginWindow.close();
-          }
-          
-          resolve({ success: false, error: 'Login timed out. Please try again.' });
-        }
-      }, 5 * 60 * 1000);
+      // Do not auto-timeout/auto-close the login popup.
+      // It should only close on user action (X) or successful login.
 
     } catch (error) {
       console.error('[linkedin] Login error:', error.message);

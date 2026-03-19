@@ -811,6 +811,9 @@
           alert('LinkedIn connected successfully! Syncing messages...');
           credentials = await window.electronAPI.getCredentials();
           renderPlatforms();
+        } else if (result.error === 'LinkedIn login window already open') {
+          status.className = 'platform-status syncing';
+          status.textContent = '⏳ Waiting for login...';
         } else {
           status.className = 'platform-status error';
           status.textContent = '✗ ' + (result.error || 'Login failed');
