@@ -40,8 +40,12 @@ def _normalize_database_url(db_url):
     query = dict(parse_qsl(parts.query, keep_blank_values=True))
 
     if parts.scheme.startswith('mysql'):
-        if query.get('ssl-mode', '') == '':
-            query['ssl-mode'] = 'REQUIRED'
+        # Aiven/mysql CLI style uses `ssl-mode`, while mysqlclient expects `ssl_mode`.
+        if 'ssl-mode' in query and 'ssl_mode' not in query:
+            query['ssl_mode'] = query.pop('ssl-mode')
+
+        if query.get('ssl_mode', '') == '':
+            query['ssl_mode'] = 'REQUIRED'
 
     normalized_query = urlencode(query)
     return urlunsplit((parts.scheme, parts.netloc, parts.path, normalized_query, parts.fragment))
