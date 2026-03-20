@@ -435,6 +435,37 @@ async function syncPlatform(platform, cookies, token) {
 // Track last Twitter fetch time
 let lastTwitterFetch = 0;
 const TWITTER_MIN_INTERVAL = 15000; // 15 seconds between fetches
+const TWITTER_SELF_ID_CACHE_TTL = 6 * 60 * 60 * 1000; // 6 hours
+let cachedTwitterSelfUserId = null;
+let twitterSelfIdFetchedAt = 0;
+
+async function getTwitterSelfUserId(headers) {
+  const now = Date.now();
+  if (
+    cachedTwitterSelfUserId &&
+    (now - twitterSelfIdFetchedAt) < TWITTER_SELF_ID_CACHE_TTL
+  ) {
+    return cachedTwitterSelfUserId;
+  }
+
+  try {
+    const response = await axios.get(
+      'https://api.twitter.com/1.1/account/verify_credentials.json?include_entities=false&skip_status=true',
+      { headers, timeout: 30000 }
+    );
+
+    const selfUserId = String(response?.data?.id_str || response?.data?.id || '').trim() || null;
+    if (selfUserId) {
+      cachedTwitterSelfUserId = selfUserId;
+      twitterSelfIdFetchedAt = now;
+      return selfUserId;
+    }
+  } catch (error) {
+    console.log('[twitter] verify_credentials lookup skipped:', error.response?.status || error.message);
+  }
+
+  return null;
+}
 
 async function fetchTwitterDMs(cookies, retryCount = 0) {
   // Rate limit check
@@ -463,7 +494,8 @@ async function fetchTwitterDMs(cookies, retryCount = 0) {
     );
     
     lastTwitterFetch = Date.now();
-    return parseTwitterResponse(response.data);
+    const verifiedAccountUserId = await getTwitterSelfUserId(headers);
+    return parseTwitterResponse(response.data, verifiedAccountUserId);
   } catch (error) {
     console.error('[twitter] Fetch error:', error.message);
     
@@ -483,11 +515,12 @@ async function fetchTwitterDMs(cookies, retryCount = 0) {
   }
 }
 
-function parseTwitterResponse(data) {
+function parseTwitterResponse(data, verifiedAccountUserId = null) {
   const conversations = [];
   const users = data.inbox_initial_state?.users || {};
   const conversationMap = data.inbox_initial_state?.conversations || {};
   const explicitAccountUserId = String(
+    verifiedAccountUserId ||
     data?.inbox_initial_state?.for_user_id ||
     data?.inbox_initial_state?.account_id ||
     data?.inbox_initial_state?.user_id ||
@@ -3344,6 +3377,20 @@ function getWhatsAppStatus() {
 
 // ============ IPC HANDLERS ============
 ipcMain.handle('get-platforms', () => PLATFORMS);
+
+ipcMain.handle('get-api-url', () => {
+  return store.get('apiUrl') || API_BASE_URL;
+});
+
+ipcMain.handle('set-api-url', async (event, url) => {
+  const cleaned = String(url || '').trim().replace(/\/$/, '');
+  if (!cleaned || !/^https?:\/\//i.test(cleaned)) {
+    return { success: false, error: 'Invalid API URL. Use full http(s) URL.' };
+  }
+
+  store.set('apiUrl', cleaned);
+  return { success: true, apiUrl: cleaned };
+});
 
 // WhatsApp IPC handlers
 ipcMain.handle('whatsapp-connect', async () => {

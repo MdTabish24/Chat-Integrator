@@ -3,7 +3,7 @@ Microsoft Teams OAuth Service.
 Uses Microsoft Graph API with Azure AD OAuth 2.0.
 
 Migrated from backend/src/services/oauth/MicrosoftTeamsOAuthService.ts
-Updated to properly support work/education accounts (Requirements 8.1)
+Updated to support both personal + work account sign-in while keeping Teams scopes user-consent friendly.
 """
 
 from typing import Dict, List, Optional, Any
@@ -27,31 +27,27 @@ class MicrosoftTeamsOAuthService(OAuthBaseService):
     - 'consumers': Only personal Microsoft accounts
     - Specific tenant ID: Only accounts from that organization
     
-    For Teams chat access, work/education accounts require 'organizations' or 'common'
-    since personal accounts don't have access to Teams chat APIs.
+    For Teams chat APIs, work/education accounts are still required by Microsoft Graph,
+    but sign-in itself should work for both account types.
     """
     
     # Microsoft Graph API scopes required for Teams chat functionality
     # Reference: https://learn.microsoft.com/en-us/graph/permissions-reference
     TEAMS_SCOPES = [
-        'offline_access',           # Required for refresh tokens
-        'User.Read',                # Read user profile
-        'Chat.Read',                # Read user's chats
-        'Chat.ReadWrite',           # Read and write user's chats
-        'ChatMessage.Read',         # Read chat messages
-        'ChatMessage.Send',         # Send chat messages
-        'Chat.ReadBasic',           # Read basic chat info
-        'ChannelMessage.Read.All',  # Read channel messages (for Teams channels)
+        'offline_access',    # Required for refresh tokens
+        'User.Read',         # Read profile
+        'Chat.Read',         # Read chats + messages
+        'Chat.ReadWrite',    # Send chat messages
     ]
     
     def __init__(self):
-        # Use 'organizations' for work/education accounts (Teams requires this)
-        # 'common' allows both but Teams chat API only works with work/school accounts
-        # Fall back to configured tenant ID or 'organizations' for Teams
+        # Use tenant from env when explicitly configured.
+        # Default to `common` so login does not fail for users outside one tenant.
+        # Teams chat APIs may still be unavailable for personal accounts; those are
+        # handled later by adapter logic with graceful fallback.
         tenant_id = getattr(settings, 'MICROSOFT_TENANT_ID', None)
-        if not tenant_id or tenant_id == 'consumers':
-            # Teams chat API requires work/school accounts
-            tenant_id = 'organizations'
+        if not tenant_id:
+            tenant_id = 'common'
         
         config = OAuthConfig(
             client_id=getattr(settings, 'MICROSOFT_CLIENT_ID', ''),
@@ -119,7 +115,7 @@ class MicrosoftTeamsOAuthService(OAuthBaseService):
             if error_code == 'invalid_grant':
                 error_msg = 'Authorization code expired or already used. Please try connecting again.'
             elif error_code == 'unauthorized_client':
-                error_msg = 'Application not authorized for Teams. Ensure app is registered for work/school accounts.'
+                error_msg = 'Application is not authorized for this account type/tenant. Check Azure app account type and redirect URI.'
             elif error_code == 'invalid_client':
                 error_msg = 'Invalid client credentials. Check MICROSOFT_CLIENT_ID and MICROSOFT_CLIENT_SECRET.'
             

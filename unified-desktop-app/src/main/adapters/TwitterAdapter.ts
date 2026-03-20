@@ -70,6 +70,8 @@ export class TwitterAdapter extends EventEmitter {
   private isConnected: boolean = false;
   private lastCursor: string | null = null;
   private currentUserId: string | null = null;
+  private currentUserIdFetchedAt: number = 0;
+  private readonly currentUserIdCacheMs: number = 6 * 60 * 60 * 1000;
   private loginWindow: BrowserWindow | null = null;
   
   // Cache for conversations and messages
@@ -83,6 +85,86 @@ export class TwitterAdapter extends EventEmitter {
       timeout: 60000,
       validateStatus: (status) => status < 500,
     });
+  }
+
+  /**
+   * Infer logged-in account id from inbox payload.
+   * In Twitter DM payloads, the account id is typically the participant that appears
+   * across the most conversations.
+   */
+  private inferCurrentUserIdFromInbox(inboxState: TwitterInboxResponse['inbox_initial_state']): string | null {
+    if (!inboxState) return null;
+
+    // Prefer explicit API hints when present.
+    const explicitId =
+      (inboxState as any).for_user_id ||
+      (inboxState as any).account_id ||
+      (inboxState as any).user_id;
+    if (explicitId) {
+      return String(explicitId);
+    }
+
+    const conversations = inboxState.conversations || {};
+    const participantCounts = new Map<string, number>();
+
+    for (const conv of Object.values(conversations)) {
+      const uniqueIds = new Set(
+        (conv.participants || [])
+          .map((p) => String(p.user_id || '').trim())
+          .filter(Boolean)
+      );
+
+      for (const id of uniqueIds) {
+        participantCounts.set(id, (participantCounts.get(id) || 0) + 1);
+      }
+    }
+
+    if (participantCounts.size === 0) {
+      return null;
+    }
+
+    let inferredId: string | null = null;
+    let maxCount = -1;
+    for (const [id, count] of participantCounts.entries()) {
+      if (count > maxCount) {
+        inferredId = id;
+        maxCount = count;
+      }
+    }
+
+    return inferredId;
+  }
+
+  /**
+   * Resolve logged-in user id directly from Twitter API.
+   * This avoids ambiguity when DM participant ordering is inconsistent.
+   */
+  private async fetchVerifiedCurrentUserId(): Promise<string | null> {
+    if (
+      this.currentUserId &&
+      (Date.now() - this.currentUserIdFetchedAt) < this.currentUserIdCacheMs
+    ) {
+      return this.currentUserId;
+    }
+
+    try {
+      const response = await this.axiosInstance.get<any>(
+        'https://api.twitter.com/1.1/account/verify_credentials.json?include_entities=false&skip_status=true',
+        {
+          headers: this.getHeaders(),
+        }
+      );
+
+      const verifiedUserId = String(response?.data?.id_str || response?.data?.id || '').trim() || null;
+      if (verifiedUserId) {
+        this.currentUserId = verifiedUserId;
+        this.currentUserIdFetchedAt = Date.now();
+      }
+      return verifiedUserId;
+    } catch (error: any) {
+      console.log('[TwitterAdapter] verify_credentials lookup skipped:', error?.response?.status || error.message);
+      return null;
+    }
   }
 
   /**
@@ -114,10 +196,21 @@ export class TwitterAdapter extends EventEmitter {
       
       for (const [userId, user] of Object.entries(users)) {
         this.usersCache.set(userId, user);
-        // First user is usually the current user
-        if (!currentUser) {
-          currentUser = user;
-          this.currentUserId = userId;
+      }
+
+      const verifiedUserId = await this.fetchVerifiedCurrentUserId();
+      this.currentUserId = verifiedUserId || this.inferCurrentUserIdFromInbox(response.inbox_initial_state);
+
+      if (this.currentUserId) {
+        currentUser = users[this.currentUserId] || this.usersCache.get(this.currentUserId) || null;
+      }
+
+      // Final fallback for malformed payloads
+      if (!this.currentUserId) {
+        const [fallbackUserId, fallbackUser] = Object.entries(users)[0] || [];
+        if (fallbackUserId) {
+          this.currentUserId = fallbackUserId;
+          currentUser = fallbackUser;
         }
       }
       
@@ -148,6 +241,7 @@ export class TwitterAdapter extends EventEmitter {
     this.usersCache.clear();
     this.lastCursor = null;
     this.currentUserId = null;
+    this.currentUserIdFetchedAt = 0;
     
     if (this.loginWindow && !this.loginWindow.isDestroyed()) {
       this.loginWindow.close();
@@ -381,6 +475,12 @@ export class TwitterAdapter extends EventEmitter {
     
     if (!inboxState) return conversations;
 
+    // Keep self-id fresh on each fetch to avoid stale/wrong identity mapping.
+    const inferredUserId = this.inferCurrentUserIdFromInbox(inboxState);
+    if (inferredUserId) {
+      this.currentUserId = inferredUserId;
+    }
+
     const users = inboxState.users || {};
     const convs = inboxState.conversations || {};
     const entries = inboxState.entries || [];
@@ -434,7 +534,41 @@ export class TwitterAdapter extends EventEmitter {
       // Get participant info (exclude current user for display)
       const participantIds = conv.participants?.map(p => p.user_id) || [];
       const otherParticipants = participantIds.filter(id => id !== this.currentUserId);
-      const mainParticipantId = otherParticipants[0] || participantIds[0];
+      const peerSenderIds: string[] = [];
+      for (const message of messages) {
+        if (message.senderId && message.senderId !== this.currentUserId) {
+          peerSenderIds.push(message.senderId);
+        }
+      }
+
+      let mainParticipantId = otherParticipants[0] || participantIds[0];
+
+      // Prefer the participant who actually appears as incoming sender in messages.
+      if (peerSenderIds.length > 0) {
+        const peerSenderCount = new Map<string, number>();
+        for (const senderId of peerSenderIds) {
+          peerSenderCount.set(senderId, (peerSenderCount.get(senderId) || 0) + 1);
+        }
+
+        let bestPeerId: string | null = null;
+        let bestCount = -1;
+        for (const [senderId, count] of peerSenderCount.entries()) {
+          if (count > bestCount) {
+            bestPeerId = senderId;
+            bestCount = count;
+          }
+        }
+
+        if (bestPeerId) {
+          mainParticipantId = bestPeerId;
+        }
+      }
+
+      // Guardrail: if self still got selected and another participant exists, force non-self.
+      if (mainParticipantId === this.currentUserId && otherParticipants.length > 0) {
+        mainParticipantId = otherParticipants[0];
+      }
+
       const mainParticipant = users[mainParticipantId] || this.usersCache.get(mainParticipantId);
 
       const lastMessage = messages[messages.length - 1];

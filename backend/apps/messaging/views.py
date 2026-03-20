@@ -534,10 +534,12 @@ class ChatAIAssistView(APIView):
             )
             recent_messages.reverse()
 
-            if not recent_messages:
-                return Response({
-                    'error': 'No messages found in this conversation'
-                }, status=status.HTTP_400_BAD_REQUEST)
+            participant_name = (conversation.participant_name or 'Contact').strip()
+            if is_encrypted(participant_name):
+                try:
+                    participant_name = decrypt(participant_name)
+                except Exception:
+                    participant_name = 'Contact'
 
             context_lines = []
             for msg in recent_messages:
@@ -555,12 +557,12 @@ class ChatAIAssistView(APIView):
                 sender = 'You' if msg.is_outgoing else (msg.sender_name or 'Contact')
                 context_lines.append(f'{sender}: {content}')
 
-            if not context_lines:
+            if action == 'suggest' and not context_lines:
                 return Response({
-                    'error': 'No text messages available for AI analysis'
+                    'error': 'No messages found yet in this chat. Use Custom Prompt to draft first message.'
                 }, status=status.HTTP_400_BAD_REQUEST)
 
-            context_text = '\n'.join(context_lines)
+            context_text = '\n'.join(context_lines) if context_lines else '[No previous messages in this conversation]'
 
             if action == 'suggest':
                 ai_text = self._call_openai(
@@ -591,6 +593,7 @@ class ChatAIAssistView(APIView):
                 ),
                 user_prompt=(
                     f'Conversation platform: {conversation.account.platform}.\n'
+                    f'Conversation with: {participant_name}.\n'
                     f'Conversation history (oldest to latest):\n{context_text}\n\n'
                     f'User instruction: {custom_prompt}\n\n'
                     'Generate the message now.'

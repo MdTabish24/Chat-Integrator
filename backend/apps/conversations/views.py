@@ -28,6 +28,44 @@ class ConversationsListView(APIView):
     3. Limited to: all unread + 10 read conversations
     """
     permission_classes = [AllowAny]
+
+    def _normalize_twitter_participants(self, conversations):
+        """
+        Safety net for stale Twitter rows where participant is accidentally stored as self.
+        Prefer latest incoming sender as participant for UI response.
+        """
+        for conversation in conversations:
+            account = getattr(conversation, 'account', None)
+            if not account or account.platform != 'twitter':
+                continue
+
+            account_user_id = str(account.platform_user_id or '').strip()
+            account_username = str(account.platform_username or '').strip().lstrip('@').lower()
+            participant_id = str(conversation.participant_id or '').strip()
+            participant_name = str(conversation.participant_name or '').strip()
+            participant_name_lower = participant_name.lower()
+
+            looks_self_mapped = False
+            if account_user_id and participant_id and participant_id == account_user_id:
+                looks_self_mapped = True
+            if account_username and participant_name_lower in {account_username, f'@{account_username}'}:
+                looks_self_mapped = True
+
+            if not looks_self_mapped:
+                continue
+
+            latest_incoming = conversation.messages.filter(is_outgoing=False).order_by('-sent_at').first()
+            if not latest_incoming:
+                continue
+
+            incoming_name = str(latest_incoming.sender_name or '').strip()
+            if not incoming_name or incoming_name.lower() == 'you':
+                continue
+
+            conversation.participant_name = incoming_name
+            incoming_sender_id = str(latest_incoming.sender_id or '').strip()
+            if incoming_sender_id and incoming_sender_id != account_user_id:
+                conversation.participant_id = incoming_sender_id
     
     def get(self, request):
         try:
@@ -73,6 +111,9 @@ class ConversationsListView(APIView):
             
             # Combine: unread first, then read
             prioritized_conversations = unread_conversations + read_conversations
+
+            # Runtime safety normalization for stale Twitter participant mappings
+            self._normalize_twitter_participants(prioritized_conversations)
             
             # Apply offset and limit for pagination
             total_count = len(prioritized_conversations)

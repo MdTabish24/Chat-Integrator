@@ -3,6 +3,10 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('electronAPI', {
   // Get platform configurations
   getPlatforms: () => ipcRenderer.invoke('get-platforms'),
+
+  // API base URL management
+  getApiUrl: () => ipcRenderer.invoke('get-api-url'),
+  setApiUrl: (url) => ipcRenderer.invoke('set-api-url', url),
   
   // Credentials management
   saveCredentials: (data) => ipcRenderer.invoke('save-credentials', data),

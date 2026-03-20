@@ -2,7 +2,7 @@
 Microsoft Teams adapter using Microsoft Graph API.
 
 Migrated from backend/src/adapters/TeamsAdapter.ts
-Updated to properly support work/education accounts (Requirements 8.1, 8.2, 8.3)
+Updated to improve sign-in compatibility and keep Graph scopes consistent.
 """
 
 from typing import List, Dict, Optional
@@ -22,8 +22,8 @@ class TeamsAdapter(BasePlatformAdapter):
     
     Migrated from: TeamsAdapter in TeamsAdapter.ts
     
-    Note: Teams chat API only works with work/school (Azure AD) accounts.
-    Personal Microsoft accounts cannot access Teams chat functionality.
+    Note: Teams chat APIs only work for work/school (Azure AD) accounts.
+    Personal Microsoft accounts can sign in but may have no chat access.
     """
     
     BASE_URL = 'https://graph.microsoft.com/v1.0'
@@ -32,10 +32,11 @@ class TeamsAdapter(BasePlatformAdapter):
         super().__init__('teams')
         self.timeout = 30
         
-        # Use 'organizations' for work/education accounts (Teams requires this)
+        # Use configured tenant when provided, otherwise default to `common`
+        # so sign-in works across org boundaries.
         tenant_id = getattr(settings, 'MICROSOFT_TENANT_ID', None)
-        if not tenant_id or tenant_id == 'consumers':
-            tenant_id = 'organizations'
+        if not tenant_id:
+            tenant_id = 'common'
         
         self.token_url = f'https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token'
         self.tenant_id = tenant_id
@@ -92,15 +93,12 @@ class TeamsAdapter(BasePlatformAdapter):
             
             refresh_token = decrypt(account.refresh_token)
             
-            # Use the correct scopes for Teams chat API
+            # Keep scopes aligned with OAuth consent scopes.
             scopes = [
                 'offline_access',
                 'User.Read',
                 'Chat.Read',
                 'Chat.ReadWrite',
-                'ChatMessage.Read',
-                'ChatMessage.Send',
-                'Chat.ReadBasic',
             ]
             
             response = requests.post(

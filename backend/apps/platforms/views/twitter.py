@@ -11,6 +11,8 @@ Requirements: 3.1, 3.2, 3.3
 
 import json
 import re
+from collections import Counter
+from django.db.models import Q
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
@@ -788,6 +790,116 @@ class TwitterDesktopSyncView(APIView):
 
             account_user_id = str(account.platform_user_id or '').strip()
             account_username = (account.platform_username or '').strip().lstrip('@').lower()
+            account_display_name = ''
+
+            # Infer the logged-in account identity from all participants in this sync batch.
+            # In desktop auto-create flows, account.platform_user_id can be wrong, which causes
+            # self-selection bugs and repeated participant names in UI.
+            participant_counts = Counter()
+            payload_account_id_counts = Counter()
+            participant_meta = {}
+            for conv in conversations_data:
+                payload_account_id = str(conv.get('account_user_id', '')).strip()
+                if payload_account_id:
+                    payload_account_id_counts[payload_account_id] += 1
+
+                seen_participant_ids = set()
+                for p in conv.get('participants', []):
+                    p_id = str(p.get('user_id', p.get('id', ''))).strip()
+                    if not p_id or p_id in seen_participant_ids:
+                        continue
+                    seen_participant_ids.add(p_id)
+                    participant_counts[p_id] += 1
+                    if p_id not in participant_meta:
+                        participant_meta[p_id] = p
+
+            if participant_counts:
+                inferred_user_id, _ = participant_counts.most_common(1)[0]
+                payload_inferred_user_id = payload_account_id_counts.most_common(1)[0][0] if payload_account_id_counts else ''
+                if payload_inferred_user_id and payload_inferred_user_id in participant_counts:
+                    inferred_user_id = payload_inferred_user_id
+
+                should_override_account_id = (
+                    not account_user_id or
+                    account_user_id == 'desktop_user' or
+                    account_user_id not in participant_counts or
+                    (payload_inferred_user_id and account_user_id != payload_inferred_user_id)
+                )
+
+                if should_override_account_id:
+                    inferred_meta = participant_meta.get(inferred_user_id, {})
+                    inferred_username = str(
+                        inferred_meta.get('screen_name') or inferred_meta.get('name') or ''
+                    ).strip().lstrip('@')
+                    inferred_display_name = strip_emojis(str(inferred_meta.get('name', '')).strip() or '')
+
+                    account.platform_user_id = inferred_user_id
+                    if inferred_username:
+                        account.platform_username = inferred_username
+                    account.save()
+
+                    account_user_id = inferred_user_id
+                    account_username = inferred_username.lower() if inferred_username else account_username
+                    if inferred_display_name and inferred_display_name.lower() not in ('user', 'twitter user'):
+                        account_display_name = inferred_display_name
+
+                    print(
+                        f'[twitter-desktop] Inferred and updated account identity: '
+                        f'user_id={account_user_id}, username={account.platform_username}'
+                    )
+
+            if not account_display_name and account_user_id:
+                existing_meta = participant_meta.get(account_user_id, {})
+                existing_display_name = strip_emojis(str(existing_meta.get('name', '')).strip() or '')
+                if existing_display_name and existing_display_name.lower() not in ('user', 'twitter user'):
+                    account_display_name = existing_display_name
+
+            # Cleanup legacy bad mappings where conversation participant was saved as self.
+            # Twitter DMs should point to peer participant, not the logged-in account id.
+            if account_user_id:
+                stale_filter = Q(account=account, participant_id=account_user_id)
+                account_username_exact = (account.platform_username or '').strip()
+                if account_username_exact:
+                    stale_filter = stale_filter | Q(account=account, participant_name__iexact=account_username_exact)
+                if account_display_name:
+                    stale_filter = stale_filter | Q(account=account, participant_name__iexact=account_display_name)
+
+                stale_deleted, _ = Conversation.objects.filter(stale_filter).delete()
+                if stale_deleted:
+                    print(f'[twitter-desktop] Removed {stale_deleted} stale self-mapped conversations')
+
+                def _normalize_name(name: str) -> str:
+                    normalized = re.sub(r'[^a-z0-9]+', '', (name or '').lower())
+                    # Normalize common first-name variants used by Twitter display names.
+                    normalized = normalized.replace('mohammad', 'md')
+                    normalized = normalized.replace('muhammad', 'md')
+                    normalized = normalized.replace('mohd', 'md')
+                    return normalized
+
+                account_name_norms = set()
+                account_display_name_exact = (account_display_name or '').strip()
+                if account_username_exact:
+                    account_name_norms.add(_normalize_name(account_username_exact))
+                if account_display_name_exact:
+                    account_name_norms.add(_normalize_name(account_display_name_exact))
+
+                account_name_norms = {n for n in account_name_norms if n}
+                if account_name_norms:
+                    stale_name_ids = []
+                    candidate_rows = Conversation.objects.filter(
+                        account=account,
+                        participant_name__isnull=False,
+                    ).exclude(participant_name='')
+
+                    for row in candidate_rows:
+                        row_name_norm = _normalize_name(row.participant_name or '')
+                        if row_name_norm and row_name_norm in account_name_norms:
+                            stale_name_ids.append(row.id)
+
+                    if stale_name_ids:
+                        extra_deleted, _ = Conversation.objects.filter(id__in=stale_name_ids).delete()
+                        if extra_deleted:
+                            print(f'[twitter-desktop] Removed {extra_deleted} stale self-name conversations')
             
             for conv_data in conversations_data:
                 conv_id = conv_data.get('id')
@@ -796,28 +908,58 @@ class TwitterDesktopSyncView(APIView):
                 
                 # Get participant info
                 participants = conv_data.get('participants', [])
+                messages = conv_data.get('messages', [])
                 participant_name = 'Twitter User'
                 participant_id = ''
+                conv_account_user_id = str(conv_data.get('account_user_id', '')).strip() or account_user_id
 
                 # Find the other participant (not the logged-in Twitter account)
                 participant_avatar = ''
+
+                incoming_sender_counts = Counter()
+                sender_name_by_id = {}
+                for msg in messages:
+                    sender_id = str(msg.get('senderId', '')).strip()
+                    if not sender_id:
+                        continue
+                    if conv_account_user_id and sender_id == conv_account_user_id:
+                        continue
+
+                    incoming_sender_counts[sender_id] += 1
+                    if sender_id not in sender_name_by_id:
+                        sender_name_by_id[sender_id] = msg.get('senderName', '')
 
                 def _is_current_account(participant):
                     p_id = str(participant.get('user_id', participant.get('id', ''))).strip()
                     p_screen = str(participant.get('screen_name', '')).strip().lstrip('@').lower()
                     p_name = str(participant.get('name', '')).strip().lower()
 
-                    if account_user_id and p_id and p_id == account_user_id:
+                    if conv_account_user_id and p_id and p_id == conv_account_user_id:
                         return True
                     if account_username and p_screen and p_screen == account_username:
                         return True
                     # Some payloads only include display name, so keep this as a fallback match.
                     if account_username and p_name and p_name == account_username:
                         return True
+                    if account_display_name and p_name and p_name == account_display_name.lower():
+                        return True
                     return False
 
                 selected_participant = None
+
+                # Highest-confidence match: participant whose id appears as incoming sender.
+                if incoming_sender_counts and participants:
+                    best_sender_id, _ = incoming_sender_counts.most_common(1)[0]
+                    for p in participants:
+                        p_id = str(p.get('user_id', p.get('id', ''))).strip()
+                        if p_id and p_id == best_sender_id:
+                            selected_participant = p
+                            break
+
                 for p in participants:
+                    if selected_participant is not None:
+                        break
+
                     p_id = str(p.get('user_id', p.get('id', ''))).strip()
                     if not p_id:
                         continue
@@ -827,10 +969,32 @@ class TwitterDesktopSyncView(APIView):
                     selected_participant = p
                     break
 
+                # If participants are incomplete/self-only, infer peer from message sender ids.
+                if selected_participant is None:
+                    if incoming_sender_counts:
+                        inferred_peer_id, _ = incoming_sender_counts.most_common(1)[0]
+                        inferred_peer_name = strip_emojis(sender_name_by_id.get(inferred_peer_id, '')) or 'Twitter User'
+
+                        participant_id = inferred_peer_id
+                        participant_name = inferred_peer_name
+
                 # Fallback: if all participants looked like self or metadata was incomplete,
                 # choose the first participant to avoid blank names.
-                if selected_participant is None and participants:
-                    selected_participant = participants[0]
+                if selected_participant is None and not participant_id and participants:
+                    for p in participants:
+                        p_id = str(p.get('user_id', p.get('id', ''))).strip()
+                        if conv_account_user_id and p_id and p_id == conv_account_user_id:
+                            continue
+
+                        p_name = strip_emojis(str(p.get('name', p.get('screen_name', ''))).strip() or '').lower()
+                        if account_display_name and p_name and p_name == account_display_name.lower():
+                            continue
+
+                        selected_participant = p
+                        break
+
+                    if selected_participant is None:
+                        selected_participant = participants[0]
 
                 if selected_participant is not None:
                     p_id = str(selected_participant.get('user_id', selected_participant.get('id', ''))).strip()
@@ -838,6 +1002,47 @@ class TwitterDesktopSyncView(APIView):
                     participant_name = strip_emojis(raw_name) or selected_participant.get('screen_name', 'Twitter User')
                     participant_id = p_id
                     participant_avatar = selected_participant.get('profile_image_url', '')
+
+                # Absolute guardrail: never persist self as conversation participant.
+                if participant_id and conv_account_user_id and participant_id == conv_account_user_id:
+                    if incoming_sender_counts:
+                        fallback_peer_id, _ = incoming_sender_counts.most_common(1)[0]
+                        participant_id = fallback_peer_id
+                        participant_name = strip_emojis(sender_name_by_id.get(fallback_peer_id, '')) or 'Twitter User'
+                        participant_avatar = ''
+                    else:
+                        for p in participants:
+                            fallback_peer_id = str(p.get('user_id', p.get('id', ''))).strip()
+                            if not fallback_peer_id or fallback_peer_id == participant_id:
+                                continue
+
+                            raw_fallback_name = p.get('name', p.get('screen_name', 'Twitter User'))
+                            fallback_name = strip_emojis(raw_fallback_name) or p.get('screen_name', 'Twitter User')
+                            if account_display_name and fallback_name.lower() == account_display_name.lower():
+                                continue
+
+                            participant_id = fallback_peer_id
+                            participant_name = fallback_name
+                            participant_avatar = p.get('profile_image_url', '')
+                            break
+
+                # Name-based guardrail for older/bad payloads where account id could be wrong.
+                if account_display_name and participant_name.lower() == account_display_name.lower():
+                    for p in participants:
+                        fallback_peer_id = str(p.get('user_id', p.get('id', ''))).strip()
+                        raw_fallback_name = p.get('name', p.get('screen_name', 'Twitter User'))
+                        fallback_name = strip_emojis(raw_fallback_name) or p.get('screen_name', 'Twitter User')
+                        if not fallback_peer_id:
+                            continue
+                        if conv_account_user_id and fallback_peer_id == conv_account_user_id:
+                            continue
+                        if fallback_name.lower() == account_display_name.lower():
+                            continue
+
+                        participant_id = fallback_peer_id
+                        participant_name = fallback_name
+                        participant_avatar = p.get('profile_image_url', '')
+                        break
                 
                 # Use Twitter profile image or fallback to generated avatar
                 avatar_url = participant_avatar if participant_avatar else f'https://ui-avatars.com/api/?name={participant_name}&background=1DA1F2&color=fff'
@@ -856,7 +1061,6 @@ class TwitterDesktopSyncView(APIView):
                 saved_conversations += 1
                 
                 # Save messages
-                messages = conv_data.get('messages', [])
                 for msg_data in messages:
                     msg_id = msg_data.get('id')
                     if not msg_id:
@@ -870,7 +1074,7 @@ class TwitterDesktopSyncView(APIView):
                     created_at = msg_data.get('createdAt')
                     
                     # Determine if outgoing
-                    is_outgoing = sender_id == str(account.platform_user_id)
+                    is_outgoing = sender_id == account_user_id
                     
                     # Parse datetime
                     from django.utils.dateparse import parse_datetime

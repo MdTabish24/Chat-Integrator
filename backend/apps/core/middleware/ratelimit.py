@@ -25,6 +25,15 @@ class RateLimitMiddleware(MiddlewareMixin):
         self.window_ms = settings.RATE_LIMIT_WINDOW * 1000  # Convert to milliseconds
         self.max_requests = settings.RATE_LIMIT_MAX_REQUESTS
         self.key_prefix = 'ratelimit:api'
+        self._redis_error_log_cooldown_seconds = 30
+        self._last_redis_error_log_at = 0.0
+
+    def _log_redis_error_once(self, error):
+        """Log Redis connectivity errors at most once per cooldown window."""
+        now = time.time()
+        if (now - self._last_redis_error_log_at) >= self._redis_error_log_cooldown_seconds:
+            print(f'Rate limiter Redis error: {error}')
+            self._last_redis_error_log_at = now
     
     def process_request(self, request):
         """
@@ -63,7 +72,7 @@ class RateLimitMiddleware(MiddlewareMixin):
             try:
                 requests_data = cache.get(key, [])
             except (RedisConnectionError, Exception) as e:
-                print(f'Rate limiter Redis error: {e}')
+                self._log_redis_error_once(e)
                 return None  # Allow request if Redis is down
             
             # Remove old entries outside the time window

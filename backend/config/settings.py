@@ -50,6 +50,21 @@ def _normalize_database_url(db_url):
     normalized_query = urlencode(query)
     return urlunsplit((parts.scheme, parts.netloc, parts.path, normalized_query, parts.fragment))
 
+
+def _normalize_redis_url(redis_url):
+    """Ensure Redis URL is valid for providers like Upstash that require TLS."""
+    if not redis_url:
+        return redis_url
+
+    normalized = _clean_env_value(redis_url)
+
+    # Upstash often provides `redis://...` for redis-cli with --tls.
+    # Python clients should use rediss:// so TLS is negotiated automatically.
+    if 'upstash.io' in normalized and normalized.startswith('redis://'):
+        normalized = normalized.replace('redis://', 'rediss://', 1)
+
+    return normalized
+
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = config('SECRET_KEY', default='django-insecure-change-this-in-production')
 
@@ -282,7 +297,7 @@ X_FRAME_OPTIONS = 'DENY'
 
 # Redis Configuration
 # Migrated from backend/src/config/redis.ts
-REDIS_URL = _get_env('REDIS_URL', default='redis://localhost:6379/0')
+REDIS_URL = _normalize_redis_url(_get_env('REDIS_URL', default='redis://localhost:6379/0'))
 
 # AI Configuration
 OPENAI_API_KEY = _get_env('OPENAI_API_KEY', default='')

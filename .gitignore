@@ -50,6 +50,10 @@ coverage/
 *.temp
 .cache/
 
+# Desktop app generated WhatsApp artifacts
+desktop-app/.wwebjs_cache/
+desktop-app/.wwebjs_auth/
+
 # Database
 *.db
 *.sqlite
