@@ -1,8 +1,7 @@
 import axios from 'axios';
+import { getApiBaseUrl } from './runtimeApi';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 
-  (typeof window !== 'undefined' && window.location.origin) || 
-  'http://localhost:8000';
+const API_BASE_URL = getApiBaseUrl();
 
 export const apiClient = axios.create({
   baseURL: API_BASE_URL,

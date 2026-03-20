@@ -861,45 +861,10 @@ class TwitterDesktopSyncView(APIView):
                 account_username_exact = (account.platform_username or '').strip()
                 if account_username_exact:
                     stale_filter = stale_filter | Q(account=account, participant_name__iexact=account_username_exact)
-                if account_display_name:
-                    stale_filter = stale_filter | Q(account=account, participant_name__iexact=account_display_name)
 
                 stale_deleted, _ = Conversation.objects.filter(stale_filter).delete()
                 if stale_deleted:
                     print(f'[twitter-desktop] Removed {stale_deleted} stale self-mapped conversations')
-
-                def _normalize_name(name: str) -> str:
-                    normalized = re.sub(r'[^a-z0-9]+', '', (name or '').lower())
-                    # Normalize common first-name variants used by Twitter display names.
-                    normalized = normalized.replace('mohammad', 'md')
-                    normalized = normalized.replace('muhammad', 'md')
-                    normalized = normalized.replace('mohd', 'md')
-                    return normalized
-
-                account_name_norms = set()
-                account_display_name_exact = (account_display_name or '').strip()
-                if account_username_exact:
-                    account_name_norms.add(_normalize_name(account_username_exact))
-                if account_display_name_exact:
-                    account_name_norms.add(_normalize_name(account_display_name_exact))
-
-                account_name_norms = {n for n in account_name_norms if n}
-                if account_name_norms:
-                    stale_name_ids = []
-                    candidate_rows = Conversation.objects.filter(
-                        account=account,
-                        participant_name__isnull=False,
-                    ).exclude(participant_name='')
-
-                    for row in candidate_rows:
-                        row_name_norm = _normalize_name(row.participant_name or '')
-                        if row_name_norm and row_name_norm in account_name_norms:
-                            stale_name_ids.append(row.id)
-
-                    if stale_name_ids:
-                        extra_deleted, _ = Conversation.objects.filter(id__in=stale_name_ids).delete()
-                        if extra_deleted:
-                            print(f'[twitter-desktop] Removed {extra_deleted} stale self-name conversations')
             
             for conv_data in conversations_data:
                 conv_id = conv_data.get('id')
@@ -940,8 +905,6 @@ class TwitterDesktopSyncView(APIView):
                         return True
                     # Some payloads only include display name, so keep this as a fallback match.
                     if account_username and p_name and p_name == account_username:
-                        return True
-                    if account_display_name and p_name and p_name == account_display_name.lower():
                         return True
                     return False
 
@@ -986,10 +949,6 @@ class TwitterDesktopSyncView(APIView):
                         if conv_account_user_id and p_id and p_id == conv_account_user_id:
                             continue
 
-                        p_name = strip_emojis(str(p.get('name', p.get('screen_name', ''))).strip() or '').lower()
-                        if account_display_name and p_name and p_name == account_display_name.lower():
-                            continue
-
                         selected_participant = p
                         break
 
@@ -1026,24 +985,6 @@ class TwitterDesktopSyncView(APIView):
                             participant_avatar = p.get('profile_image_url', '')
                             break
 
-                # Name-based guardrail for older/bad payloads where account id could be wrong.
-                if account_display_name and participant_name.lower() == account_display_name.lower():
-                    for p in participants:
-                        fallback_peer_id = str(p.get('user_id', p.get('id', ''))).strip()
-                        raw_fallback_name = p.get('name', p.get('screen_name', 'Twitter User'))
-                        fallback_name = strip_emojis(raw_fallback_name) or p.get('screen_name', 'Twitter User')
-                        if not fallback_peer_id:
-                            continue
-                        if conv_account_user_id and fallback_peer_id == conv_account_user_id:
-                            continue
-                        if fallback_name.lower() == account_display_name.lower():
-                            continue
-
-                        participant_id = fallback_peer_id
-                        participant_name = fallback_name
-                        participant_avatar = p.get('profile_image_url', '')
-                        break
-                
                 # Use Twitter profile image or fallback to generated avatar
                 avatar_url = participant_avatar if participant_avatar else f'https://ui-avatars.com/api/?name={participant_name}&background=1DA1F2&color=fff'
                 

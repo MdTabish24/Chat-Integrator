@@ -28,17 +28,50 @@ let whatsappQRCode = null;
 let whatsappStatus = 'disconnected'; // disconnected, connecting, qr_ready, connected
 
 // Chat Orbitor API URL
-// Prefer current production URL, keep legacy URL as fallback for older deployments.
-const PRIMARY_API_BASE_URL = store.get('apiUrl') || 'https://chatorbitor.onrender.com';
-const LEGACY_API_BASE_URL = 'https://chat-integrator.onrender.com';
+// Keep local fallback for live demos when Render DNS/network is flaky.
+const PRIMARY_API_BASE_URL = 'https://chatorbitor.onrender.com';
+const LOCAL_API_BASE_URL = 'http://127.0.0.1:8000';
+const DEPRECATED_API_HOSTS = new Set(['chat-integrator.onrender.com']);
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function normalizeApiUrl(url) {
+  if (!url) return '';
+
+  const cleaned = String(url).trim().replace(/\/$/, '');
+  if (!cleaned) return '';
+
+  try {
+    const parsed = new URL(cleaned);
+    if (DEPRECATED_API_HOSTS.has(parsed.hostname)) {
+      return PRIMARY_API_BASE_URL;
+    }
+  } catch (_err) {
+    return '';
+  }
+
+  return cleaned;
+}
+
+function getConfiguredApiUrl() {
+  const normalized = normalizeApiUrl(store.get('apiUrl'));
+
+  if (!normalized) {
+    return PRIMARY_API_BASE_URL;
+  }
+
+  if (store.get('apiUrl') !== normalized) {
+    store.set('apiUrl', normalized);
+  }
+
+  return normalized;
+}
+
 function getApiCandidates() {
-  const configured = store.get('apiUrl');
-  const candidates = [configured, PRIMARY_API_BASE_URL, LEGACY_API_BASE_URL]
+  const configured = getConfiguredApiUrl();
+  const candidates = [configured, PRIMARY_API_BASE_URL, LOCAL_API_BASE_URL]
     .filter(Boolean)
     .map((url) => String(url).trim().replace(/\/$/, ''));
   return [...new Set(candidates)];
@@ -98,7 +131,7 @@ async function backendRequest(method, endpoint, { token, data, timeout = 30000, 
   throw lastError;
 }
 
-const API_BASE_URL = PRIMARY_API_BASE_URL;
+const API_BASE_URL = getConfiguredApiUrl();
 
 const LINKEDIN_PARTITION = 'persist:linkedin-login';
 const FACEBOOK_PARTITION = 'persist:facebook-login';
@@ -3028,22 +3061,13 @@ async function syncSingleWhatsAppMessage(msg, isFromMe) {
       lastMessageAt: new Date().toISOString()
     };
     
-    // Send to backend
-    const apiUrl = store.get('apiUrl') || API_BASE_URL;
-    
     console.log(`[whatsapp] 🚀 Real-time sync: "${messageData.text?.substring(0, 30)}..." to ${chatName}`);
-    
-    const response = await axios.post(
-      `${apiUrl}/api/platforms/whatsapp/sync-from-desktop`,
-      { conversations: [conversation] },
-      {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        timeout: 30000
-      }
-    );
+
+    const response = await backendRequest('post', '/api/platforms/whatsapp/sync-from-desktop', {
+      token,
+      data: { conversations: [conversation] },
+      timeout: 30000,
+    });
     
     console.log('[whatsapp] ✅ Real-time sync successful!');
     
@@ -3201,22 +3225,13 @@ async function syncWhatsAppMessages() {
       return [];
     }
     
-    // Send to backend
-    const apiUrl = store.get('apiUrl') || API_BASE_URL;
-    
     console.log(`[whatsapp] Sending ${conversations.length} conversations to backend...`);
-    
-    const response = await axios.post(
-      `${apiUrl}/api/platforms/whatsapp/sync-from-desktop`,
-      { conversations },
-      {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        timeout: 60000
-      }
-    );
+
+    const response = await backendRequest('post', '/api/platforms/whatsapp/sync-from-desktop', {
+      token,
+      data: { conversations },
+      timeout: 60000,
+    });
     
     console.log('[whatsapp] Sync completed successfully:', response.data);
     store.set('whatsapp_lastSync', new Date().toISOString());
@@ -3281,7 +3296,7 @@ async function sendWhatsAppMessage(chatId, text) {
 }
 
 // Send pending WhatsApp message from backend queue
-async function sendWhatsAppPendingMessage(msg, token, apiUrl) {
+async function sendWhatsAppPendingMessage(msg, token) {
   console.log(`[whatsapp] Sending pending message ${msg.id} to ${msg.platformConversationId}`);
   console.log(`[whatsapp] Content: "${msg.content.substring(0, 50)}..."`);
   
@@ -3379,7 +3394,7 @@ function getWhatsAppStatus() {
 ipcMain.handle('get-platforms', () => PLATFORMS);
 
 ipcMain.handle('get-api-url', () => {
-  return store.get('apiUrl') || API_BASE_URL;
+  return getConfiguredApiUrl();
 });
 
 ipcMain.handle('set-api-url', async (event, url) => {
@@ -3428,7 +3443,7 @@ ipcMain.handle('save-credentials', async (event, { platform, cookies, chatOrbito
 ipcMain.handle('get-credentials', async () => {
   const result = {
     chatOrbitorToken: store.get('chatorbitor_token') || '',
-    apiUrl: store.get('apiUrl') || API_BASE_URL,
+    apiUrl: getConfiguredApiUrl(),
     platforms: {}
   };
   
@@ -3475,18 +3490,11 @@ ipcMain.handle('login-twitter', async (event, { username, password, email }) => 
       return { success: false, error: 'Please save your Chat Orbitor token first' };
     }
     
-    const apiUrl = store.get('apiUrl') || API_BASE_URL;
-    const response = await axios.post(
-      `${apiUrl}/api/platforms/twitter/login`,
-      { username, password, email },
-      {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        timeout: 120000 // 2 minutes for login (server can be slow)
-      }
-    );
+    const response = await backendRequest('post', '/api/platforms/twitter/login', {
+      token,
+      data: { username, password, email },
+      timeout: 120000,
+    });
     
     if (response.data.success) {
       // Store a flag that Twitter is connected via login
@@ -3834,23 +3842,16 @@ ipcMain.handle('login-facebook-browser', async () => {
                 setTimeout(async () => {
                   try {
                     // First, register/create the Facebook account in backend
-                    const apiUrl = store.get('apiUrl') || API_BASE_URL;
-                    await axios.post(
-                      `${apiUrl}/api/platforms/facebook/cookies`,
-                      { 
+                    await backendRequest('post', '/api/platforms/facebook/cookies', {
+                      token: chatToken,
+                      data: {
                         c_user: c_user,
                         xs: xs,
-                        platform_user_id: c_user,  // c_user IS the Facebook user ID
-                        platform_username: `Facebook User ${c_user.substring(0, 6)}` // Will be updated later
+                        platform_user_id: c_user,
+                        platform_username: `Facebook User ${c_user.substring(0, 6)}`
                       },
-                      {
-                        headers: {
-                          'Authorization': `Bearer ${chatToken}`,
-                          'Content-Type': 'application/json'
-                        },
-                        timeout: 30000
-                      }
-                    );
+                      timeout: 30000,
+                    });
                     console.log('[facebook] Account registered in backend');
                     
                     // Now sync
@@ -4096,21 +4097,14 @@ ipcMain.handle('login-linkedin-browser', async () => {
                   setTimeout(async () => {
                     try {
                       // First, register/create the LinkedIn account in backend
-                      const apiUrl = store.get('apiUrl') || API_BASE_URL;
-                      await axios.post(
-                        `${apiUrl}/api/platforms/linkedin/cookies`,
-                        {
+                      await backendRequest('post', '/api/platforms/linkedin/cookies', {
+                        token: chatToken,
+                        data: {
                           li_at: li_at,
                           JSESSIONID: cleanJSESSIONID,
                         },
-                        {
-                          headers: {
-                            'Authorization': `Bearer ${chatToken}`,
-                            'Content-Type': 'application/json'
-                          },
-                          timeout: 30000
-                        }
-                      );
+                        timeout: 30000,
+                      });
                       console.log('[linkedin] Account registered in backend');
 
                       // Now sync
@@ -4250,7 +4244,7 @@ async function checkAndSendPendingMessages() {
         console.log(`[whatsapp] Found ${waPendingMessages.length} pending messages to send`);
         
         for (const msg of waPendingMessages) {
-          await sendWhatsAppPendingMessage(msg, token, apiUrl);
+          await sendWhatsAppPendingMessage(msg, token);
           await new Promise(resolve => setTimeout(resolve, 2000));
         }
       }
@@ -4276,7 +4270,7 @@ async function checkAndSendPendingMessages() {
         console.log(`[facebook] Found ${fbPendingMessages.length} pending messages to send`);
         
         for (const msg of fbPendingMessages) {
-          await sendFacebookPendingMessage(msg, facebookCookies, token, apiUrl);
+          await sendFacebookPendingMessage(msg, facebookCookies, token);
           await new Promise(resolve => setTimeout(resolve, 3000)); // Longer delay for Facebook
         }
       }
@@ -4308,7 +4302,7 @@ async function checkAndSendPendingMessages() {
           console.log(`[linkedin]   - To: ${msg.recipientName || 'UNKNOWN RECIPIENT'}`);
           console.log(`[linkedin]   - Content: ${msg.content?.substring(0, 50)}...`);
           
-          await sendLinkedInPendingMessage(msg, linkedinCookies, token, apiUrl);
+          await sendLinkedInPendingMessage(msg, linkedinCookies, token);
           await new Promise(resolve => setTimeout(resolve, 3000)); // Longer delay for LinkedIn
         }
       }
@@ -4338,7 +4332,7 @@ async function checkAndSendPendingMessages() {
       
       // Send each message
       for (const msg of pendingMessages) {
-        await sendInstagramMessage(msg, instagramCookies, token, apiUrl);
+        await sendInstagramMessage(msg, instagramCookies, token);
         // Wait a bit between messages to avoid rate limiting
         await new Promise(resolve => setTimeout(resolve, 2000));
       }
@@ -4363,7 +4357,7 @@ let instagramSendWindow = null;
 let facebookSendWindow = null;
 
 // Send pending Facebook message using browser automation
-async function sendFacebookPendingMessage(msg, cookies, token, apiUrl) {
+async function sendFacebookPendingMessage(msg, cookies, token) {
   // Prevent duplicate sends
   if (sendingMessages.has(msg.id)) {
     console.log(`[facebook] Message ${msg.id} already being sent, skipping...`);
@@ -4599,6 +4593,30 @@ function sendFacebookMessageViaBrowser(msg, cookies) {
           `);
           
           console.log('[facebook] Send result:', sendResult);
+
+          const verifyResult = await facebookSendWindow.webContents.executeJavaScript(`
+            (function() {
+              try {
+                const messageInput = document.querySelector('div[contenteditable="true"][role="textbox"]') ||
+                                  document.querySelector('div[aria-label*="Message"]') ||
+                                  document.querySelector('[data-lexical-editor="true"]') ||
+                                  document.querySelector('div[contenteditable="true"]');
+
+                if (!messageInput) {
+                  return { inputEmpty: true, noInput: true };
+                }
+
+                const text = (messageInput.textContent || '').trim();
+                return {
+                  inputEmpty: text.length === 0,
+                  inputText: text.substring(0, 80),
+                };
+              } catch (e) {
+                return { inputEmpty: false, error: e.message };
+              }
+            })();
+          `);
+          console.log('[facebook] Verify result:', verifyResult);
           
           // Wait for message to be sent
           await new Promise(r => setTimeout(r, 2000));
@@ -4610,10 +4628,11 @@ function sendFacebookMessageViaBrowser(msg, cookies) {
             facebookSendWindow.close();
           }
           
-          if (sendResult.success) {
+          if (sendResult.success && verifyResult.inputEmpty) {
             resolve({ success: true, messageId: `fb_browser_${Date.now()}` });
           } else {
-            resolve({ success: false, error: sendResult.error || 'Failed to send' });
+            const verifyError = verifyResult.error || (!verifyResult.inputEmpty ? 'Composer not cleared after send' : 'Unknown verify failure');
+            resolve({ success: false, error: sendResult.error || verifyError || 'Failed to send' });
           }
           
         } catch (err) {
@@ -4660,7 +4679,7 @@ function sendFacebookMessageViaBrowser(msg, cookies) {
 let linkedinSendWindow = null;
 
 // Send pending LinkedIn message using browser automation
-async function sendLinkedInPendingMessage(msg, cookies, token, apiUrl) {
+async function sendLinkedInPendingMessage(msg, cookies, token) {
   // Prevent duplicate sends
   if (sendingMessages.has(msg.id)) {
     console.log(`[linkedin] Message ${msg.id} already being sent, skipping...`);
@@ -5343,12 +5362,13 @@ function sendLinkedInMessageViaBrowser(msg, cookies) {
             linkedinSendWindow.close();
           }
           
-          if (sendResult.success) {
+          if (sendResult.success && verifyResult.inputEmpty) {
             console.log('[linkedin] ✅ Message sent successfully via', sendResult.method);
             resolve({ success: true, messageId: `li_browser_${Date.now()}` });
           } else {
             console.log('[linkedin] ❌ Message send failed');
-            resolve({ success: false, error: sendResult.error || 'Failed to send' });
+            const verifyError = verifyResult.error || (!verifyResult.inputEmpty ? 'Composer not cleared after send' : 'Failed to send');
+            resolve({ success: false, error: sendResult.error || verifyError || 'Failed to send' });
           }
           
         } catch (err) {
@@ -5394,7 +5414,7 @@ function sendLinkedInMessageViaBrowser(msg, cookies) {
 
 // Send Instagram message using Electron browser automation (MOST RELIABLE METHOD)
 // This method opens Instagram's actual web interface and types/sends the message
-async function sendInstagramMessage(msg, cookies, token, apiUrl) {
+async function sendInstagramMessage(msg, cookies, token) {
   // Prevent duplicate sends
   if (sendingMessages.has(msg.id)) {
     console.log(`[instagram] Message ${msg.id} already being sent, skipping...`);
@@ -5639,6 +5659,29 @@ function sendMessageViaBrowser(msg, cookies) {
           `);
           
           console.log('[instagram] Send result:', sendResult);
+
+          const verifyResult = await instagramSendWindow.webContents.executeJavaScript(`
+            (function() {
+              try {
+                const messageInput = document.querySelector('textarea[placeholder*="Message"]') ||
+                                    document.querySelector('div[contenteditable="true"][role="textbox"]') ||
+                                    document.querySelector('[data-lexical-editor="true"]');
+
+                if (!messageInput) {
+                  return { inputEmpty: true, noInput: true };
+                }
+
+                const text = ((messageInput.value || messageInput.textContent) || '').trim();
+                return {
+                  inputEmpty: text.length === 0,
+                  inputText: text.substring(0, 80),
+                };
+              } catch (e) {
+                return { inputEmpty: false, error: e.message };
+              }
+            })();
+          `);
+          console.log('[instagram] Verify result:', verifyResult);
           
           // Wait for message to be sent
           await new Promise(r => setTimeout(r, 2000));
@@ -5692,10 +5735,11 @@ function sendMessageViaBrowser(msg, cookies) {
             instagramSendWindow.close();
           }
           
-          if (sendResult.success) {
+          if (sendResult.success && verifyResult.inputEmpty) {
             resolve({ success: true, messageId: `browser_${Date.now()}` });
           } else {
-            resolve({ success: false, error: sendResult.error || 'Failed to send' });
+            const verifyError = verifyResult.error || (!verifyResult.inputEmpty ? 'Composer not cleared after send' : 'Failed to send');
+            resolve({ success: false, error: sendResult.error || verifyError || 'Failed to send' });
           }
           
         } catch (err) {

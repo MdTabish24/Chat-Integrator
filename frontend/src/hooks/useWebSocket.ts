@@ -1,11 +1,8 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
 import { Message, Conversation, Platform } from '../types';
+import { getWebSocketBaseUrl } from '../config/runtimeApi';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 
-  (typeof window !== 'undefined' && window.location.origin) || 
-  'http://localhost:8000';
-
-const WS_BASE_URL = API_BASE_URL.replace('http://', 'ws://').replace('https://', 'wss://');
+const WS_BASE_URL = getWebSocketBaseUrl();
 
 interface UnreadCountUpdate {
   unreadCounts: Record<Platform, number>;
